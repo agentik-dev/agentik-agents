@@ -1,0 +1,53 @@
+pull complete: qwen3.8:27b-mxfp8             464021588235    31 GB    1 second ago    
+llama-server stopped (memory freed)
+  ok    router        http://127.0.0.1:8787 answered 200
+  ok    upstream      https://api.anthropic.com reachable (HEAD /api/hello -> 200)
+  ok    backend mlx   ollama 0.33.2 at http://127.0.0.1:11434
+  ok      model       qwen3.8:27b-mxfp8 present on mlx
+  ok    backend default ollama 0.33.2 at http://127.0.0.1:11434
+  ok      model       qwen3.8:27b-mtp-q8_0 present on default
+  ok    local policy  effort default=low max=medium; max_tokens<=8192; concurrency=2; strip_reminder=on; backends=mlx, default
+  ok    ledger        /Users/you/.local/state/agentroute/requests.jsonl
+
+=== M0: cold load + smoke (native /api/chat think:false, chat-server path gate) ===
+  content_len 185 thinking_len 0 | eval 34 tok in 2.2 s = 15.6 tok/s | prompt 23 tok in 0.49 s | load 10.1 s
+  wall=13s
+  resident: [('qwen3.8:27b-mxfp8', 32.0), ('qwen3.6:35b-a3b-mxfp8', 40.9)]
+  starting mlx runner subprocess" model=qwen3.8:27b-mxfp8
+=== M0b: prose throughput (MTP acceptance on free text) ===
+  gen 300 tok @ 24.2 tok/s | prefill 31 @ 126.9 tok/s
+=== M1: agent A, two turns ===
+  exit=0 wall=37s
+   {'is_error': False, 'subtype': 'success', 'num_turns': 2, 'duration_ms': 36490} result: 'gamma'
+   modelUsage: {'local/mlx': (14194, 131)}
+  local    200  wall   35.0 ttfb 31.465 | local/mlx              -> qwen3.8:27b-mxfp8      | eff    low->low    | strip 0 | msgs 2 tools 3 | in 6252 out 108 cr None | agent None | auth bearer+x-api-key:Bearer oll
+  local    200  wall    1.2 ttfb   0.33 | local/mlx              -> qwen3.8:27b-mxfp8      | eff    low->low    | strip 0 | msgs 4 tools 3 | in 6351 out 23 cr None | agent None | auth bearer+x-api-key:Bearer oll
+tail: illegal offset -- + 1723730: Invalid argument
+
+=== M2: agent B right after A (cross-agent) ===
+  exit=0 wall=38s
+   {'is_error': False, 'subtype': 'success', 'num_turns': 2, 'duration_ms': 37385} result: 'beta'
+   modelUsage: {'local/mlx': (14192, 122)}
+  local    200  wall   36.3 ttfb 33.037 | local/mlx              -> qwen3.8:27b-mxfp8      | eff    low->low    | strip 0 | msgs 2 tools 3 | in 6253 out 106 cr None | agent None | auth bearer+x-api-key:Bearer oll
+  local    200  wall    0.9 ttfb  0.318 | local/mlx              -> qwen3.8:27b-mxfp8      | eff    low->low    | strip 0 | msgs 4 tools 3 | in 6349 out 16 cr None | agent None | auth bearer+x-api-key:Bearer oll
+tail: illegal offset -- + 1723778: Invalid argument
+
+=== M3: A again after B ===
+  exit=0 wall=5s
+   {'is_error': False, 'subtype': 'success', 'num_turns': 2, 'duration_ms': 4288} result: 'alpha'
+   modelUsage: {'local/mlx': (14192, 126)}
+  local    200  wall    3.3 ttfb  0.442 | local/mlx              -> qwen3.8:27b-mxfp8      | eff    low->low    | strip 0 | msgs 2 tools 3 | in 6253 out 106 cr None | agent None | auth bearer+x-api-key:Bearer oll
+  local    200  wall    0.8 ttfb  0.302 | local/mlx              -> qwen3.8:27b-mxfp8      | eff    low->low    | strip 0 | msgs 4 tools 3 | in 6349 out 20 cr None | agent None | auth bearer+x-api-key:Bearer oll
+tail: illegal offset -- + 1723797: Invalid argument
+
+=== M4: two agents at once (MLX runner is serial; expect ~2x wall) ===
+  both done wall=9s
+   {'is_error': False, 'subtype': 'success', 'num_turns': 2, 'duration_ms': 8805} result: 'gamma'
+   modelUsage: {'local/mlx': (14187, 124)}
+   {'is_error': False, 'subtype': 'success', 'num_turns': 2, 'duration_ms': 7834} result: 'alpha'
+   modelUsage: {'local/mlx': (14192, 131)}
+  local    200  wall    3.7 ttfb  0.254 | local/mlx              -> qwen3.8:27b-mxfp8      | eff    low->low    | strip 0 | msgs 2 tools 3 | in 6253 out 106 cr None | agent None | auth bearer+x-api-key:Bearer oll
+  local    200  wall    6.7 ttfb  3.944 | local/mlx              -> qwen3.8:27b-mxfp8      | eff    low->low    | strip 0 | msgs 2 tools 3 | in 6252 out 101 cr None | agent None | auth bearer+x-api-key:Bearer oll
+  local    200  wall    3.9 ttfb  3.235 | local/mlx              -> qwen3.8:27b-mxfp8      | eff    low->low    | strip 0 | msgs 4 tools 3 | in 6349 out 25 cr None | agent None | auth bearer+x-api-key:Bearer oll
+  local    200  wall    1.9 ttfb  1.259 | local/mlx              -> qwen3.8:27b-mxfp8      | eff    low->low    | strip 0 | msgs 4 tools 3 | in 6343 out 23 cr None | agent None | auth bearer+x-api-key:Bearer oll
+=== DONE ===

@@ -1,0 +1,56 @@
+[
+ {
+  "run": "A",
+  "turn": 1,
+  "system_len": 3682,
+  "message_roles": [
+   "user",
+   "system"
+  ],
+  "system_message_heads": [
+   "[{\"type\": \"text\", \"text\": \"SessionStart hook additional context: The respeak shorthand lex"
+  ]
+ },
+ {
+  "run": "A",
+  "turn": 2,
+  "system_len": 3682,
+  "message_roles": [
+   "user",
+   "system",
+   "assistant",
+   "user",
+   "system"
+  ],
+  "system_message_heads": [
+   "SessionStart hook additional context: The respeak shorthand lexicon (v0) is at /Users/you",
+   "[{\"type\": \"text\", \"text\": \"<total_tokens>14992845 tokens left</total_tokens>\", \"cache_cont"
+  ]
+ },
+ {
+  "run": "B",
+  "turn": 1,
+  "system_len": 3629,
+  "message_roles": [
+   "user",
+   "system"
+  ],
+  "system_message_heads": [
+   "[{\"type\": \"text\", \"text\": \"SessionStart hook additional context: The respeak shorthand lex"
+  ]
+ },
+ {
+  "run": "B",
+  "turn": 2,
+  "system_len": 3629,
+  "message_roles": [
+   "user",
+   "system",
+   "assistant",
+   "user"
+  ],
+  "system_message_heads": [
+   "SessionStart hook additional context: The respeak shorthand lexicon (v0) is at /Users/you"
+  ]
+ }
+]

@@ -1,0 +1,163 @@
+=== T1: direct model name, Read tool, json envelope ===
+
+real	0m0.372s
+user	0m0.165s
+sys	0m0.054s
+exit=1
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+    import json;d=json.load(open("t1.json"));print({k:d.get(k) for k in ("is_error","subtype","num_turns","duration_ms","total_cost_usd","result")}); print("usage:", d.get("usage")); print("modelUsage:", d.get("modelUsage"))
+                  ~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/python@3.14/3.14.7/Frameworks/Python.framework/Versions/3.14/lib/python3.14/json/__init__.py", line 298, in load
+    return loads(fp.read(),
+        cls=cls, object_hook=object_hook,
+        parse_float=parse_float, parse_int=parse_int,
+        parse_constant=parse_constant, object_pairs_hook=object_pairs_hook, **kw)
+  File "/opt/homebrew/Cellar/python@3.14/3.14.7/Frameworks/Python.framework/Versions/3.14/lib/python3.14/json/__init__.py", line 352, in loads
+    return _default_decoder.decode(s)
+           ~~~~~~~~~~~~~~~~~~~~~~~^^^
+  File "/opt/homebrew/Cellar/python@3.14/3.14.7/Frameworks/Python.framework/Versions/3.14/lib/python3.14/json/decoder.py", line 345, in decode
+    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+               ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/python@3.14/3.14.7/Frameworks/Python.framework/Versions/3.14/lib/python3.14/json/decoder.py", line 363, in raw_decode
+    raise JSONDecodeError("Expecting value", s, err.value) from None
+json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
+--- stderr ---
+Error: Input must be provided either through stdin or as a prompt argument when using --print
+
+=== T2: alias mapping haiku -> local model ===
+
+real	0m0.363s
+user	0m0.152s
+sys	0m0.049s
+exit=1
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+    import json;d=json.load(open("t2.json"));print({k:d.get(k) for k in ("is_error","subtype","num_turns","duration_ms","result")}); print("modelUsage:", d.get("modelUsage"))
+                  ~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/python@3.14/3.14.7/Frameworks/Python.framework/Versions/3.14/lib/python3.14/json/__init__.py", line 298, in load
+    return loads(fp.read(),
+        cls=cls, object_hook=object_hook,
+        parse_float=parse_float, parse_int=parse_int,
+        parse_constant=parse_constant, object_pairs_hook=object_pairs_hook, **kw)
+  File "/opt/homebrew/Cellar/python@3.14/3.14.7/Frameworks/Python.framework/Versions/3.14/lib/python3.14/json/__init__.py", line 352, in loads
+    return _default_decoder.decode(s)
+           ~~~~~~~~~~~~~~~~~~~~~~~^^^
+  File "/opt/homebrew/Cellar/python@3.14/3.14.7/Frameworks/Python.framework/Versions/3.14/lib/python3.14/json/decoder.py", line 345, in decode
+    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+               ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/python@3.14/3.14.7/Frameworks/Python.framework/Versions/3.14/lib/python3.14/json/decoder.py", line 363, in raw_decode
+    raise JSONDecodeError("Expecting value", s, err.value) from None
+json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
+--- stderr ---
+Error: Input must be provided either through stdin or as a prompt argument when using --print
+
+=== T3: Bash tool via local model ===
+
+real	0m0.401s
+user	0m0.156s
+sys	0m0.051s
+exit=1
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+    import json;d=json.load(open("t3.json"));print({k:d.get(k) for k in ("is_error","subtype","num_turns","duration_ms","result")}); print("modelUsage:", d.get("modelUsage")); print("denials:", d.get("permission_denials"))
+                  ~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/python@3.14/3.14.7/Frameworks/Python.framework/Versions/3.14/lib/python3.14/json/__init__.py", line 298, in load
+    return loads(fp.read(),
+        cls=cls, object_hook=object_hook,
+        parse_float=parse_float, parse_int=parse_int,
+        parse_constant=parse_constant, object_pairs_hook=object_pairs_hook, **kw)
+  File "/opt/homebrew/Cellar/python@3.14/3.14.7/Frameworks/Python.framework/Versions/3.14/lib/python3.14/json/__init__.py", line 352, in loads
+    return _default_decoder.decode(s)
+           ~~~~~~~~~~~~~~~~~~~~~~~^^^
+  File "/opt/homebrew/Cellar/python@3.14/3.14.7/Frameworks/Python.framework/Versions/3.14/lib/python3.14/json/decoder.py", line 345, in decode
+    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+               ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/homebrew/Cellar/python@3.14/3.14.7/Frameworks/Python.framework/Versions/3.14/lib/python3.14/json/decoder.py", line 363, in raw_decode
+    raise JSONDecodeError("Expecting value", s, err.value) from None
+json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
+--- stderr ---
+Error: Input must be provided either through stdin or as a prompt argument when using --print
+
+=== DONE ===
+=== T1: direct model name, Read tool ===
+=== T1: bare, direct model, Read, effort low ===
+exit=0 wall=45s
+{'is_error': False, 'subtype': 'success', 'num_turns': 2, 'duration_ms': 45317, 'duration_api_ms': 45297, 'total_cost_usd': 0.055615}
+result: '4'
+usage: {'input_tokens': 8983, 'cache_creation_input_tokens': 0, 'cache_read_input_tokens': 0, 'output_tokens': 428, 'output_tokens_details': {'thinking_tokens': 0}, 'server_tool_use': {'web_search_requests': 0, 'web_fetch_requests': 0}, 'service_tier': 'standard', 'cache_creation': {'ephemeral_1h_input_tokens': 0, 'ephemeral_5m_input_tokens': 0}, 'inference_geo': '', 'iterations': [], 'speed': 'standard'}
+modelUsage: {"qwen3.8:27b-mtp-q8_0": {"inputTokens": 8983, "outputTokens": 428, "cacheReadInputTokens": 0, "cacheCreationInputTokens": 0, "webSearchRequests": 0, "costUSD": 0.055615, "contextWindow": 200000, "maxOutputTokens": 32000, "thinkingTokens": 0, "canonicalModel": "qwen3.8:27b-mtp-q8_0", "provider": "firstParty", "costBasis": "unknown"}}
+denials: []
+--- stderr ---
+[claude-code:unrecognized_model] {"model":"qwen3.8:27b-mtp-q8_0","query_source":"sdk"}
+
+=== T2: bare, alias haiku -> local, effort low ===
+exit=0 wall=9s
+{'is_error': False, 'subtype': 'success', 'num_turns': 2, 'duration_ms': 8499, 'duration_api_ms': 8480, 'total_cost_usd': 0.047865000000000005}
+result: 'beta'
+usage: {'input_tokens': 8968, 'cache_creation_input_tokens': 0, 'cache_read_input_tokens': 0, 'output_tokens': 121, 'output_tokens_details': {'thinking_tokens': 0}, 'server_tool_use': {'web_search_requests': 0, 'web_fetch_requests': 0}, 'service_tier': 'standard', 'cache_creation': {'ephemeral_1h_input_tokens': 0, 'ephemeral_5m_input_tokens': 0}, 'inference_geo': '', 'iterations': [], 'speed': 'standard'}
+modelUsage: {"qwen3.8:27b-mtp-q8_0": {"inputTokens": 8968, "outputTokens": 121, "cacheReadInputTokens": 0, "cacheCreationInputTokens": 0, "webSearchRequests": 0, "costUSD": 0.047865000000000005, "contextWindow": 200000, "maxOutputTokens": 32000, "thinkingTokens": 0, "canonicalModel": "qwen3.8:27b-mtp-q8_0", "provider": "firstParty", "costBasis": "unknown"}}
+denials: []
+--- stderr ---
+[claude-code:unrecognized_model] {"model":"qwen3.8:27b-mtp-q8_0","query_source":"sdk"}
+
+=== T3: bare, Bash tool, effort low ===
+exit=0 wall=32s
+{'is_error': False, 'subtype': 'success', 'num_turns': 2, 'duration_ms': 31369, 'duration_api_ms': 31264, 'total_cost_usd': 0.050589999999999996}
+result: 'The file `sample.txt` contains **3 lines**.'
+usage: {'input_tokens': 9373, 'cache_creation_input_tokens': 0, 'cache_read_input_tokens': 0, 'output_tokens': 149, 'output_tokens_details': {'thinking_tokens': 0}, 'server_tool_use': {'web_search_requests': 0, 'web_fetch_requests': 0}, 'service_tier': 'standard', 'cache_creation': {'ephemeral_1h_input_tokens': 0, 'ephemeral_5m_input_tokens': 0}, 'inference_geo': '', 'iterations': [], 'speed': 'standard'}
+modelUsage: {"qwen3.8:27b-mtp-q8_0": {"inputTokens": 9373, "outputTokens": 149, "cacheReadInputTokens": 0, "cacheCreationInputTokens": 0, "webSearchRequests": 0, "costUSD": 0.050589999999999996, "contextWindow": 200000, "maxOutputTokens": 32000, "thinkingTokens": 0, "canonicalModel": "qwen3.8:27b-mtp-q8_0", "provider": "firstParty", "costBasis": "unknown"}}
+denials: []
+--- stderr ---
+[claude-code:unrecognized_model] {"model":"qwen3.8:27b-mtp-q8_0","query_source":"sdk"}
+
+=== T4: NON-bare (full system prompt + CLAUDE.md + plugins), Read/Glob/Grep, effort low ===
+./run3.sh: line 33:  7007 Done                    echo "Use Glob to list the files in $PWD, then Read sample.txt and reply with the first line only."
+      7008 Terminated: 15          | run t4 claude -p --model qwen3.8:27b-mtp-q8_0 --effort low --tools "Read Glob Grep" --permission-mode dontAsk --output-format json --add-dir "$PWD" --exclude-dynamic-system-prompt-sections
+=== T5: SEAT PASSTHROUGH via proxy (no key vars; saved claude.ai login), haiku, one turn ===
+exit=1 wall=0s
+{'is_error': True, 'subtype': 'success', 'num_turns': 1, 'duration_ms': 22, 'duration_api_ms': 0, 'total_cost_usd': 0}
+result: 'Not logged in · Please run /login'
+usage: {'output_tokens_details': {'thinking_tokens': 0}, 'input_tokens': 0, 'cache_creation_input_tokens': 0, 'cache_read_input_tokens': 0, 'output_tokens': 0, 'server_tool_use': {'web_search_requests': 0, 'web_fetch_requests': 0}, 'service_tier': 'standard', 'cache_creation': {'ephemeral_1h_input_tokens': 0, 'ephemeral_5m_input_tokens': 0}, 'inference_geo': '', 'iterations': [], 'speed': 'standard'}
+modelUsage: {}
+denials: []
+--- stderr ---
+
+(bare mode ignores OAuth; if T5 failed with auth error, rerun non-bare below)
+=== T5b: SEAT PASSTHROUGH non-bare ===
+exit=0 wall=3s
+{'is_error': False, 'subtype': 'success', 'num_turns': 1, 'duration_ms': 2471, 'duration_api_ms': 2045, 'total_cost_usd': 0.021450999999999998}
+result: 'OK'
+usage: {'input_tokens': 9, 'cache_creation_input_tokens': 10431, 'cache_read_input_tokens': 0, 'output_tokens': 116, 'output_tokens_details': {'thinking_tokens': 109}, 'server_tool_use': {'web_search_requests': 0, 'web_fetch_requests': 0}, 'service_tier': 'standard', 'cache_creation': {'ephemeral_1h_input_tokens': 10431, 'ephemeral_5m_input_tokens': 0}, 'inference_geo': 'not_available', 'iterations': [], 'speed': 'standard'}
+modelUsage: {"claude-haiku-4-5-20251001": {"inputTokens": 9, "outputTokens": 116, "cacheReadInputTokens": 0, "cacheCreationInputTokens": 10431, "webSearchRequests": 0, "costUSD": 0.021450999999999998, "contextWindow": 200000, "maxOutputTokens": 32000, "thinkingTokens": 109, "canonicalModel": "claude-haiku-4-5", "provider": "firstParty", "costBasis": "list"}}
+denials: []
+--- stderr ---
+
+=== DONE ===
+=== T4 (rerun, shim on): NON-bare, Read/Glob/Grep, effort low ===
+exit=0 wall=98s
+{'is_error': False, 'subtype': 'success', 'num_turns': 3, 'duration_ms': 98351, 'duration_api_ms': 97982}
+result: 'Files in `e2e`: `run.sh`, `log.txt`, `run2.sh`, `log2.txt`, `run3.sh`, `sample.txt`, `t1.err`, `t1.json`, `t2.err`, `t2.json`, `t3.err`, `t3.json`, `run6.sh`, `t5.err`, `t5.json`, `t5b.err`, `t5b.json'
+usage: {'input_tokens': 14464, 'output_tokens': 464, 'cache_read_input_tokens': 0, 'cache_creation_input_tokens': 0}
+modelUsage: {"qwen3.8:27b-mtp-q8_0": {"inputTokens": 14464, "outputTokens": 464, "cacheReadInputTokens": 0, "cacheCreationInputTokens": 0, "webSearchRequests": 0, "costUSD": 0.08392, "contextWindow": 200000, "maxOutputTokens": 32000, "thinkingTokens": 0, "canonicalModel": "qwen3.8:27b-mtp-q8_0", "provider": "firstParty", "costBasis": "unknown"}}
+denials: []
+--- stderr ---
+⚠ claude.ai connectors are disabled because ANTHROPIC_API_KEY or another auth source is set and takes precedence over your claude.ai login · Unset it to load your organization's connectors
+[claude-code:unrecognized_model] {"model":"qwen3.8:27b-mtp-q8_0","query_source":"sdk"}
+
+=== T6: integration — seat main (haiku) spawns local subagent ===
+exit=0 wall=141s
+{'is_error': False, 'subtype': 'success', 'num_turns': 2, 'duration_ms': 141400, 'total_cost_usd': 0.20616099999999998}
+result: 'I was unable to read the file. Both Grep and Glob returned permission denied, and the local-explore agent has no Read tool available. If you can grant read access, the second line can be extracted immediately.'
+modelUsage: {"claude-haiku-4-5-20251001": {"inputTokens": 19, "outputTokens": 408, "cacheReadInputTokens": 0, "cacheCreationInputTokens": 47991, "webSearchRequests": 0, "costUSD": 0.09804099999999999, "contextWindow": 200000, "maxOutputTokens": 32000, "thinkingTokens": 173, "canonicalModel": "claude-haiku-4-5", "provider": "firstParty", "costBasis": "list"}, "qwen3.8:27b-mtp-q8_0": {"inputTokens": 17954, "outputTokens": 734, "cacheReadInputTokens": 0, "cacheCreationInputTokens": 0, "webSearchRequests": 0, "costUSD": 0.10812, "contextWindow": 200000, "maxOutputTokens": 32000, "thinkingTokens": 0, "canonicalModel": "qwen3.8:27b-mtp-q8_0", "provider": "firstParty", "costBasis": "unknown"}}
+--- stderr ---
+[claude-code:unrecognized_model] {"model":"qwen3.8:27b-mtp-q8_0","query_source":"agent:custom:local-explore"}
+
+=== DONE ===
+exit=0 wall=87s
+{'is_error': False, 'subtype': 'success', 'num_turns': 2, 'duration_ms': 4366, 'total_cost_usd': 0.3390135}
+result: 'beta'
+modelUsage: {"claude-haiku-4-5-20251001": {"inputTokens": 59, "outputTokens": 1290, "cacheReadInputTokens": 219565, "cacheCreationInputTokens": 90999, "webSearchRequests": 0, "costUSD": 0.21046349999999997, "contextWindow": 200000, "maxOutputTokens": 32000, "thinkingTokens": 893, "canonicalModel": "claude-haiku-4-5", "provider": "firstParty", "costBasis": "list"}, "qwen3.8:27b-mtp-q8_0": {"inputTokens": 24885, "outputTokens": 165, "cacheReadInputTokens": 0, "cacheCreationInputTokens": 0, "webSearchRequests": 0, "costUSD": 0.12855000000000003, "contextWindow": 200000, "maxOutputTokens": 32000, "thinkingTokens": 0, "canonicalModel": "qwen3.8:27b-mtp-q8_0", "provider": "firstParty", "costBasis": "unknown"}
+--- stderr ---
+[claude-code:unrecognized_model] {"model":"qwen3.8:27b-mtp-q8_0","query_source":"agent:custom:local-explore"}
+

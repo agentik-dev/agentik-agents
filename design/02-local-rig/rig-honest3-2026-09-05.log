@@ -1,0 +1,54 @@
+resident: []
+=== llama (llama-server on the q8 blob, tuned), main on sonnet ===
+localrig: starting llama-server on :8081 (log: /Users/you/.local/state/agentroute/llama-server.log)
+localrig: llama-server up
+localrig: restart the router to load the file: localrig restart-router
+  backends.json: llama set (mlx, llama)
+  ok    backend mlx   ollama 0.33.2 at http://127.0.0.1:11434
+  ok      model       qwen3.8:27b-mxfp8 present on mlx
+  ok    backend llama Anthropic-format backend at http://127.0.0.1:8081 serving qwen3.8-27b-q8
+  ok      model       qwen3.8-27b-q8 present on llama
+  ok    backend default ollama 0.33.2 at http://127.0.0.1:11434
+  ok      model       qwen3.8:27b-mtp-q8_0 present on default
+  ok    local policy  effort default=low max=medium; max_tokens<=8192; concurrency=1; strip_reminder=on; backends=mlx, llama, default
+
+################ backend: llama ################
+  exit=0 wall=195s
+   {'is_error': False, 'subtype': 'success', 'num_turns': 5, 'duration_ms': 194102} result: 'gamma, beta, alpha, 4 lines'
+   modelUsage: {'claude-sonnet-5': (10, 854), 'local/llama': (13700, 1838)}
+  local rows (A1 A2 | B1 B2 | A1 A2 | A1 A2 expected):
+    llama    qwen3.8-27b-q8         agent adc0da00 wall   33.3  ttfb 26.783  in  6278  cr     0  out   99  eff low
+    llama    qwen3.8-27b-q8         agent adc0da00 wall    6.3  ttfb  0.377  in    28  cr  6376  out   90  eff low
+    llama    qwen3.8-27b-q8         agent a07c6578 wall   36.2  ttfb 29.541  in  6276  cr     0  out  101  eff low
+    llama    qwen3.8-27b-q8         agent a07c6578 wall    5.3  ttfb  0.348  in    28  cr  6376  out   74  eff low
+    llama    qwen3.8-27b-q8         agent abebe9dc wall    9.0  ttfb  2.483  in   516  cr  5762  out  100  eff low
+    llama    qwen3.8-27b-q8         agent abebe9dc wall    1.3  ttfb  0.331  in    28  cr  6377  out   15  eff low
+    llama    qwen3.8-27b-q8         agent ae9f8a8e wall    9.2  ttfb  2.401  in   518  cr  5762  out  104  eff low
+    llama    qwen3.8-27b-q8         agent ae9f8a8e wall   82.7  ttfb  0.344  in    28  cr  6383  out 1255  eff low
+
+--- llama-server cache lines (this run) ---
+slot print_timing: id  1 | task 0 | prompt processing, n_tokens =   2048, progress = 0.33, t =   6.03 s / 339.73 tokens per second
+slot print_timing: id  1 | task 0 | prompt processing, n_tokens =   2201, progress = 0.35, t =   8.16 s / 269.82 tokens per second
+slot print_timing: id  1 | task 0 | prompt processing, n_tokens =   4249, progress = 0.68, t =  15.46 s / 274.84 tokens per second
+slot print_timing: id  1 | task 0 | prompt processing, n_tokens =   5762, progress = 0.92, t =  21.82 s / 264.05 tokens per second
+slot print_timing: id  1 | task 0 | prompt processing, n_tokens =   6274, progress = 1.00, t =  24.14 s / 259.85 tokens per second
+slot print_timing: id  1 | task 0 | prompt eval time =   26769.98 ms /  6278 tokens (    4.26 ms per token,   234.52 tokens per second)
+slot      release: id  1 | task 0 | stop processing: n_tokens = 6376, truncated = 0
+slot print_timing: id  1 | task 105 | prompt eval time =     366.59 ms /    28 tokens (   13.09 ms per token,    76.38 tokens per second)
+slot      release: id  1 | task 105 | stop processing: n_tokens = 6493, truncated = 0
+slot print_timing: id  1 | task 197 | prompt processing, n_tokens =   2048, progress = 0.33, t =   6.58 s / 311.15 tokens per second
+slot print_timing: id  1 | task 197 | prompt processing, n_tokens =   2199, progress = 0.35, t =   8.88 s / 247.76 tokens per second
+slot print_timing: id  1 | task 197 | prompt processing, n_tokens =   4247, progress = 0.68, t =  16.95 s / 250.60 tokens per second
+slot print_timing: id  1 | task 197 | prompt processing, n_tokens =   5760, progress = 0.92, t =  24.35 s / 236.55 tokens per second
+slot print_timing: id  1 | task 197 | prompt processing, n_tokens =   6272, progress = 1.00, t =  26.84 s / 233.70 tokens per second
+slot print_timing: id  1 | task 197 | prompt eval time =   29463.41 ms /  6276 tokens (    4.69 ms per token,   213.01 tokens per second)
+slot      release: id  1 | task 197 | stop processing: n_tokens = 6376, truncated = 0
+slot print_timing: id  1 | task 304 | prompt eval time =     333.51 ms /    28 tokens (   11.91 ms per token,    83.96 tokens per second)
+slot      release: id  1 | task 304 | stop processing: n_tokens = 6477, truncated = 0
+slot print_timing: id  1 | task 380 | prompt eval time =    2387.82 ms /   516 tokens (    4.63 ms per token,   216.10 tokens per second)
+slot      release: id  1 | task 380 | stop processing: n_tokens = 6377, truncated = 0
+slot print_timing: id  1 | task 482 | prompt eval time =     320.48 ms /    28 tokens (   11.45 ms per token,    87.37 tokens per second)
+slot      release: id  1 | task 482 | stop processing: n_tokens = 6419, truncated = 0
+slot print_timing: id  1 | task 499 | prompt eval time =    2385.20 ms /   518 tokens (    4.60 ms per token,   217.17 tokens per second)
+slot      release: id  1 | task 499 | stop processing: n_tokens = 6383, truncated = 0
+=== DONE ===

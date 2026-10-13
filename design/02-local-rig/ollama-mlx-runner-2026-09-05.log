@@ -1,0 +1,45 @@
+time=2026-09-04T21:48:53.861-07:00 level=INFO source=base.go:122 msg="Model architecture" arch=Qwen3_5ForConditionalGeneration
+time=2026-09-04T21:49:03.645-07:00 level=INFO source=prefix_cache.go:125 msg="cache miss" total=23 matched=0 cached=0 left=23
+time=2026-09-04T21:49:06.310-07:00 level=INFO source=speculate_stats.go:62 msg="speculative decode stats" iterations=20 drafted=22 accepted=15 acceptance=0.68 avg_draft=1.10 max_draft=2 avg_accepted=0.75 depth_over_time=
+time=2026-09-04T21:49:06.314-07:00 level=INFO source=pipeline.go:105 msg="peak memory" size="30.09 GiB"
+time=2026-09-04T21:49:07.520-07:00 level=INFO source=prefix_cache.go:125 msg="cache miss" total=31 matched=2 cached=0 left=31
+time=2026-09-04T21:49:20.154-07:00 level=INFO source=speculate_stats.go:62 msg="speculative decode stats" iterations=169 drafted=187 accepted=131 acceptance=0.70 avg_draft=1.11 max_draft=3 avg_accepted=0.78 depth_over_ti
+time=2026-09-04T21:49:20.155-07:00 level=INFO source=pipeline.go:105 msg="peak memory" size="30.69 GiB"
+time=2026-09-04T21:49:20.536-07:00 level=INFO source=prefix_cache.go:125 msg="cache miss" total=7029 matched=0 cached=0 left=7029
+time=2026-09-04T21:49:28.916-07:00 level=INFO source=pipeline.go:223 msg="Prompt processing progress" processed=2048 total=7029
+time=2026-09-04T21:49:37.720-07:00 level=INFO source=pipeline.go:223 msg="Prompt processing progress" processed=4096 total=7029
+time=2026-09-04T21:49:47.348-07:00 level=INFO source=pipeline.go:223 msg="Prompt processing progress" processed=6144 total=7029
+time=2026-09-04T21:49:51.776-07:00 level=INFO source=pipeline.go:223 msg="Prompt processing progress" processed=7028 total=7029
+time=2026-09-04T21:49:55.477-07:00 level=INFO source=speculate_stats.go:62 msg="speculative decode stats" iterations=32 drafted=82 accepted=78 acceptance=0.95 avg_draft=2.56 max_draft=4 avg_accepted=2.44 depth_over_time=
+time=2026-09-04T21:49:55.483-07:00 level=INFO source=pipeline.go:105 msg="peak memory" size="33.80 GiB"
+time=2026-09-04T21:49:55.515-07:00 level=INFO source=prefix_cache.go:125 msg="cache hit" total=7165 matched=7137 cached=7137 left=28
+time=2026-09-04T21:49:56.710-07:00 level=INFO source=speculate_stats.go:62 msg="speculative decode stats" iterations=6 drafted=27 accepted=19 acceptance=0.70 avg_draft=4.50 max_draft=5 avg_accepted=3.17 depth_over_time="
+time=2026-09-04T21:49:56.715-07:00 level=INFO source=pipeline.go:105 msg="peak memory" size="31.92 GiB"
+time=2026-09-04T21:49:57.732-07:00 level=INFO source=prefix_cache.go:125 msg="cache miss" total=7029 matched=7017 cached=0 left=7029
+time=2026-09-04T21:50:06.733-07:00 level=INFO source=pipeline.go:223 msg="Prompt processing progress" processed=2048 total=7029
+time=2026-09-04T21:50:16.226-07:00 level=INFO source=pipeline.go:223 msg="Prompt processing progress" processed=4096 total=7029
+time=2026-09-04T21:50:26.088-07:00 level=INFO source=pipeline.go:223 msg="Prompt processing progress" processed=6144 total=7029
+time=2026-09-04T21:50:30.517-07:00 level=INFO source=pipeline.go:223 msg="Prompt processing progress" processed=7028 total=7029
+time=2026-09-04T21:50:33.995-07:00 level=INFO source=speculate_stats.go:62 msg="speculative decode stats" iterations=26 drafted=98 accepted=82 acceptance=0.84 avg_draft=3.77 max_draft=5 avg_accepted=3.15 depth_over_time=
+time=2026-09-04T21:50:34.027-07:00 level=INFO source=pipeline.go:105 msg="peak memory" size="35.17 GiB"
+time=2026-09-04T21:50:34.033-07:00 level=INFO source=prefix_cache.go:125 msg="cache hit" total=7163 matched=7135 cached=7135 left=28
+time=2026-09-04T21:50:34.907-07:00 level=INFO source=speculate_stats.go:62 msg="speculative decode stats" iterations=5 drafted=21 accepted=13 acceptance=0.62 avg_draft=4.20 max_draft=5 avg_accepted=2.60 depth_over_time="
+time=2026-09-04T21:50:34.923-07:00 level=INFO source=pipeline.go:105 msg="peak memory" size="33.35 GiB"
+time=2026-09-04T21:50:35.758-07:00 level=INFO source=prefix_cache.go:125 msg="cache hit" total=7029 matched=7017 cached=7017 left=12
+time=2026-09-04T21:50:39.055-07:00 level=INFO source=speculate_stats.go:62 msg="speculative decode stats" iterations=23 drafted=93 accepted=85 acceptance=0.91 avg_draft=4.04 max_draft=5 avg_accepted=3.70 depth_over_time=
+time=2026-09-04T21:50:39.064-07:00 level=INFO source=pipeline.go:105 msg="peak memory" size="34.07 GiB"
+time=2026-09-04T21:50:39.075-07:00 level=INFO source=prefix_cache.go:125 msg="cache hit" total=7163 matched=7135 cached=7135 left=28
+time=2026-09-04T21:50:39.856-07:00 level=INFO source=speculate_stats.go:62 msg="speculative decode stats" iterations=5 drafted=20 accepted=17 acceptance=0.85 avg_draft=4.00 max_draft=4 avg_accepted=3.40 depth_over_time="
+time=2026-09-04T21:50:39.858-07:00 level=INFO source=pipeline.go:105 msg="peak memory" size="34.11 GiB"
+time=2026-09-04T21:50:40.662-07:00 level=INFO source=prefix_cache.go:125 msg="cache hit" total=7029 matched=7028 cached=7024 left=5
+time=2026-09-04T21:50:44.349-07:00 level=INFO source=speculate_stats.go:62 msg="speculative decode stats" iterations=23 drafted=92 accepted=85 acceptance=0.92 avg_draft=4.00 max_draft=5 avg_accepted=3.70 depth_over_time=
+time=2026-09-04T21:50:44.382-07:00 level=INFO source=pipeline.go:105 msg="peak memory" size="34.94 GiB"
+time=2026-09-04T21:50:44.383-07:00 level=INFO source=prefix_cache.go:125 msg="cache hit" total=7029 matched=7028 cached=7024 left=5
+time=2026-09-04T21:50:47.338-07:00 level=INFO source=speculate_stats.go:62 msg="speculative decode stats" iterations=20 drafted=84 accepted=83 acceptance=0.99 avg_draft=4.20 max_draft=6 avg_accepted=4.15 depth_over_time=
+time=2026-09-04T21:50:47.371-07:00 level=INFO source=pipeline.go:105 msg="peak memory" size="35.08 GiB"
+time=2026-09-04T21:50:47.372-07:00 level=INFO source=prefix_cache.go:125 msg="cache hit" total=7163 matched=7162 cached=7158 left=5
+time=2026-09-04T21:50:48.281-07:00 level=INFO source=speculate_stats.go:62 msg="speculative decode stats" iterations=6 drafted=25 accepted=20 acceptance=0.80 avg_draft=4.17 max_draft=5 avg_accepted=3.33 depth_over_time="
+time=2026-09-04T21:50:48.299-07:00 level=INFO source=pipeline.go:105 msg="peak memory" size="35.65 GiB"
+time=2026-09-04T21:50:48.300-07:00 level=INFO source=prefix_cache.go:125 msg="cache hit" total=7158 matched=7130 cached=7130 left=28
+time=2026-09-04T21:50:49.258-07:00 level=INFO source=speculate_stats.go:62 msg="speculative decode stats" iterations=6 drafted=24 accepted=18 acceptance=0.75 avg_draft=4.00 max_draft=4 avg_accepted=3.00 depth_over_time="
+time=2026-09-04T21:50:49.266-07:00 level=INFO source=pipeline.go:105 msg="peak memory" size="35.27 GiB"

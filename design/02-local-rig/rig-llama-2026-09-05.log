@@ -1,0 +1,69 @@
+  ok    router        http://127.0.0.1:8787 answered 200
+  ok    upstream      https://api.anthropic.com reachable (HEAD /api/hello -> 200)
+  ok    backend llama Anthropic-format backend at http://127.0.0.1:8081 serving qwen3.8-27b-q8
+  ok      model       qwen3.8-27b-q8 present on llama
+  ok    backend default ollama 0.33.2 at http://127.0.0.1:11434
+  ok      model       qwen3.8:27b-mtp-q8_0 present on default
+  ok    local policy  effort default=low max=medium; max_tokens<=8192; concurrency=2; strip_reminder=on; backends=llama, default
+  ok    ledger        /Users/you/.local/state/agentroute/requests.jsonl
+
+=== L1: agent A, two turns (within-agent cache) ===
+  exit=0 wall=94s
+   {'is_error': False, 'subtype': 'success', 'num_turns': 2, 'duration_ms': 93115} result: 'gamma'
+   modelUsage: {'local/llama': (7197, 860)}
+  local    200  wall   40.5 ttfb  0.083 | local/llama            -> qwen3.8-27b-q8         | eff    low->low    | strip 0 | msgs 1 tools 3 | in 7169 out 107 cr 0 | agent None | auth bearer+x-api-key:Bearer oll
+  local    200  wall   52.0 ttfb  0.015 | local/llama            -> qwen3.8-27b-q8         | eff    low->low    | strip 0 | msgs 3 tools 3 | in 28 out 753 cr 7275 | agent None | auth bearer+x-api-key:Bearer oll
+slot print_timing: id  0 | task 265 | prompt processing, n_tokens =   6653, progress = 0.93, t =  30.05 s / 221.39 tokens per second
+slot print_timing: id  0 | task 265 | prompt processing, n_tokens =   7165, progress = 1.00, t =  30.43 s / 235.43 tokens per second
+slot print_timing: id  0 | task 265 | prompt eval time =   33330.22 ms /  7169 tokens (    4.65 ms per token,   215.09 tokens per second)
+slot      release: id  0 | task 265 | stop processing: n_tokens = 7275, truncated = 0
+slot print_timing: id  0 | task 379 | prompt eval time =     335.83 ms /    28 tokens (   11.99 ms per token,    83.38 tokens per second)
+slot      release: id  0 | task 379 | stop processing: n_tokens = 8055, truncated = 0
+
+=== L2: agent B right after A (cross-agent: shared tool prefix, different system text) ===
+  exit=0 wall=14s
+   {'is_error': False, 'subtype': 'success', 'num_turns': 2, 'duration_ms': 12921} result: 'beta'
+   modelUsage: {'local/llama': (544, 139)}
+  local    200  wall   10.1 ttfb  0.014 | local/llama            -> qwen3.8-27b-q8         | eff    low->low    | strip 0 | msgs 1 tools 3 | in 516 out 108 cr 6653 | agent None | auth bearer+x-api-key:Bearer oll
+  local    200  wall    2.5 ttfb  0.014 | local/llama            -> qwen3.8-27b-q8         | eff    low->low    | strip 0 | msgs 3 tools 3 | in 28 out 31 cr 7276 | agent None | auth bearer+x-api-key:Bearer oll
+slot print_timing: id  0 | task 379 | prompt eval time =     335.83 ms /    28 tokens (   11.99 ms per token,    83.38 tokens per second)
+slot      release: id  0 | task 379 | stop processing: n_tokens = 8055, truncated = 0
+slot print_timing: id  0 | task 1134 | prompt eval time =    2628.69 ms /   516 tokens (    5.09 ms per token,   196.30 tokens per second)
+slot      release: id  0 | task 1134 | stop processing: n_tokens = 7276, truncated = 0
+slot print_timing: id  0 | task 1244 | prompt eval time =     409.31 ms /    28 tokens (   14.62 ms per token,    68.41 tokens per second)
+slot      release: id  0 | task 1244 | stop processing: n_tokens = 7334, truncated = 0
+
+=== L3: A again (is A's prefix still restorable from host cache after B ran?) ===
+  exit=0 wall=12s
+   {'is_error': False, 'subtype': 'success', 'num_turns': 2, 'duration_ms': 11965} result: 'alpha'
+   modelUsage: {'local/llama': (544, 134)}
+  local    200  wall    9.7 ttfb  0.014 | local/llama            -> qwen3.8-27b-q8         | eff    low->low    | strip 0 | msgs 1 tools 3 | in 516 out 109 cr 6653 | agent None | auth bearer+x-api-key:Bearer oll
+  local    200  wall    2.0 ttfb  0.013 | local/llama            -> qwen3.8-27b-q8         | eff    low->low    | strip 0 | msgs 3 tools 3 | in 28 out 25 cr 7277 | agent None | auth bearer+x-api-key:Bearer oll
+slot print_timing: id  0 | task 1244 | prompt eval time =     409.31 ms /    28 tokens (   14.62 ms per token,    68.41 tokens per second)
+slot      release: id  0 | task 1244 | stop processing: n_tokens = 7334, truncated = 0
+slot print_timing: id  0 | task 1277 | prompt eval time =    2506.09 ms /   516 tokens (    4.86 ms per token,   205.90 tokens per second)
+slot      release: id  0 | task 1277 | stop processing: n_tokens = 7277, truncated = 0
+slot print_timing: id  0 | task 1388 | prompt eval time =     396.81 ms /    28 tokens (   14.17 ms per token,    70.56 tokens per second)
+slot      release: id  0 | task 1388 | stop processing: n_tokens = 7329, truncated = 0
+
+=== L4: two agents AT ONCE (-np 2) ===
+  both done wall=47s
+   {'is_error': False, 'subtype': 'success', 'num_turns': 2, 'duration_ms': 47046} result: 'gamma'
+   modelUsage: {'local/llama': (7197, 143)}
+   {'is_error': False, 'subtype': 'success', 'num_turns': 2, 'duration_ms': 46482} result: 'alpha'
+   modelUsage: {'local/llama': (32, 140)}
+  local    200  wall   43.4 ttfb  0.017 | local/llama            -> qwen3.8-27b-q8         | eff    low->low    | strip 0 | msgs 1 tools 3 | in 4 out 115 cr 7165 | agent None | auth bearer+x-api-key:Bearer oll
+  local    200  wall   43.4 ttfb  0.155 | local/llama            -> qwen3.8-27b-q8         | eff    low->low    | strip 0 | msgs 1 tools 3 | in 7169 out 108 cr 0 | agent None | auth bearer+x-api-key:Bearer oll
+  local    200  wall    2.7 ttfb  0.092 | local/llama            -> qwen3.8-27b-q8         | eff    low->low    | strip 0 | msgs 3 tools 3 | in 28 out 25 cr 7283 | agent None | auth bearer+x-api-key:Bearer oll
+  local    200  wall    3.4 ttfb  0.095 | local/llama            -> qwen3.8-27b-q8         | eff    low->low    | strip 0 | msgs 3 tools 3 | in 28 out 35 cr 7276 | agent None | auth bearer+x-api-key:Bearer oll
+slot print_timing: id  1 | task 1416 | prompt processing, n_tokens =   6653, progress = 0.93, t =  32.04 s / 207.64 tokens per second
+slot print_timing: id  1 | task 1416 | prompt processing, n_tokens =   7165, progress = 1.00, t =  34.29 s / 208.96 tokens per second
+slot print_timing: id  0 | task 1415 | prompt eval time =     140.84 ms /     4 tokens (   35.21 ms per token,    28.40 tokens per second)
+slot      release: id  0 | task 1415 | stop processing: n_tokens = 7283, truncated = 0
+slot print_timing: id  1 | task 1416 | prompt eval time =   34467.34 ms /  7169 tokens (    4.81 ms per token,   207.99 tokens per second)
+slot      release: id  1 | task 1416 | stop processing: n_tokens = 7276, truncated = 0
+slot print_timing: id  0 | task 1533 | prompt eval time =     714.45 ms /    28 tokens (   25.52 ms per token,    39.19 tokens per second)
+slot      release: id  0 | task 1533 | stop processing: n_tokens = 7335, truncated = 0
+slot print_timing: id  1 | task 1532 | prompt eval time =     711.58 ms /    28 tokens (   25.41 ms per token,    39.35 tokens per second)
+slot      release: id  1 | task 1532 | stop processing: n_tokens = 7338, truncated = 0
+=== DONE ===

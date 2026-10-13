@@ -1,0 +1,848 @@
+#!/usr/bin/env python3
+"""claude-costs — what the API lane costs, what the subscription lane absorbs, and
+what the local lane did for free.
+
+Three lanes, three different kinds of number, deliberately never summed:
+
+  API lane (actual dollars)
+      Real spend billed to the Anthropic Console project, read from
+      claude-api-agent's usage log. This money left the account.
+
+  Subscription lane (equivalent dollars)
+      Interactive `claude` work covered by the Team Premium seat, read from
+      the per-model usage Claude Code records in ~/.claude.json. Priced at API
+      list rates, this is what that work *would* have cost had it been billed.
+      No money left the account -- it consumed seat capacity instead.
+
+  Local lane (zero dollars, real tokens and wall time)
+      Subagent work routed by agentroute to the local model (design/01). Nothing
+      was billed anywhere; the ledger records tokens, wall time and which agents
+      ran. Shown with a "Sonnet 5 list" figure only to size what the lane spared.
+
+Their ratio is the tuning signal: it says how much work you are paying cash for
+versus absorbing into a seat you have already bought.
+
+A third figure applies to the API lane only: the same tokens repriced with
+every cached token charged as fresh input, which is what the prompt cache is
+saving.
+
+Prices are Anthropic first-party list rates (see PRICES). They are a static
+table and go stale when pricing changes -- `--check-prices` prints them for
+review against the current pricing page.
+"""
+
+from __future__ import annotations
+
+import argparse
+import collections
+import datetime as dt
+import json
+import os
+import pathlib
+import sys
+
+# USD per million tokens, (input, output), by canonical model name.
+# Source: Anthropic first-party API list pricing.
+# The 5.x rows are the claude-api skill's table (cached 2026-10-06, first-party list
+# rates; packet a-s3 ruling 9).
+PRICES = {
+    "claude-fable-5-1": (10.00, 50.00),
+    "claude-opus-5-5": (4.00, 20.00),
+    "claude-sonnet-5-5": (2.00, 10.00),
+    "claude-haiku-5-5": (0.10, 0.50),
+    "claude-fable-5": (10.00, 50.00),
+    "claude-mythos-5": (10.00, 50.00),
+    "claude-opus-5": (5.00, 25.00),
+    "claude-opus-4-8": (5.00, 25.00),
+    "claude-opus-4-7": (5.00, 25.00),
+    "claude-opus-4-6": (5.00, 25.00),
+    "claude-opus-4-5": (5.00, 25.00),
+    "claude-sonnet-5": (3.00, 15.00),
+    "claude-sonnet-4-6": (3.00, 15.00),
+    "claude-sonnet-4-5": (3.00, 15.00),
+    "claude-haiku-4-5": (1.00, 5.00),
+}
+
+# Cache-read rates in USD per million tokens, where the list names one. In
+# predicted_cost such a rate overrides CACHE_READ_MULT below; every other model
+# reads cache at the multiplier.
+CACHE_READ_RATES = {
+    "claude-opus-5-5": 0.20,
+    "claude-sonnet-5-5": 0.20,
+    "claude-fable-5-1": 0.25,
+}
+
+# Introductory / promotional rates, by model. Deliberately empty.
+#
+# Anthropic's pricing page lists a $2/$10 introductory rate for Claude Sonnet 5
+# through 2026-08-31, and encoding it here looked obviously correct. Solving for
+# the rate actually billed on this account says otherwise: eight `review` runs
+# billed $3.1167, which the standard $3/$15 rate predicts to within 0.00% and
+# the introductory rate misses by 33%. The published intro rate does not apply
+# to this account, so it is not encoded -- the self-check below is what settles
+# questions like this, not the pricing page.
+INTRO_PRICING: dict[str, dict] = {}
+
+# Cache multipliers against the model's input rate.
+#
+# CACHE_WRITE_MULT assumes a 5-minute-TTL write (1.25x); a 1-hour-TTL write is
+# 2.0x, and the usage log records only a cache-creation token count, not the
+# TTL, so this cannot be derived per row (C4). Likewise canonical() folds the
+# `[1m]` long-context variant into its base model, though it bills a premium
+# above 200K tokens (C5). Both are deliberately left as documented assumptions
+# rather than guessed: the per-model price-table self-check (price_table_drift,
+# checked per model so errors cannot cancel across models) withholds the cache
+# figure whenever the assumed rate disagrees with what was actually billed by
+# more than 2%. So a TTL- or variant-driven mispricing fails safe -- the tool
+# refuses the number instead of reporting a wrong one.
+CACHE_READ_MULT = 0.10
+CACHE_WRITE_MULT = 1.25
+
+USAGE_LOG = pathlib.Path(
+    os.environ.get("CLAUDE_API_AGENT_LOG")
+    or (pathlib.Path(os.environ.get("XDG_STATE_HOME") or (pathlib.Path.home() / ".local/state"))
+        / "claude-api-agent" / "usage.jsonl")
+)
+CLAUDE_CONFIG = pathlib.Path(os.environ.get("CLAUDE_CONFIG_FILE")
+                             or (pathlib.Path.home() / ".claude.json"))
+
+# agentroute's ledger: one line per request routed by the local agent lane.
+LOCAL_LEDGER = pathlib.Path(
+    os.environ.get("AGENTROUTE_LOG")
+    or pathlib.Path(os.environ.get("AGENTROUTE_STATE_DIR")
+                    or pathlib.Path(os.environ.get("XDG_STATE_HOME")
+                                    or pathlib.Path.home() / ".local" / "state") / "agentroute")
+    / "requests.jsonl")
+LOCAL_EQUIV_MODEL = "claude-sonnet-5"      # the rung the local lane usually replaces
+
+
+def canonical(name: str) -> str:
+    """Strip variant and date suffixes: 'claude-opus-5[1m]' -> 'claude-opus-5'."""
+    name = name.split("[")[0]
+    parts = name.split("-")
+    if parts and parts[-1].isdigit() and len(parts[-1]) == 8:  # trailing YYYYMMDD
+        name = "-".join(parts[:-1])
+    return name
+
+
+def rates(model: str, when: dt.date | None = None) -> tuple[float, float] | None:
+    """List rates for a model, honouring an active introductory window."""
+    model = canonical(model)
+    intro = INTRO_PRICING.get(model)
+    if intro:
+        until = dt.date.fromisoformat(intro["until"])
+        if (when or dt.date.today()) <= until:
+            return intro["rates"]
+    return PRICES.get(model)
+
+
+def uncached_cost(model: str, tok: dict, when: dt.date | None = None) -> float | None:
+    """What these tokens cost with every cached token billed as fresh input."""
+    r = rates(model, when)
+    if r is None:
+        return None
+    inp, out = r
+    fresh = tok["in"] + tok["cr"] + tok["cw"]
+    return (fresh * inp + tok["out"] * out) / 1_000_000
+
+
+def predicted_cost(model: str, tok: dict, when: dt.date | None = None) -> float | None:
+    """What the price table says these tokens cost, cache multipliers applied."""
+    r = rates(model, when)
+    if r is None:
+        return None
+    inp, out = r
+    cr_rate = CACHE_READ_RATES.get(canonical(model), inp * CACHE_READ_MULT)
+    return (tok["in"] * inp
+            + tok["cr"] * cr_rate
+            + tok["cw"] * inp * CACHE_WRITE_MULT
+            + tok["out"] * out) / 1_000_000
+
+
+def price_table_drift(by_model: dict, when: dt.date | None = None) -> list[tuple]:
+    """Compare the price table against what was actually billed, per model.
+
+    The envelope's own costUSD is authoritative; this table is a copy of a
+    published page that can be wrong for a given account (promotional rates,
+    negotiated rates, a pricing change). Rather than quietly reporting a cache
+    saving computed from stale numbers, back out the disagreement and say so.
+    Returns (model, predicted, actual, pct_error) for every priced model.
+    """
+    out = []
+    for m, t in by_model.items():
+        if t["usd"] <= 0:
+            continue
+        p = predicted_cost(m, t, when)
+        if p is None:
+            continue
+        out.append((m, p, t["usd"], 100 * (p - t["usd"]) / t["usd"]))
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Efficiency measures
+#
+# Each is chosen because it points at a specific lever. A number nobody can act
+# on is decoration, so anything reported here is paired with an advisory rule
+# below that names what to change when the number is bad.
+# ---------------------------------------------------------------------------
+def efficiency(rows: list[dict], by_model: dict) -> dict:
+    """Derive actionable ratios from the raw usage rows."""
+    tok = blank()
+    for t in by_model.values():
+        add(tok, t)
+
+    total = sum(r.get("cost_usd") or 0.0 for r in rows)
+    usable = [r for r in rows
+              if not r.get("is_error") and r.get("quality") not in ("thin", "error")]
+    wasted = total - sum(r.get("cost_usd") or 0.0 for r in usable)
+
+    # Share of spend going to output tokens. Output bills at 5x input on every
+    # current model, so when this dominates, the lever is response length and
+    # turn count -- not caching, which only ever discounts the input side.
+    out_cost = in_cost = 0.0
+    for m, t in by_model.items():
+        r = rates(m)
+        if not r:
+            continue
+        out_cost += t["out"] * r[1] / 1_000_000
+        # Cache tokens bill at their multipliers, not the full input rate.
+        # Pricing them at 1.00x inflated the input side, which shrank output's
+        # share and SUPPRESSED the "output dominates" advisory (it never fired).
+        in_cost += (t["in"] * r[0]
+                    + t["cr"] * r[0] * CACHE_READ_MULT
+                    + t["cw"] * r[0] * CACHE_WRITE_MULT) / 1_000_000
+
+    input_tokens = tok["in"] + tok["cr"] + tok["cw"]
+    findings = sum(r.get("findings_count") or 0 for r in usable)
+    turns = sum(r.get("turns") or 0 for r in usable)
+
+    # Dispersion across runs of the same profile: how far the expensive tail
+    # sits from the median. Budgets sized on the mean under-fund that tail.
+    disp = {}
+    by_profile: dict[str, list[float]] = collections.defaultdict(list)
+    for r in rows:
+        by_profile[r.get("profile") or "(none)"].append(r.get("cost_usd") or 0.0)
+    for prof, costs in by_profile.items():
+        costs = sorted(c for c in costs if c > 0)
+        if len(costs) >= 3:
+            mid = costs[len(costs) // 2]
+            if mid > 0:
+                disp[prof] = {"median": mid, "max": costs[-1],
+                              "ratio": costs[-1] / mid, "runs": len(costs)}
+
+    return {
+        "runs": len(rows),
+        "usable_runs": len(usable),
+        "total_usd": total,
+        "wasted_usd": wasted,
+        "waste_rate": (wasted / total) if total else 0.0,
+        "cache_hit_rate": (tok["cr"] / input_tokens) if input_tokens else 0.0,
+        "output_cost_share": (out_cost / (out_cost + in_cost)) if (out_cost + in_cost) else 0.0,
+        "usd_per_usable_run": (total / len(usable)) if usable else None,
+        "usd_per_finding": (total / findings) if findings else None,
+        "turns_per_usable_run": (turns / len(usable)) if usable else None,
+        "denial_runs": sum(1 for r in rows if r.get("denial_count")),
+        "dispersion": disp,
+    }
+
+
+def phase_split(rows: list[dict]) -> dict:
+    """Spend per phase tag — how much went on deciding vs. doing."""
+    out: dict[str, dict] = collections.defaultdict(lambda: {"runs": 0, "usd": 0.0})
+    for r in rows:
+        ph = (r.get("tags") or {}).get("phase")
+        if ph:
+            out[ph]["runs"] += 1
+            out[ph]["usd"] += r.get("cost_usd") or 0.0
+    return dict(out)
+
+
+# Phases that decide what work to do rather than doing it. Their share is
+# overhead: necessary, but worth watching, and usually the cheapest thing to
+# move to a smaller model, because the output is a routing decision rather than
+# a deliverable.
+#
+# This is a default, not a definition -- phase names belong to whatever drives
+# this tool, and a caller whose vocabulary differs should say so rather than
+# have this list quietly decide the answer. Override with
+# --overhead-phases a,b,c or CLAUDE_COSTS_OVERHEAD_PHASES; an empty value
+# disables the overhead rule entirely.
+DEFAULT_OVERHEAD_PHASES = {"triage", "orchestrator", "categorizer", "classify",
+                           "route", "plan", "dispatch"}
+
+
+def overhead_phases(arg: str | None) -> set[str]:
+    raw = arg if arg is not None else os.environ.get("CLAUDE_COSTS_OVERHEAD_PHASES")
+    if raw is None:
+        return set(DEFAULT_OVERHEAD_PHASES)
+    return {p.strip().lower() for p in raw.split(",") if p.strip()}
+
+
+def advise(eff: dict, phases: dict, by_model: dict,
+           overhead: set[str] | None = None) -> list[tuple[str, str]]:
+    """Turn the measures into specific changes. Returns (headline, detail)."""
+    out = []
+
+    if eff["waste_rate"] > 0.15 and eff["wasted_usd"] > 0:
+        out.append((
+            f"{eff['waste_rate']:.0%} of spend (${eff['wasted_usd']:.4f}) bought nothing",
+            "Runs that errored or returned substanceless output still bill in "
+            "full. claude-fanout already refuses to count these as answers; for "
+            "single runs, check the `quality` field before using a result. If "
+            "the thin runs cluster in one profile, raise its effort — a shard "
+            "that gives up cheaply is more expensive than one that succeeds."))
+
+    if eff["output_cost_share"] > 0.55:
+        out.append((
+            f"output tokens are {eff['output_cost_share']:.0%} of cost",
+            "Output bills at 5x input on every current model, so response "
+            "length and turn count dominate the bill — caching only discounts "
+            "the input side and cannot reach this. Tighten the role prompt "
+            "toward shorter answers, or lower effort, before tuning the cache."))
+
+    if eff["cache_hit_rate"] < 0.40 and by_model:
+        out.append((
+            f"cache hit rate is {eff['cache_hit_rate']:.0%}",
+            "Under 40% of input tokens came from cache. Check that the prompt "
+            "prefix is byte-identical between runs — the profiles already set "
+            "--exclude-dynamic-system-prompt-sections, so a low rate usually "
+            "means per-run variation in the prompt itself, or shards too short "
+            "to amortise the cache write."))
+
+    for prof, d in sorted(eff["dispersion"].items(), key=lambda kv: -kv[1]["ratio"]):
+        if d["ratio"] >= 1.5:
+            out.append((
+                f"{prof} runs vary {d['ratio']:.1f}x in cost "
+                f"(median ${d['median']:.4f}, max ${d['max']:.4f}, n={d['runs']})",
+                "Identical prompts do not cost the same amount. Size per-shard "
+                "budgets on the expensive tail, not the average, or the "
+                "slowest shards trip their ceiling and return nothing — which "
+                "costs their spend and yields no answer."))
+
+    if eff["denial_runs"]:
+        out.append((
+            f"{eff['denial_runs']} run(s) attempted a disallowed tool",
+            "Delegates tried to step outside the read-only allow-list. The "
+            "harness refused them, but the attempts were paid for. Two of the "
+            "three denial runs measured here also returned substanceless "
+            "output, so treat denial_count > 0 as a quality warning."))
+
+    overhead = DEFAULT_OVERHEAD_PHASES if overhead is None else overhead
+    total_phase = sum(v["usd"] for v in phases.values())
+    overhead_usd = sum(v["usd"] for k, v in phases.items() if k.lower() in overhead)
+    if total_phase > 0 and overhead_usd > 0:
+        share = overhead_usd / total_phase
+        if share > 0.25:
+            out.append((
+                f"deciding costs {share:.0%} of tagged spend (${overhead_usd:.4f})",
+                "Triage and orchestration phases produce a routing decision, "
+                "not a deliverable. That much overhead usually means the "
+                "deciding step is running on the same model as the doing step "
+                "— try a smaller model or lower effort for those phases and "
+                "re-measure."))
+
+    if not out:
+        out.append(("nothing to flag",
+                    "Waste, cache hit rate, output share, cost dispersion, "
+                    "denials, and phase overhead are all within thresholds."))
+    return out
+
+
+def _wrap(text: str, width: int) -> list[str]:
+    out, line = [], ""
+    for word in text.split():
+        if len(line) + len(word) + 1 > width:
+            out.append(line)
+            line = word
+        else:
+            line = f"{line} {word}".strip()
+    if line:
+        out.append(line)
+    return out
+
+
+def blank() -> dict:
+    return {"in": 0, "out": 0, "cr": 0, "cw": 0, "usd": 0.0}
+
+
+def add(dst: dict, src: dict) -> None:
+    for k in ("in", "out", "cr", "cw"):
+        dst[k] += src.get(k, 0) or 0
+    dst["usd"] += src.get("usd", 0.0) or 0.0
+
+
+# ---------------------------------------------------------------------------
+# Lane readers
+# ---------------------------------------------------------------------------
+def read_api_lane(path: pathlib.Path, since: dt.date | None) -> dict:
+    """Actual API spend from claude-api-agent's usage log."""
+    rows = []
+    if path.exists():
+        for line in path.read_text().splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                rows.append(json.loads(line))
+            except Exception:
+                continue
+
+    if since:
+        rows = [r for r in rows if (r.get("ts") or "")[:10] >= since.isoformat()]
+
+    by_model: dict[str, dict] = collections.defaultdict(blank)
+    by_profile: dict[str, dict] = collections.defaultdict(lambda: {"runs": 0, "usd": 0.0})
+    total = 0.0
+    wasted = 0.0
+    legacy = 0
+
+    for r in rows:
+        cost = r.get("cost_usd") or 0.0
+        total += cost
+        if r.get("is_error") or r.get("quality") == "thin":
+            wasted += cost
+        p = by_profile[r.get("profile") or "(none)"]
+        p["runs"] += 1
+        p["usd"] += cost
+
+        bm = r.get("by_model")
+        if isinstance(bm, dict) and bm:
+            for m, tok in bm.items():
+                add(by_model[canonical(m)], tok)
+        else:
+            # Rows written before per-model logging existed carry only run-level
+            # cost. Count them so totals stay right, but they cannot be
+            # attributed to a model or repriced.
+            legacy += 1
+
+    return {"rows": rows, "total": total, "wasted": wasted,
+            "by_model": dict(by_model), "by_profile": dict(by_profile),
+            "legacy_rows": legacy}
+
+
+def read_local_lane(path: pathlib.Path, since: dt.date | None) -> dict:
+    """The local lane, from agentroute's ledger: tokens, wall time, agents. $0 by
+    construction -- the only dollar figure is what the same tokens would have listed
+    at on LOCAL_EQUIV_MODEL, so the lane can be sized against the other two."""
+    def num(v):
+        """A ledger written by a future schema (or a broken one) must not crash the report."""
+        return v if isinstance(v, (int, float)) and not isinstance(v, bool) else 0
+
+    rows = []
+    undated = 0
+    if path.exists():
+        with path.open() as fh:                     # stream: the ledger grows without bound
+            for line in fh:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    r = json.loads(line)
+                except Exception:
+                    continue
+                if not isinstance(r, dict):         # a bare 123 or [] used to kill every lane
+                    continue
+                if r.get("route") != "local":
+                    continue
+                if since:
+                    iso = r.get("iso")
+                    if not isinstance(iso, str) or not iso:
+                        undated += 1               # keep it: dropping it silently understates the lane
+                    elif iso[:10] < since.isoformat():
+                        continue
+                rows.append(r)
+    tok = {"in": 0, "out": 0, "cr": 0}
+    wall = 0.0
+    agents = set()
+    sessions = set()
+    errors = 0
+    stripped = 0
+    pinged = 0
+    by_model: dict[str, dict] = collections.defaultdict(blank)
+    by_backend: dict[str, dict] = collections.defaultdict(lambda: {"requests": 0, "in": 0, "out": 0, "wall_s": 0.0, "errors": 0})
+    for r in rows:
+        u = r.get("usage")
+        u = u if isinstance(u, dict) else {}
+        # a row with no `backend` predates the rig; it is not the same thing as the
+        # backend actually named "default"
+        bb = by_backend[r["backend"] if isinstance(r.get("backend"), str) else "(unrecorded)"]
+        bb["requests"] += 1
+        bb["in"] += num(u.get("input_tokens"))
+        bb["out"] += num(u.get("output_tokens"))
+        bb["wall_s"] += num(r.get("wall_s"))
+        try:
+            status_ok = r.get("status") is None or int(r["status"]) == 200
+        except (TypeError, ValueError):
+            status_ok = False
+        if not status_ok:
+            bb["errors"] += 1
+        tok["in"] += num(u.get("input_tokens"))
+        tok["out"] += num(u.get("output_tokens"))
+        tok["cr"] += num(u.get("cache_read_input_tokens"))
+        wall += num(r.get("wall_s"))
+        if r.get("agent_id"):
+            agents.add(r["agent_id"])
+        if r.get("session_id"):
+            sessions.add(r["session_id"])
+        if not status_ok:                 # same coercion the per-backend counter uses
+            errors += 1
+        stripped += num(r.get("stripped_reminders"))
+        pinged += num(r.get("pinged"))
+        m = by_model[r.get("model_out") if isinstance(r.get("model_out"), str) else "?"]
+        m["in"] += num(u.get("input_tokens"))
+        m["out"] += num(u.get("output_tokens"))
+        m["cr"] += num(u.get("cache_read_input_tokens"))
+    r = rates(LOCAL_EQUIV_MODEL)
+    # price cache reads too, at the same multiplier the API lane uses, so the figure
+    # covers every token the line above it reports
+    equiv = ((tok["in"] * r[0]) + (tok["out"] * r[1]) + (tok["cr"] * r[0] * CACHE_READ_MULT)) / 1e6 if r else None
+    return {"rows": rows, "requests": len(rows), "undated": undated, "tokens": tok, "wall_s": wall,
+            "agents": len(agents), "sessions": len(sessions), "errors": errors,
+            "stripped_reminders": stripped, "pinged": pinged, "by_model": dict(by_model),
+            "by_backend": dict(by_backend),
+            "equiv_model": LOCAL_EQUIV_MODEL, "equiv_usd": equiv}
+
+
+def read_subscription_lane(path: pathlib.Path) -> dict:
+    """Seat-covered work, from the per-model usage Claude Code records."""
+    if not path.exists():
+        return {"available": False, "by_model": {}, "total": 0.0,
+                "projects": 0, "tier": None, "org_tier": None}
+    try:
+        cfg = json.loads(path.read_text())
+    except Exception:
+        return {"available": False, "by_model": {}, "total": 0.0,
+                "projects": 0, "tier": None, "org_tier": None}
+
+    by_model: dict[str, dict] = collections.defaultdict(blank)
+    projects = 0
+    for proj in (cfg.get("projects") or {}).values():
+        lmu = proj.get("lastModelUsage") or {}
+        if lmu:
+            projects += 1
+        for m, u in lmu.items():
+            add(by_model[canonical(m)], {
+                "in": u.get("inputTokens"), "out": u.get("outputTokens"),
+                "cr": u.get("cacheReadInputTokens"),
+                "cw": u.get("cacheCreationInputTokens"),
+                "usd": u.get("costUSD"),
+            })
+
+    oauth = cfg.get("oauthAccount") or {}
+    return {"available": True, "by_model": dict(by_model),
+            "total": sum(t["usd"] for t in by_model.values()),
+            "projects": projects,
+            "tier": oauth.get("userRateLimitTier"),
+            "org_tier": oauth.get("organizationRateLimitTier")}
+
+
+def fmt_tokens(n: int) -> str:
+    for unit, div in (("B", 1e9), ("M", 1e6), ("k", 1e3)):
+        if n >= div:
+            return f"{n / div:.1f}{unit}"
+    return str(n)
+
+
+def model_table(by_model: dict, when: dt.date | None, indent: str = "  ") -> list[str]:
+    out = []
+    for m, t in sorted(by_model.items(), key=lambda kv: -kv[1]["usd"]):
+        r = rates(m, when)
+        price = f"${r[0]:g}/${r[1]:g}" if r else "unpriced"
+        out.append(f"{indent}{m:<26} {price:>12}  in {fmt_tokens(t['in']):>7}  "
+                   f"out {fmt_tokens(t['out']):>7}  cache r/w "
+                   f"{fmt_tokens(t['cr']):>7}/{fmt_tokens(t['cw']):>7}  "
+                   f"${t['usd']:.4f}")
+    return out
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(
+        prog="claude-costs",
+        description="Compare actual API spend against seat-covered work.")
+    ap.add_argument("--since", help="only count API runs on/after YYYY-MM-DD")
+    ap.add_argument("--by", metavar="TAG",
+                    help="group API spend by a tag key (id, phase, or any key "
+                         "you set with --tag)")
+    ap.add_argument("--overhead-phases", metavar="A,B,C",
+                    help="phase names that decide rather than do, for the "
+                         "overhead rule. Empty disables the rule. Default: "
+                         + ",".join(sorted(DEFAULT_OVERHEAD_PHASES)))
+    ap.add_argument("--json", action="store_true", help="emit machine-readable JSON")
+    ap.add_argument("--check-prices", action="store_true",
+                    help="print the built-in price table for review and exit")
+    args = ap.parse_args()
+
+    if args.check_prices:
+        print("Built-in list prices (USD per million tokens). Verify against")
+        print("https://platform.claude.com/docs/en/pricing when rates change.\n")
+        for m, (i, o) in sorted(PRICES.items()):
+            note = ""
+            intro = INTRO_PRICING.get(m)
+            if intro:
+                note = (f"   [intro ${intro['rates'][0]:g}/${intro['rates'][1]:g} "
+                        f"until {intro['until']}]")
+            print(f"  {m:<24} ${i:>6.2f} in / ${o:>6.2f} out{note}")
+        print(f"\n  cache read  = {CACHE_READ_MULT}x input")
+        print(f"  cache write = {CACHE_WRITE_MULT}x input (5m TTL; 2.0x at 1h)")
+        return 0
+
+    overhead = overhead_phases(args.overhead_phases)
+    since = dt.date.fromisoformat(args.since) if args.since else None
+    today = dt.date.today()
+
+    api = read_api_lane(USAGE_LOG, since)
+    sub = read_subscription_lane(CLAUDE_CONFIG)
+    loc = read_local_lane(LOCAL_LEDGER, since)
+
+    # Reprice the API lane with caching switched off. The saving must compare
+    # like with like: the no-cache counterfactual (list_cost) and the actual
+    # spend (attributable_actual) are BOTH summed over exactly the priced,
+    # per-model-attributable entries. The old code subtracted api["total"] --
+    # which also includes legacy rows with no by_model data and unpriced-model
+    # spend -- from list_cost, mixing a broad total into a narrow counterfactual
+    # and reporting a wrong saving.
+    list_cost = 0.0
+    attributable_actual = 0.0
+    unpriced = []
+    for m, t in api["by_model"].items():
+        c = uncached_cost(m, t, today)
+        if c is None:
+            unpriced.append(m)
+        else:
+            list_cost += c
+            attributable_actual += t["usd"]
+
+    if args.json:
+        print(json.dumps({
+            "api_lane": {
+                "actual_usd": round(api["total"], 6),
+                "uncached_equivalent_usd": round(list_cost, 6),
+                "cache_saving_usd": round(list_cost - attributable_actual, 6),
+                "cache_saving_basis_usd": round(attributable_actual, 6),
+                "wasted_usd": round(api["wasted"], 6),
+                "runs": len(api["rows"]),
+                "unattributed_runs": api["legacy_rows"],
+                "unpriced_models": unpriced,
+                "by_model": api["by_model"],
+                "by_profile": api["by_profile"],
+            },
+            "efficiency": (efficiency(api["rows"], api["by_model"])
+                           if api["rows"] else None),
+            "by_phase": phase_split(api["rows"]),
+            "advice": [{"headline": h, "detail": d}
+                       for h, d in advise(efficiency(api["rows"], api["by_model"]),
+                                          phase_split(api["rows"]),
+                                          api["by_model"],
+                                          overhead)] if api["rows"] else [],
+            "local_lane": {
+                "ledger": str(LOCAL_LEDGER),
+                "requests": loc["requests"], "undated_rows": loc.get("undated", 0),
+                "sessions": loc["sessions"], "agents": loc["agents"],
+                "errors": loc["errors"], "tokens": loc["tokens"], "wall_s": round(loc["wall_s"], 1),
+                "stripped_reminders": loc["stripped_reminders"], "pinged": loc["pinged"],
+                "by_model": loc["by_model"], "by_backend": loc["by_backend"], "billed_usd": 0.0,
+                "equiv_model": loc["equiv_model"], "equiv_usd": loc["equiv_usd"],
+            },
+            "subscription_lane": {
+                "equivalent_usd": round(sub["total"], 6),
+                "available": sub["available"],
+                "projects": sub["projects"],
+                "tier": sub["tier"],
+                "by_model": sub["by_model"],
+            },
+        }, indent=2))
+        return 0
+
+    print("=" * 72)
+    print("API LANE — actual dollars billed to the Console project")
+    print("=" * 72)
+    if not api["rows"]:
+        print(f"  no runs recorded in {USAGE_LOG}")
+    else:
+        span = f" since {since}" if since else ""
+        print(f"  {len(api['rows'])} run(s){span}   spent ${api['total']:.4f}")
+        if api["wasted"]:
+            pct = 100 * api["wasted"] / max(api["total"], 1e-9)
+            print(f"  ${api['wasted']:.4f} ({pct:.0f}%) bought nothing "
+                  "(errored or substanceless)")
+        print()
+        print("\n".join(model_table(api["by_model"], today)))
+        if api["legacy_rows"]:
+            print(f"\n  {api['legacy_rows']} run(s) predate per-model logging — "
+                  "counted in the total, not attributable to a model")
+        if unpriced:
+            print(f"  unpriced models (excluded from the cache figure): "
+                  f"{', '.join(sorted(unpriced))}")
+        drift = price_table_drift(api["by_model"], today)
+        bad = [d for d in drift if abs(d[3]) > 2.0]
+        if list_cost and not bad:
+            saved = list_cost - attributable_actual
+            pct = 100 * saved / list_cost if list_cost else 0
+            print(f"\n  same tokens with no cache:  ${list_cost:.4f}"
+                  f"  (vs ${attributable_actual:.4f} actual, priced rows only)")
+            print(f"  prompt cache saved:         ${saved:.4f}  ({pct:.0f}%)")
+            if drift:
+                worst = max(abs(d[3]) for d in drift)
+                print(f"  (price table agrees with billing to {worst:.2f}%)")
+        elif bad:
+            print("\n  PRICE TABLE DISAGREES WITH ACTUAL BILLING — "
+                  "cache figure withheld.")
+            for m, p, a, err in sorted(bad, key=lambda d: -abs(d[3])):
+                print(f"    {m:<24} table predicts ${p:.4f}, billed ${a:.4f} "
+                      f"({err:+.1f}%)")
+            print("    Actual spend above is unaffected (it comes from the "
+                  "envelope, not the table).")
+            print("    Update PRICES in this file, then re-run.")
+        print()
+        print("  by profile:")
+        for p, v in sorted(api["by_profile"].items(), key=lambda kv: -kv[1]["usd"]):
+            print(f"    {p:<14} {v['runs']:>4} runs   ${v['usd']:.4f}")
+
+        group_key = args.by
+        if not group_key and any((r.get("tags") or {}).get("id") for r in api["rows"]):
+            group_key = "id"
+        if group_key:
+            groups: dict[str, dict] = collections.defaultdict(
+                lambda: {"runs": 0, "usd": 0.0})
+            for r in api["rows"]:
+                key = (r.get("tags") or {}).get(group_key) or "(untagged)"
+                groups[key]["runs"] += 1
+                groups[key]["usd"] += r.get("cost_usd") or 0.0
+            print()
+            print(f"  by {group_key}:")
+            for k, v in sorted(groups.items(), key=lambda kv: -kv[1]["usd"]):
+                share = 100 * v["usd"] / max(api["total"], 1e-9)
+                print(f"    {k:<24} {v['runs']:>4} runs   ${v['usd']:.4f}  ({share:.0f}%)")
+
+    print()
+    print("=" * 72)
+    print("LOCAL LANE — zero dollars; agentroute -> the local model")
+    print("=" * 72)
+    if not loc["rows"]:
+        print(f"  no local requests recorded in {LOCAL_LEDGER}")
+    else:
+        t = loc["tokens"]
+        print(f"  {loc['requests']} request(s) in {loc['sessions']} session(s), {loc['agents']} agent(s)   "
+              f"billed $0.0000   wall {loc['wall_s'] / 60:.1f} min")
+        print(f"  in {fmt_tokens(t['in'])}  out {fmt_tokens(t['out'])}  cache reads {fmt_tokens(t['cr'])}"
+              + (f"   errors {loc['errors']}" if loc["errors"] else ""))
+        if loc["equiv_usd"] is not None:
+            print(f"  the same input, output and cache-read tokens at {loc['equiv_model']} list: "
+                  f"${loc['equiv_usd']:.4f}  (what the lane spared; not a spend)")
+        if loc.get("undated"):
+            print(f"  {loc['undated']} row(s) carry no timestamp and are counted regardless of --since")
+        if loc["stripped_reminders"] or loc["pinged"]:
+            print(f"  reminders stripped {loc['stripped_reminders']}   pings sent {loc['pinged']}")
+        for m, v in sorted(loc["by_model"].items(), key=lambda kv: -kv[1]["in"]):
+            print(f"    {m:<26} in {fmt_tokens(v['in']):>7}  out {fmt_tokens(v['out']):>7}  cache r {fmt_tokens(v['cr']):>7}")
+        if len(loc["by_backend"]) > 1 or any(k != "default" for k in loc["by_backend"]):
+            print("  by backend (the rig, design/02):")
+            for k, v in sorted(loc["by_backend"].items(), key=lambda kv: -kv[1]["requests"]):
+                avg = v["wall_s"] / v["requests"] if v["requests"] else 0.0
+                print(f"    {k:<10} {v['requests']:>4} req   in {fmt_tokens(v['in']):>7}  out {fmt_tokens(v['out']):>6}  "
+                      f"wall {v['wall_s'] / 60:5.1f} min  avg {avg:5.1f} s/req" + (f"  errors {v['errors']}" if v["errors"] else ""))
+    print()
+    print("=" * 72)
+    print("SUBSCRIPTION LANE — equivalent dollars absorbed by the seat")
+    print("=" * 72)
+    if not sub["available"]:
+        print(f"  no Claude Code state found at {CLAUDE_CONFIG}")
+    elif not sub["by_model"]:
+        print("  no per-model usage recorded")
+    else:
+        print(f"  {sub['projects']} project(s)   would have cost "
+              f"${sub['total']:.2f} at list rates")
+        print("  (no money left the account — this consumed seat capacity)")
+        print()
+        print("\n".join(model_table(sub["by_model"], today)))
+
+    if api["rows"]:
+        eff = efficiency(api["rows"], api["by_model"])
+        phases = phase_split(api["rows"])
+
+        print()
+        print("=" * 72)
+        print("TOKEN EFFICIENCY — API lane")
+        print("=" * 72)
+        print(f"  usable runs            {eff['usable_runs']}/{eff['runs']}")
+        print(f"  spend that bought nothing  {eff['waste_rate']:.0%}"
+              f"  (${eff['wasted_usd']:.4f})")
+        if api["by_model"]:
+            print(f"  cache hit rate         {eff['cache_hit_rate']:.0%}"
+                  "   (share of input tokens served from cache)")
+            print(f"  output share of cost   {eff['output_cost_share']:.0%}"
+                  "   (output bills at 5x input)")
+        if eff["usd_per_usable_run"] is not None:
+            print(f"  $ per usable run       ${eff['usd_per_usable_run']:.4f}")
+        if eff["usd_per_finding"] is not None:
+            print(f"  $ per finding          ${eff['usd_per_finding']:.4f}")
+        if eff["turns_per_usable_run"] is not None:
+            print(f"  turns per usable run   {eff['turns_per_usable_run']:.1f}")
+
+        if phases:
+            print()
+            print("  by phase:")
+            for ph, v in sorted(phases.items(), key=lambda kv: -kv[1]["usd"]):
+                mark = "  <- overhead" if ph.lower() in overhead else ""
+                print(f"    {ph:<16} {v['runs']:>4} runs   ${v['usd']:.4f}{mark}")
+
+        print()
+        print("=" * 72)
+        print("TUNING")
+        print("=" * 72)
+        for headline, detail in advise(eff, phases, api["by_model"], overhead):
+            print(f"  * {headline}")
+            for line in _wrap(detail, 68):
+                print(f"      {line}")
+
+    print()
+    print("=" * 72)
+    print("WHERE THE WORK WENT")
+    print("=" * 72)
+    # The two lanes are different units -- API is actual billed cash (possibly
+    # discounted), subscription is list-priced equivalent -- so their sum is
+    # not a spend total, and the docstring's "never sum the lanes" holds. To put
+    # them on ONE basis for a proportion, value the API lane at list too
+    # (api_list): what it would have listed at, comparable to the seat lane.
+    # The proportion then answers "of all work done, valued at list rates, how
+    # much did we pay cash for vs. absorb into the seat" -- a volume split, not
+    # a money total.
+    api_list = list_cost if list_cost else api["total"]
+    combined_list = api_list + sub["total"]
+    if combined_list > 0:
+        share = 100 * api_list / combined_list
+        print("  Both figures below are valued at LIST rates, so they share a")
+        print("  basis. They are not summed as a spend total.")
+        print(f"  API lane (list-valued):   ${api_list:.4f}  ({share:.1f}% of work)")
+        print(f"  seat-absorbed (list):     ${sub['total']:.2f}  ({100 - share:.1f}%)")
+        print(f"  API lane, actual cash:    ${api['total']:.4f}"
+              "   (what actually left the account)")
+        if api_list > 0:
+            print(f"  for every $1 of list-valued API work, "
+                  f"${sub['total'] / api_list:.0f} was absorbed by the seat")
+    else:
+        print("  nothing recorded in either lane")
+
+    # An introductory rate expiring is a scheduled cost increase, so say so
+    # while there is still time to plan around it rather than after.
+    for m, intro in INTRO_PRICING.items():
+        until = dt.date.fromisoformat(intro["until"])
+        if m in api["by_model"] and today <= until:
+            std = PRICES[m]
+            mult = std[1] / intro["rates"][1]
+            print(f"\n  NOTE: {m} is on introductory pricing until {intro['until']}"
+                  f" ({(until - today).days} days).")
+            print(f"        After that it reverts to ${std[0]:g}/${std[1]:g} per Mtok — "
+                  f"about {mult:.1f}x the current rate for the same work.")
+
+    if sub["tier"]:
+        print(f"\n  subscription tier: {sub['tier']}"
+              + (f"   org: {sub['org_tier']}" if sub["org_tier"] else ""))
+    print("  Session-window utilization (5-hour / weekly) is not exposed in any")
+    print("  local file — run /usage inside an interactive `claude` session.")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

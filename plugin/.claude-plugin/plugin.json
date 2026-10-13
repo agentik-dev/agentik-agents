@@ -1,0 +1,10 @@
+{
+  "name": "claude-code-agents",
+  "version": "1.2.0",
+  "description": "Delegate Claude Code work to the lane that fits it: read-only review on API-billed headless agents under a budget cap, mechanical work on a local model, and cost reporting.",
+  "author": {"name": "Kevin Tegtmeier"},
+  "homepage": "https://github.com/agentik-dev/agentik-agents",
+  "repository": "https://github.com/agentik-dev/agentik-agents",
+  "license": "MIT",
+  "keywords": ["delegation", "subagents", "local-model", "review", "costs"]
+}

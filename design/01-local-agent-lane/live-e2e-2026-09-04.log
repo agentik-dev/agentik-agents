@@ -1,0 +1,152 @@
+===== live e2e through the production router (2026-09-04) =====
+=== A: non-bare, --model local/default, two turns (reminder strip -> cache reuse through the production router) ===
+./live.sh: line 6: /Users/you/.local/state/agentroute/requests.jsonl: No such file or directory
+  exit=0 wall=56s
+   {'is_error': False, 'subtype': 'success', 'num_turns': 2, 'duration_ms': 55281} result: 'gamma'
+   modelUsage: {'local/default': (13922, 124)}
+  stderr: ⚠ claude.ai connectors are disabled because ANTHROPIC_API_KEY or another auth source is set and takes precedence over your claude.ai login · Unset it to load your organization's connectors
+[claude-
+  File "<string>", line 7
+    print(f"  {r[\"route\"]:<8} {str(r.get(\"status\")):<4} wall {r.get(\"wall_s\",0):6.1f} ttfb {str(r.get(\"ttfb_s\")):>6} | {str(r.get(\"model_in\"))[:22]:<22} -> {str(r.get(\"model_out\"))[:22]:<22} | eff {str(r.get(\"effort_in\")):>6}->{str(r.get(\"effort_out\")):<6} | strip {r.get(\"stripped_reminders\",\"-\")} | msgs {r.get(\"n_messages\")} tools {r.get(\"n_tools\")} | in {u.get(\"input_tokens\")} out {u.get(\"output_tokens\")} | agent {str(r.get(\"agent_id\"))[:8]} | auth {r.get(\"auth_kind\")}:{r.get(\"auth_prefix\",\"\")[:10]}")
+                  ^
+SyntaxError: unexpected character after line continuation character
+
+=== B: claude-local launcher — seat main (haiku) delegates to the plugin's local-explore ===
+  exit=0 wall=45s
+  NO ENVELOPE: Expecting value: line 1 column 3 (char 2)
+  stderr: [claude-code:unrecognized_model] {"model":"local/default","query_source":"agent:custom:claude-code-agents:local-explore"}
+  File "<string>", line 7
+    print(f"  {r[\"route\"]:<8} {str(r.get(\"status\")):<4} wall {r.get(\"wall_s\",0):6.1f} ttfb {str(r.get(\"ttfb_s\")):>6} | {str(r.get(\"model_in\"))[:22]:<22} -> {str(r.get(\"model_out\"))[:22]:<22} | eff {str(r.get(\"effort_in\")):>6}->{str(r.get(\"effort_out\")):<6} | strip {r.get(\"stripped_reminders\",\"-\")} | msgs {r.get(\"n_messages\")} tools {r.get(\"n_tools\")} | in {u.get(\"input_tokens\")} out {u.get(\"output_tokens\")} | agent {str(r.get(\"agent_id\"))[:8]} | auth {r.get(\"auth_kind\")}:{r.get(\"auth_prefix\",\"\")[:10]}")
+                  ^
+SyntaxError: unexpected character after line continuation character
+
+=== C: D5 — built-in Explore agent (names no model) should go local via CLAUDE_CODE_SUBAGENT_MODEL ===
+  exit=0 wall=15s
+  NO ENVELOPE: Expecting value: line 1 column 3 (char 2)
+  stderr: 
+  File "<string>", line 7
+    print(f"  {r[\"route\"]:<8} {str(r.get(\"status\")):<4} wall {r.get(\"wall_s\",0):6.1f} ttfb {str(r.get(\"ttfb_s\")):>6} | {str(r.get(\"model_in\"))[:22]:<22} -> {str(r.get(\"model_out\"))[:22]:<22} | eff {str(r.get(\"effort_in\")):>6}->{str(r.get(\"effort_out\")):<6} | strip {r.get(\"stripped_reminders\",\"-\")} | msgs {r.get(\"n_messages\")} tools {r.get(\"n_tools\")} | in {u.get(\"input_tokens\")} out {u.get(\"output_tokens\")} | agent {str(r.get(\"agent_id\"))[:8]} | auth {r.get(\"auth_kind\")}:{r.get(\"auth_prefix\",\"\")[:10]}")
+                  ^
+SyntaxError: unexpected character after line continuation character
+=== DONE ===
+
+===== live2: B2 / C1 / C2 / C3 =====
+
+=== B2 ===
+  exit=0 wall=19s
+   {'is_error': False, 'subtype': 'success', 'num_turns': 1, 'duration_ms': 1621} result: '`beta`'
+   modelUsage: {'claude-haiku-4-5-20251001': (27, 440), 'local/default': (12493, 226)}
+  upstream 200  wall    3.7 ttfb  1.157 | claude-haiku-4-5-20251 -> claude-haiku-4-5-20251 | eff   None->None   | strip - | msgs 1 tools 69 | in 9 out 309 cr 51778 | agent None | auth bearer:Bearer sk-
+  upstream 200  wall    1.6 ttfb  0.677 | claude-haiku-4-5-20251 -> claude-haiku-4-5-20251 | eff   None->None   | strip - | msgs 3 tools 69 | in 8 out 78 cr 59833 | agent None | auth bearer:Bearer sk-
+  local    200  wall    6.5 ttfb  2.541 | local/default          -> qwen3.8:27b-mtp-q8_0   | eff    low->low    | strip 0 | msgs 2 tools 3 | in 5372 out 104 cr None | agent ad80ba2f | auth bearer:Bearer sk-
+  local    200  wall    6.1 ttfb   0.36 | local/default          -> qwen3.8:27b-mtp-q8_0   | eff    low->low    | strip 0 | msgs 4 tools 3 | in 5469 out 122 cr None | agent ad80ba2f | auth bearer:Bearer sk-
+  upstream 200  wall    1.4 ttfb  0.717 | claude-haiku-4-5-20251 -> claude-haiku-4-5-20251 | eff   None->None   | strip - | msgs 5 tools 69 | in 10 out 53 cr 60487 | agent None | auth bearer:Bearer sk-
+
+=== C1 ===
+  exit=0 wall=19s
+   {'is_error': False, 'subtype': 'success', 'num_turns': 2, 'duration_ms': 5731} result: 'I need permission to run Bash commands to search the directory. The search requires `find` and `grep` to locate which fi'
+   modelUsage: {'claude-haiku-4-5-20251001': (53, 1513)}
+  upstream 200  wall    3.4 ttfb  0.655 | claude-haiku-4-5-20251 -> claude-haiku-4-5-20251 | eff   None->None   | strip - | msgs 1 tools 69 | in 9 out 317 cr 59140 | agent None | auth bearer:Bearer sk-
+  upstream 200  wall    1.2 ttfb  0.644 | claude-haiku-4-5-20251 -> claude-haiku-4-5-20251 | eff   None->None   | strip - | msgs 3 tools 69 | in 8 out 52 cr 59140 | agent None | auth bearer:Bearer sk-
+  upstream 200  wall    4.2 ttfb  0.788 | claude-haiku-4-5-20251 -> claude-haiku-4-5-20251 | eff   None->None   | strip - | msgs 1 tools 50 | in 10 out 369 cr 31340 | agent acb5ef53 | auth bearer:Bearer sk-
+  upstream 200  wall    4.6 ttfb  0.575 | claude-haiku-4-5-20251 -> claude-haiku-4-5-20251 | eff   None->None   | strip - | msgs 3 tools 50 | in 8 out 374 cr 33731 | agent acb5ef53 | auth bearer:Bearer sk-
+  upstream 200  wall    2.6 ttfb  0.797 | claude-haiku-4-5-20251 -> claude-haiku-4-5-20251 | eff   None->None   | strip - | msgs 5 tools 69 | in 10 out 196 cr 59801 | agent None | auth bearer:Bearer sk-
+  upstream 200  wall    2.9 ttfb    0.6 | claude-haiku-4-5-20251 -> claude-haiku-4-5-20251 | eff   None->None   | strip - | msgs 7 tools 69 | in 8 out 205 cr 60438 | agent None | auth bearer:Bearer sk-
+
+=== C2 ===
+  exit=0 wall=211s
+   {'is_error': False, 'subtype': 'success', 'num_turns': 1, 'duration_ms': 5315} result: 'A.json\ncache.log\ncacheA.json\nlive.log\nC1.json\nlive.sh\nlive3.sh\ncacheB.json\nlive2.sh\nsample.txt'
+   modelUsage: {'claude-haiku-4-5-20251001': (27, 742), 'local/default': (77271, 810)}
+  upstream 200  wall    3.7 ttfb  1.149 | claude-haiku-4-5-20251 -> claude-haiku-4-5-20251 | eff   None->None   | strip - | msgs 1 tools 69 | in 9 out 292 cr 0 | agent None | auth bearer:Bearer sk-
+  upstream 200  wall    1.3 ttfb  0.824 | claude-haiku-4-5-20251 -> claude-haiku-4-5-20251 | eff   None->None   | strip - | msgs 3 tools 69 | in 8 out 51 cr 59011 | agent None | auth bearer:Bearer sk-
+  local    200  wall  146.0 ttfb 139.066 | local/default          -> qwen3.8:27b-mtp-q8_0   | eff    low->low    | strip 0 | msgs 2 tools 50 | in 26456 out 155 cr None | agent a5c49b91 | auth bearer:Bearer sk-
+  local    200  wall   25.9 ttfb  4.815 | local/default          -> qwen3.8:27b-mtp-q8_0   | eff    low->low    | strip 0 | msgs 4 tools 50 | in 26937 out 304 cr None | agent a5c49b91 | auth bearer:Bearer sk-
+  local    200  wall   27.9 ttfb  3.778 | local/default          -> qwen3.8:27b-mtp-q8_0   | eff    low->low    | strip 0 | msgs 6 tools 50 | in 27501 out 351 cr None | agent a5c49b91 | auth bearer:Bearer sk-
+  upstream 200  wall    5.0 ttfb    0.9 | claude-haiku-4-5-20251 -> claude-haiku-4-5-20251 | eff   None->None   | strip - | msgs 5 tools 69 | in 10 out 399 cr 59657 | agent None | auth bearer:Bearer sk-
+
+=== C3 ===
+  exit=0 wall=360s
+   {'is_error': False, 'subtype': 'success', 'num_turns': 1, 'duration_ms': 1809} result: 'alpha'
+   modelUsage: {'claude-haiku-4-5-20251001': (27, 428), 'local/default': (60458, 130)}
+  upstream 200  wall    3.3 ttfb  0.788 | claude-haiku-4-5-20251 -> claude-haiku-4-5-20251 | eff   None->None   | strip - | msgs 1 tools 69 | in 9 out 315 cr 51778 | agent None | auth bearer:Bearer sk-
+  upstream 200  wall    1.3 ttfb  0.624 | claude-haiku-4-5-20251 -> claude-haiku-4-5-20251 | eff   None->None   | strip - | msgs 3 tools 69 | in 8 out 67 cr 59022 | agent None | auth bearer:Bearer sk-
+  local    200  wall  172.2 ttfb 166.416 | local/default          -> qwen3.8:27b-mtp-q8_0   | eff    low->low    | strip 0 | msgs 2 tools 54 | in 31136 out 113 cr None | agent ae6ac9d8 | auth bearer:Bearer sk-
+  local    200  wall  180.9 ttfb 179.821 | local/default          -> qwen3.8:27b-mtp-q8_0   | eff    low->low    | strip 0 | msgs 5 tools 54 | in 31685 out 17 cr None | agent ae6ac9d8 | auth bearer:Bearer sk-
+  upstream 200  wall    1.1 ttfb  0.533 | claude-haiku-4-5-20251 -> claude-haiku-4-5-20251 | eff   None->None   | strip - | msgs 5 tools 69 | in 10 out 46 cr 59684 | agent None | auth bearer:Bearer sk-
+=== DONE ===
+
+===== live3: C4 (launcher Explore override) =====
+=== C4: launcher's session-scoped Explore override -> local ===
+  exit=0 wall=129s
+   {'is_error': False, 'subtype': 'success', 'num_turns': 1, 'duration_ms': 7575} result: 'sample.txt'
+   modelUsage: {'claude-haiku-4-5-20251001': (27, 1070), 'local/default': (12786, 1889)}
+  upstream 200  wall    4.2 ttfb  1.161 | claude-haiku-4-5-20251 -> claude-haiku-4-5-20251 | eff   None->None   | strip - | msgs 1 tools 69 | in 9 out 369 cr 51778 | agent None | auth bearer:Bearer sk-
+  upstream 200  wall    1.4 ttfb  0.694 | claude-haiku-4-5-20251 -> claude-haiku-4-5-20251 | eff   None->None   | strip - | msgs 3 tools 69 | in 8 out 82 cr 59020 | agent None | auth bearer:Bearer sk-
+  local    200  wall   36.0 ttfb  27.33 | local/default          -> qwen3.8:27b-mtp-q8_0   | eff    low->low    | strip 0 | msgs 2 tools 3 | in 5289 out 206 cr None | agent acd3d0fe | auth bearer:Bearer sk-
+  local    200  wall   79.6 ttfb  1.954 | local/default          -> qwen3.8:27b-mtp-q8_0   | eff    low->low    | strip 0 | msgs 4 tools 3 | in 5790 out 1683 cr None | agent acd3d0fe | auth bearer:Bearer sk-
+  upstream 200  wall    7.2 ttfb  0.641 | claude-haiku-4-5-20251 -> claude-haiku-4-5-20251 | eff   None->None   | strip - | msgs 5 tools 69 | in 10 out 619 cr 59737 | agent None | auth bearer:Bearer sk-
+=== DONE ===
+
+===== live4: bare slash names (Unknown command) =====
+=== D1: /local-status via claude-local (installed plugin) ===
+  exit=0 wall=1s
+   {'is_error': False, 'subtype': 'success', 'num_turns': 0, 'duration_ms': 8}
+   result: Unknown command: /local-status
+   modelUsage: {}
+
+=== D2: /delegate-local via claude-local (installed plugin) ===
+  exit=0 wall=2s
+   {'is_error': False, 'subtype': 'success', 'num_turns': 0, 'duration_ms': 12}
+   result: Unknown command: /delegate-local
+   modelUsage: {}
+
+=== D3: /delegate-local in a PLAIN claude session (must refuse, not fail) ===
+  exit=0 wall=1s
+   {'is_error': False, 'subtype': 'success', 'num_turns': 0, 'duration_ms': 8}
+   result: Unknown command: /delegate-local
+   modelUsage: {}
+=== DONE ===
+
+===== live5: namespaced /claude-code-agents:* via installed plugin =====
+=== D1: /local-status via claude-local (installed plugin) ===
+  exit=0 wall=13s
+   {'is_error': False, 'subtype': 'success', 'num_turns': 4, 'duration_ms': 11583}
+   result: **Session routing:** This session IS routed through agentroute (`http://127.0.0.1:8787`).
+           
+           **agentroute --check:**
+           ```
+             ok    router        http://127.0.0.1:8787 answered 200
+             ok    upstream      https://api.anthropic.com reachable (HEAD /api/hello -> 200)
+             ok    local server  ollama 0.33.2
+             ok    local model   qwen3.8:27b-mtp-q8_0 present
+             ok    local policy  effort default=low max=medium; max_tokens<=8192; concurrency=1; strip_reminder=on
+             ok    ledger        /Users/you/.local/state/agentroute/requests.jsonl
+           ```
+           
+           **LOCAL LANE (claude-costs):**
+           ```
+             13 request(s) in 6 session(s), 5 agent(s)   billed $0.0000   wall 12.9 min
+             in 188.9k  out 3.4k  cache reads 0
+             same tokens at cl
+   modelUsage: {'claude-haiku-4-5-20251001': (17, 1002)}
+
+=== D2: /delegate-local via claude-local (installed plugin) ===
+  exit=0 wall=62s
+   {'is_error': False, 'subtype': 'success', 'num_turns': 3, 'duration_ms': 60701}
+   result: The file is **`sample.txt`** — it contains the word "gamma" on line 3.
+   modelUsage: {'claude-haiku-4-5-20251001': (25, 827), 'local/default': (13650, 305)}
+[claude-code:unrecognized_model] {"model":"local/default","query_source":"agent:custom:claude-code-agents:local-explore"}
+  upstream 200  wall    3.4 ttfb  0.803 | claude-haiku-4-5-20251 -> claude-haiku-4-5-20251 | eff   None->None   | strip - | msgs 1 tools 69 | in 9 out 290 cr 51916 | agent None | auth bearer:Bearer sk-
+  upstream 200  wall    4.3 ttfb  0.587 | claude-haiku-4-5-20251 -> claude-haiku-4-5-20251 | eff   None->None   | strip - | msgs 3 tools 69 | in 8 out 390 cr 61065 | agent None | auth bearer:Bearer sk-
+  local    200  wall   35.3 ttfb 29.286 | local/default          -> qwen3.8:27b-mtp-q8_0   | eff    low->low    | strip 0 | msgs 2 tools 3 | in 5588 out 144 cr None | agent a7985bb4 | auth bearer:Bearer sk-
+  local    200  wall   15.2 ttfb  3.697 | local/default          -> qwen3.8:27b-mtp-q8_0   | eff    low->low    | strip 0 | msgs 4 tools 3 | in 6230 out 161 cr None | agent a7985bb4 | auth bearer:Bearer sk-
+  upstream 200  wall    2.2 ttfb  0.684 | claude-haiku-4-5-20251 -> claude-haiku-4-5-20251 | eff   None->None   | strip - | msgs 5 tools 69 | in 8 out 147 cr 61538 | agent None | auth bearer:Bearer sk-
+
+=== D3: /delegate-local in a PLAIN claude session (must refuse, not fail) ===
+  exit=0 wall=14s
+   {'is_error': False, 'subtype': 'success', 'num_turns': 4, 'duration_ms': 12911}
+   result: The first line of the file is **`alpha`**.
+           
+           (Note: You invoked `/claude-code-agents:delegate-local`, but since Skill and Bash are denied in don't-ask mode, I read the file directly using the Read tool instead, which achieves the same result.)
+   modelUsage: {'claude-haiku-4-5-20251001': (33, 993)}
+=== DONE ===

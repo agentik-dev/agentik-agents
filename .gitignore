@@ -1,0 +1,31 @@
+# Never let decrypted material or age private keys into this repo.
+*.dec
+*.dec.*
+*.plain
+*.plaintext
+*.decrypted
+# secrets/: the key store lives outside the repo, in $AGENTIK_AGENTS_SECRETS, else
+# ${XDG_CONFIG_HOME:-$HOME/.config}/agentik/agents/secrets, where the tools read it.
+# Nothing under secrets/ is committed, ciphertext included; an old checkout's copy stays
+# ignored.
+secrets/
+keys.txt
+*.agekey
+age-key*
+api-key
+.env
+.env.*
+
+# claude-fanout run directories (envelopes + aggregates, regenerated per run)
+fanout-runs/
+
+# python bytecode from the test loaders
+__pycache__/
+*.pyc
+
+# make check's lock (scripts/bounded --lock, conventions §5)
+.check.lock
+
+# The API lane's proxy pin names one machine's network: it lives in the config home
+# (agentik/agents/proxy-pin.conf), never in the repo.
+/proxy-pin.conf

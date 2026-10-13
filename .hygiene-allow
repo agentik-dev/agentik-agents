@@ -1,0 +1,52 @@
+# .hygiene-allow: <path-glob>: <group>[,<group>]; `*` stays inside one path segment.
+# Read by scripts/hygiene. No row excepts the owner's own terms except where public-r1
+# keeps them; every other row is `sibling` (the plugin's own name, claude-code-agents,
+# until its rename, and the sibling plugins it names) or `home` on a placeholder path.
+# LICENSE's copyright line and plugin.json's author field carry the owner's name.
+LICENSE: person
+plugin/.claude-plugin/plugin.json: sibling,person
+# The marketplace and the Makefile carry the plugin's name.
+.claude-plugin/marketplace.json: sibling
+Makefile: sibling
+# The README: the plugin's name, its command namespace and its install lines.
+README.md: sibling
+# The open items cite the session plugin's conventions doc by name.
+NICE_TO_HAVE.md: sibling
+# The README renderer's config path names the plugin that renders it; this file names it.
+.claude/respeak/config.yaml: sibling
+.hygiene-allow: sibling
+# The tools name the plugin (its command namespace, its paths) or a sibling plugin.
+bin/agentroute: sibling
+bin/claude-agents: sibling
+bin/claude-local: sibling
+bin/localrig: sibling
+bin/queue-mvp: sibling
+# The plugin's agents, commands and skills name its command namespace.
+plugin/agents/*.md: sibling
+plugin/commands/delegate-local.md: sibling
+plugin/skills/*/SKILL.md: sibling
+# The design records name the plugin and the siblings they read, one row per file.
+design/01-local-agent-lane.md: sibling
+design/02-local-rig.md: sibling
+design/03-review-2026-09.md: sibling
+design/03-review-2026-09/raw-findings.md: sibling
+design/03-review-2026-09/raw-local-keys-setup.md: sibling
+# Run records: they name the plugin's path, and the logs and the reminder dump carry the
+# placeholder home of the stand-in user `you` (public-r1; no real user name).
+design/01-local-agent-lane/e2e-live5.sh: sibling
+design/01-local-agent-lane/live-e2e-2026-09-04.log: home,sibling
+design/01-local-agent-lane/reminder-dump-summary-2026-09-04.json: home,sibling
+design/01-local-agent-lane/wire-ledger-2026-09-04.jsonl: sibling
+design/02-local-rig/rig-honest-2026-09-05.log: home,sibling
+design/02-local-rig/rig-honest3-2026-09-05.log: home
+design/02-local-rig/rig-llama-2026-09-05.log: home
+design/02-local-rig/rig-mlx-2026-09-05.log: home
+design/02-local-rig/rig-unsloth-misrouted-2026-09-05.log: home
+# Each packet names the sibling plugins it reads or follows, one row per file.
+design/packets/a-s3-status.md: sibling
+design/packets/a-s4-layout.md: sibling
+design/packets/a-s5-status-api.md: sibling
+# Tests: the router's fixtures name the plugin's namespace; the status fixtures put their
+# session cwds in the home of an invented user, `x`.
+tests/test-agentroute.py: sibling
+tests/test-status.py: home,sibling

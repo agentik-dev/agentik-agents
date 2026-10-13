@@ -1,0 +1,32 @@
+# SOPS creation rules for this repo's tools.
+#
+# The stores live outside the repo, in the secrets directory: $AGENTIK_AGENTS_SECRETS, else
+# ${XDG_CONFIG_HOME:-$HOME/.config}/agentik/agents/secrets. sops looks for this file from the
+# current directory up, so run `sops updatekeys` from the repo; `claude-api-agent --setup-key`
+# does so itself. The rule below matches a store's absolute path by its `secrets/` segment.
+#
+# Only secret VALUES are encrypted (see encrypted_regex); the surrounding YAML keys stay
+# in cleartext so a diff of a store shows which value changed without showing it.
+#
+# 2026-09-05: secrets/anthropic-api-key.sops.yaml was REMOVED from this repo. It was
+# encrypted to two older identities, neither of them this Mac, so nothing here could read
+# it, and the API lane had never been run on this machine. Its ciphertext remains in git
+# history, so the key itself was retired by REVOKING it in the Anthropic Console --
+# deleting the file does not do that. Anyone who wants the API lane runs
+# `claude-api-agent --setup-key`, which writes a fresh store under the rule below.
+#
+# One recipient, the owner's Mac. On your own machine, put yours in its place
+# (`age-keygen -y ~/.config/sops/age/keys.txt` prints it).
+
+creation_rules:
+  # secrets/<name>.sops.{yaml,json,env}, one recipient.
+  - path_regex: (^|/)secrets/.*\.sops\.(ya?ml|json|env)$
+    age: age1559m8jlaltnfr7hm8k3g4wgf8kudrp6sku8cl8p706jhv8028ggsth5xdv
+    # Match anything credential-SHAPED by suffix, rather than naming each key. A list has
+    # to be edited every time a provider is added, and forgetting writes that value in
+    # cleartext -- reproduced on 2026-09-05 with `openrouter_key`. Suffixes covered:
+    #   _api_key  _key  _token  _secret  _password  _credential
+    # Anything else in a secrets file stays readable, which is what keeps diffs reviewable.
+    # tests/test-localrig.sh fails if a store made under this rule leaves a value unencrypted.
+    encrypted_regex: '(_api_key|_key|_token|_secret|_password|_credential)$'
+

@@ -1,0 +1,63 @@
+===== requalification gates on Ollama 0.33.2 (2026-09-04) =====
+=== keep-alive in server config ===
+OLLAMA_KEEP_ALIVE:30m0s
+=== Gate A: native /api/chat think:false on q8 (the chat server path) ===
+content_len 231 thinking_len 0 | eval 45 tok in 3.2 s | load 3.9 s
+content: A NAS is a network-attached storage device that consolidates centralized data storage, backup, and management services for a home or business network u
+gate A wall=7s
+=== Gate B: non-bare Claude Code, NO shim, effort low, Read/Glob/Grep (T4 shape) ===
+exit=0 wall=98s
+{'is_error': False, 'subtype': 'success', 'num_turns': 3, 'duration_ms': 97012}
+result: 'Files in the directory:\n`run.sh`, `log.txt`, `run2.sh`, `log2.txt`, `run3.sh`, `sample.txt`, `t1.err`, `t1.json`, `t2.err`, `t2.json`, `t3.err`, `t3.json`, `t5.'
+usage in/out: 14502 421
+--- stderr ---
+⚠ claude.ai connectors are disabled because ANTHROPIC_API_KEY or another auth source is set and takes precedence over your claude.ai login · Unset it to load your organization's connectors
+[claude-code:unrecognized_model] {"model":"qwen3.8:27b-mtp-q8_0","query_source":"sdk"}
+
+=== cache behaviour per turn (ollama log since restart) ===
+slot print_timing: id  0 | task 2744 | prompt eval time =     495.67 ms /    55 tokens (    9.01 ms per token,   110.96 tokens per second)
+[GIN] 2026/09/04 - 13:48:41 | 200 |  2.266979625s |       127.0.0.1 | POST     "/v1/messages"
+slot   operator(): id  0 | task 2755 | new prompt, n_ctx_slot = 262144, n_keep = 4, task.n_tokens = 6335
+slot print_timing: id  0 | task 2755 | prompt eval time =     483.99 ms /    40 tokens (   12.10 ms per token,    82.65 tokens per second)
+[GIN] 2026/09/04 - 13:48:47 | 200 |     2.063785s |       127.0.0.1 | POST     "/v1/messages"
+slot   operator(): id  0 | task 0 | new prompt, n_ctx_slot = 262144, n_keep = 4, task.n_tokens = 23
+slot print_timing: id  0 | task 0 | prompt eval time =     410.98 ms /    23 tokens (   17.87 ms per token,    55.96 tokens per second)
+[GIN] 2026/09/04 - 13:58:10 | 200 |  7.501057041s |       127.0.0.1 | POST     "/api/chat"
+slot   operator(): id  0 | task 19 | new prompt, n_ctx_slot = 262144, n_keep = 4, task.n_tokens = 7051
+slot   operator(): id  0 | task 19 | forcing full prompt re-processing due to lack of cache data (likely due to SWA or hybrid/recurrent memory, see ht
+slot print_timing: id  0 | task 19 | prompt eval time =   36349.22 ms /  7051 tokens (    5.16 ms per token,   193.98 tokens per second)
+[GIN] 2026/09/04 - 13:58:58 | 200 | 47.604877958s |       127.0.0.1 | POST     "/v1/messages?beta=true"
+slot   operator(): id  0 | task 87 | new prompt, n_ctx_slot = 262144, n_keep = 4, task.n_tokens = 7451
+slot   operator(): id  0 | task 87 | forcing full prompt re-processing due to lack of cache data (likely due to SWA or hybrid/recurrent memory, see ht
+slot print_timing: id  0 | task 87 | prompt eval time =   39257.50 ms /  7451 tokens (    5.27 ms per token,   189.80 tokens per second)
+[GIN] 2026/09/04 - 13:59:47 | 200 | 49.016683542s |       127.0.0.1 | POST     "/v1/messages?beta=true"
+=== DONE ===
+
+===== cache experiment: <total_tokens> reminder on/off =====
+=== Run A (reminder ON) ===
+cacheA: exit=0 wall=49s result='gamma' 2 turns
+=== Run B (CLAUDE_CODE_TOTAL_TOKENS_REMINDER=off) ===
+cacheB: exit=0 wall=43s result='gamma' 2 turns
+=== system prompt diff per run (turn1 vs turn2) ===
+--- run A: 2 requests
+system diff lines: 0
+turn2 messages roles: ['user', 'system', 'assistant', 'user', 'system']
+--- run B: 2 requests
+system diff lines: 0
+turn2 messages roles: ['user', 'system', 'assistant', 'user']
+=== ollama cache lines for these runs ===
+slot   operator(): id  0 | task 218 | cached n_tokens = 3072, memory_seq_rm [3072, end)
+slot   operator(): id  0 | task 218 | cached n_tokens = 3584, memory_seq_rm [3584, end)
+slot   operator(): id  0 | task 218 | cached n_tokens = 4096, memory_seq_rm [4096, end)
+slot   operator(): id  0 | task 218 | cached n_tokens = 4608, memory_seq_rm [4608, end)
+slot   operator(): id  0 | task 218 | cached n_tokens = 5120, memory_seq_rm [5120, end)
+slot   operator(): id  0 | task 218 | cached n_tokens = 5632, memory_seq_rm [5632, end)
+slot   operator(): id  0 | task 218 | cached n_tokens = 6144, memory_seq_rm [6144, end)
+slot   operator(): id  0 | task 218 | cached n_tokens = 6492, memory_seq_rm [6492, end)
+slot   operator(): id  0 | task 218 | cached n_tokens = 7000, memory_seq_rm [7000, end)
+slot print_timing: id  0 | task 218 | prompt eval time =   35994.82 ms /  7004 tokens (    5.14 ms per token,   194.58 tokens per second)
+slot   operator(): id  0 | task 255 | new prompt, n_ctx_slot = 262144, n_keep = 4, task.n_tokens = 7133
+slot   operator(): id  0 | task 255 | cached n_tokens = 7106, memory_seq_rm [7106, end)
+slot   operator(): id  0 | task 255 | cached n_tokens = 7129, memory_seq_rm [7129, end)
+slot print_timing: id  0 | task 255 | prompt eval time =     381.83 ms /    27 tokens (   14.14 ms per token,    70.71 tokens per second)
+=== DONE ===

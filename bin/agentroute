@@ -1,0 +1,743 @@
+#!/usr/bin/python3
+"""agentroute — a model-name router in front of Claude Code.
+
+Claude Code allows ONE API endpoint per session. agentroute sits on loopback as that
+endpoint and splits traffic by the request body's `model`:
+
+  Claude-named models  -> AGENTROUTE_UPSTREAM (api.anthropic.com). Every header is
+                          forwarded byte-for-byte, so a claude.ai seat login keeps
+                          working: the OAuth bearer and the oauth beta pass straight
+                          through and the session stays on the seat.
+  local models         -> an Anthropic-format local backend (Ollama, llama-server,
+                          Unsloth, MLX servers). A model is local when it starts with
+                          "local/", is listed in AGENTROUTE_LOCAL_MODELS, or carries an
+                          Ollama-style ":tag" (no Claude model name contains a colon).
+                          "local/default" -> AGENTROUTE_LOCAL_MODEL on AGENTROUTE_LOCAL_URL.
+                          Several backends can sit behind one router (a "rig"):
+                          AGENTROUTE_BACKENDS is a JSON map of name -> {url, model, auth},
+                          and "local/<name>" or "local/<name>/<model>" selects one, so a
+                          session can A/B backends by agent model name alone. A backend
+                          entry may set "fold_system": true for servers whose chat template
+                          rejects non-leading role:system messages (llama-server with Qwen's
+                          template; Ollama normalizes them itself): such messages are folded
+                          into the top-level system array before forwarding.
+
+On LOCAL routes only, four adjustments make a 27B behave inside Claude Code's loop:
+  * the `<total_tokens>` reminder system message is dropped. It changes every turn and
+    defeats the backend's prompt cache (measured: 36 s vs 0.4 s turn-two prefill);
+  * output_config.effort is injected when absent and clamped. Qwen 3.8 defaults to
+    xhigh reasoning and spun for five minutes on a three-line file when unpinned;
+  * max_tokens is clamped. Claude Code asks for 32000; at 15 tok/s that is a 35-minute
+    runaway budget;
+  * requests are serialized through a semaphore. The qwen35 runner is single-slot.
+Plus: SSE `ping` events while a long prefill is silent (Claude Code aborts a stream that
+is silent for 300 s), a chars/4 answer for count_tokens (Ollama has none), and one JSON
+ledger line per request recording the prompt SHAPE (sizes, tool names, agent ids, usage)
+and never content or credentials. Upstream requests are relayed untouched.
+
+Stdlib only. `agentroute --check` is the preflight; `agentroute --serve` runs it.
+See design/01-local-agent-lane.md.
+"""
+from __future__ import annotations
+
+import argparse
+import datetime as dt
+import http.client
+import http.server
+import json
+import os
+import pathlib
+import re
+import signal
+import socket
+import ssl
+import sys
+import threading
+import time
+import urllib.parse
+
+VERSION = "0.4.0"
+
+
+def env(name: str, default: str) -> str:
+    v = os.environ.get("AGENTROUTE_" + name)
+    return default if v is None or v == "" else v
+
+
+def env_num(name: str, default: str, cast=int):
+    """A malformed number in the environment must not kill the process at import."""
+    raw = env(name, default)
+    try:
+        return cast(raw)
+    except (TypeError, ValueError):
+        print(f"agentroute: AGENTROUTE_{name}={raw!r} is not a number; using {default}", file=sys.stderr)
+        return cast(default)
+
+
+LISTEN = env("LISTEN", "127.0.0.1:8787")
+UPSTREAM = env("UPSTREAM", "https://api.anthropic.com").rstrip("/")
+LOCAL_URL = env("LOCAL_URL", "http://127.0.0.1:11434").rstrip("/")
+LOCAL_MODEL = env("LOCAL_MODEL", "qwen3.8:27b-mtp-q8_0")
+LOCAL_MODELS = {m.strip() for m in env("LOCAL_MODELS", "").split(",") if m.strip()}
+LOCAL_AUTH = env("LOCAL_AUTH", "")                  # e.g. "Bearer sk-unsloth-..." for Unsloth
+LOCAL_DEFAULT_EFFORT = env("LOCAL_DEFAULT_EFFORT", "low")
+LOCAL_MAX_EFFORT = env("LOCAL_MAX_EFFORT", "medium")
+LOCAL_MAX_TOKENS = env_num("LOCAL_MAX_TOKENS", "8192")
+LOCAL_CONCURRENCY = max(1, env_num("LOCAL_CONCURRENCY", "1"))
+LOCAL_STRIP_TOKEN_REMINDER = env("LOCAL_STRIP_TOKEN_REMINDER", "1") not in ("0", "off", "false")
+BACKENDS_FILE = pathlib.Path(env("BACKENDS_FILE", str(
+    pathlib.Path(os.environ.get("XDG_CONFIG_HOME") or (pathlib.Path.home() / ".config")) / "agentroute" / "backends.json")))
+
+
+def load_backends() -> dict:
+    """AGENTROUTE_BACKENDS (JSON) wins; otherwise the backends file if present; else {}.
+    The file is the rig's declaration: `localrig` writes it, claude-local reads it."""
+    raw = env("BACKENDS", "")
+    src = "AGENTROUTE_BACKENDS"
+    if not raw and BACKENDS_FILE.exists():
+        raw = BACKENDS_FILE.read_text()
+        src = str(BACKENDS_FILE)
+    if not raw:
+        return {}
+    try:
+        d = json.loads(raw)
+        assert isinstance(d, dict)
+        return d
+    except (ValueError, AssertionError):
+        print(f"agentroute: {src} is not a JSON object; ignoring it", file=sys.stderr)
+        return {}
+
+
+BACKENDS = load_backends()
+BACKENDS.setdefault("default", {"url": LOCAL_URL, "model": LOCAL_MODEL, "auth": LOCAL_AUTH})
+for _name in list(BACKENDS):
+    _b = BACKENDS[_name]
+    if not isinstance(_b, dict):          # a string/null value used to crash the process
+        print(f"agentroute: backend {_name!r} is not an object; ignoring it", file=sys.stderr)
+        del BACKENDS[_name]
+        continue
+    _b["url"] = str(_b.get("url") or LOCAL_URL).rstrip("/")
+    _b.setdefault("model", LOCAL_MODEL)
+    _b.setdefault("auth", "")
+    _b.setdefault("fold_system", False)
+BACKENDS.setdefault("default", {"url": LOCAL_URL, "model": LOCAL_MODEL, "auth": "", "fold_system": False})
+PING_AFTER_S = env_num("PING_AFTER_S", "20", float)
+PING_EVERY_S = env_num("PING_EVERY_S", "15", float)
+TIMEOUT_S = env_num("TIMEOUT_S", "1800", float)
+STATE_DIR = pathlib.Path(env("STATE_DIR", str(
+    pathlib.Path(os.environ.get("XDG_STATE_HOME") or (pathlib.Path.home() / ".local" / "state")) / "agentroute")))
+LOG_PATH = pathlib.Path(env("LOG", str(STATE_DIR / "requests.jsonl")))
+
+UNKNOWN_BACKEND = object()   # sentinel: model named local/<name> for an undeclared <name>
+EFFORT_RANK = {"low": 0, "medium": 1, "high": 2, "xhigh": 3, "max": 4}
+REMINDER_RE = re.compile(r"^\s*<total_tokens>.*?</total_tokens>\s*$", re.S)
+HOP_BY_HOP = {"connection", "keep-alive", "proxy-authenticate", "proxy-authorization", "te",
+              "trailer", "transfer-encoding", "upgrade", "host", "content-length",
+              "accept-encoding"}
+# What may reach a LOCAL backend. An allow list, not a deny list: a deny list of
+# {authorization, x-api-key} relayed Cookie, ANTHROPIC_CUSTOM_HEADERS values and any
+# credential header a future Claude Code release adds straight to a local inference server.
+LOCAL_FORWARD_HEADERS = {"content-type", "accept", "anthropic-version", "anthropic-beta", "user-agent"}
+LOCAL_FORWARD_PREFIXES = ("x-claude-code-",)
+LOCAL_SEM = threading.BoundedSemaphore(LOCAL_CONCURRENCY)
+LOG_LOCK = threading.Lock()
+
+
+# --------------------------------------------------------------------------- routing
+def resolve_local(model):
+    """(backend dict, backend model name) when `model` is local, else None.
+
+    local/default            -> BACKENDS["default"], its model
+    local/<name>             -> BACKENDS[name], its model
+    local/<name>/<model>     -> BACKENDS[name], that model
+    local/<ollama:tag>       -> default backend, that tag
+    <anything with ':'>      -> default backend, as-is (an Ollama tag)
+    """
+    if not isinstance(model, str) or not model:
+        return None
+    if model.startswith("local/"):
+        rest = model[len("local/"):]
+        head, _, tail = rest.partition("/")
+        if head in BACKENDS:
+            return BACKENDS[head], (tail or BACKENDS[head]["model"])
+        if ":" in rest or rest in LOCAL_MODELS:
+            return BACKENDS["default"], rest
+        # An undeclared backend name is a MISTAKE, not a request for the default. Silently
+        # serving the default here made a whole measurement run report the wrong model.
+        return UNKNOWN_BACKEND, head
+    if model in LOCAL_MODELS:
+        return BACKENDS["default"], model
+    # A colon means an Ollama tag -- but real Claude ids carry colons too
+    # (bedrock "anthropic.claude-3-5-sonnet-20241022-v2:0", "...:beta"), so they win.
+    if ":" in model and "claude" not in model.lower() and "anthropic" not in model.lower():
+        return BACKENDS["default"], model
+    return None
+
+
+def text_of(content) -> str:
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "".join(b.get("text", "") for b in content if isinstance(b, dict) and b.get("type") == "text")
+    return ""
+
+
+def adjust_local_body(body: dict, backend_model: str, fold_system: bool = False) -> dict:
+    """Apply the local-only adjustments in place; return what changed (for the ledger)."""
+    info = {"model_in": body.get("model"), "model_out": backend_model}
+    body["model"] = backend_model
+    stripped = 0
+    folded = 0
+    dropped = 0
+    if isinstance(body.get("messages"), list):
+        keep = []
+        for m in body["messages"]:
+            is_sys = isinstance(m, dict) and m.get("role") == "system"
+            if is_sys and LOCAL_STRIP_TOKEN_REMINDER and REMINDER_RE.match(text_of(m.get("content"))):
+                stripped += 1
+            elif is_sys and fold_system:
+                # Fold into the top-level system array: position is lost, content is kept.
+                sysarr = body.get("system")
+                if isinstance(sysarr, str):
+                    sysarr = [{"type": "text", "text": sysarr}]
+                elif not isinstance(sysarr, list):
+                    sysarr = []
+                content = m.get("content")
+                blocks = ([{"type": "text", "text": content}] if isinstance(content, str)
+                          else [b for b in content if isinstance(b, dict)] if isinstance(content, list) else [])
+                for b in blocks:
+                    if b.get("type") == "text" and b.get("text"):
+                        keep_block = {"type": "text", "text": b["text"]}
+                        if b.get("cache_control"):          # dropping it silently costs cache hits
+                            keep_block["cache_control"] = b["cache_control"]
+                        sysarr.append(keep_block)
+                    else:
+                        dropped += 1                        # a tool_result/image cannot go in `system`
+                body["system"] = sysarr
+                folded += 1
+            else:
+                keep.append(m)
+        if keep or not body.get("messages"):
+            body["messages"] = keep
+        else:
+            stripped = 0          # stripping would have emptied the list; the backend 400s on that
+    info["stripped_reminders"] = stripped
+    if fold_system:
+        info["folded_system"] = folded
+        if dropped:
+            info["folded_dropped_blocks"] = dropped
+    oc = body.get("output_config")
+    if not isinstance(oc, dict):
+        oc = {}
+        body["output_config"] = oc
+    info["effort_in"] = oc.get("effort")
+    eff = oc.get("effort")
+    if eff not in EFFORT_RANK:
+        eff = LOCAL_DEFAULT_EFFORT
+    if EFFORT_RANK.get(eff, 0) > EFFORT_RANK.get(LOCAL_MAX_EFFORT, 1):
+        eff = LOCAL_MAX_EFFORT
+    oc["effort"] = eff
+    info["effort_out"] = eff
+    info["max_tokens_in"] = body.get("max_tokens")
+    if isinstance(body.get("max_tokens"), (int, float)) and not isinstance(body.get("max_tokens"), bool) \
+            and body["max_tokens"] > LOCAL_MAX_TOKENS:
+        body["max_tokens"] = LOCAL_MAX_TOKENS
+    info["max_tokens_out"] = body.get("max_tokens")
+    return info
+
+
+def shape(body) -> dict:
+    """Prompt shape for the ledger: sizes and names, never content."""
+    if not isinstance(body, dict):
+        return {}
+    tools = body.get("tools")
+    tools = tools if isinstance(tools, list) else []
+    msgs = body.get("messages")
+    msgs = msgs if isinstance(msgs, list) else []
+    sysc = body.get("system")
+    return {
+        "stream": body.get("stream"),
+        "n_messages": len(msgs),
+        "n_tools": len(tools),
+        "tools": [t.get("name") for t in tools if isinstance(t, dict)][:40],
+        "system_chars": len(json.dumps(sysc, default=str)) if sysc is not None else 0,
+        "thinking": (body.get("thinking") or {}).get("type") if isinstance(body.get("thinking"), dict) else None,
+    }
+
+
+# --------------------------------------------------------------------------- ledger
+def write_ledger(rec: dict) -> None:
+    try:
+        STATE_DIR.mkdir(parents=True, exist_ok=True)
+        os.chmod(STATE_DIR, 0o700)
+        line = (json.dumps(rec, separators=(",", ":")) + "\n").encode()
+        with LOG_LOCK:
+            fd = os.open(LOG_PATH, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
+            try:
+                os.write(fd, line)
+            finally:
+                os.close(fd)
+    except OSError as exc:                                     # logging never fails a request
+        print(f"agentroute: ledger write failed: {exc}", file=sys.stderr)
+
+
+USAGE_RES = {
+    "input_tokens": re.compile(rb'"input_tokens":\s*(\d+)'),
+    "output_tokens": re.compile(rb'"output_tokens":\s*(\d+)'),
+    "cache_read_input_tokens": re.compile(rb'"cache_read_input_tokens":\s*(\d+)'),
+    "cache_creation_input_tokens": re.compile(rb'"cache_creation_input_tokens":\s*(\d+)'),
+}
+
+
+def parse_usage(head: bytes, tail: bytes) -> dict:
+    """Best-effort usage from a response: message_start sits in the head, the final
+    message_delta in the tail; a non-streaming body is small enough to be both."""
+    out = {}
+    blob = head + b"\n" + tail
+    for k, rx in USAGE_RES.items():
+        hits = rx.findall(blob)
+        if hits:
+            out[k] = int(hits[-1] if k == "output_tokens" else hits[0])
+    return out
+
+
+def auth_summary(headers) -> dict:
+    a = headers.get("Authorization") or headers.get("authorization")
+    k = headers.get("x-api-key") or headers.get("X-Api-Key")
+    return {"auth_kind": ("bearer" if a else "") + ("+" if a and k else "") + ("x-api-key" if k else "") or "none",
+            "auth_prefix": (a or k or "")[:12]}
+
+
+# --------------------------------------------------------------------------- relay
+def connect(base: str):
+    u = urllib.parse.urlsplit(base)
+    if u.scheme == "https":
+        return http.client.HTTPSConnection(u.hostname, u.port or 443, timeout=TIMEOUT_S,
+                                           context=ssl.create_default_context()), u
+    return http.client.HTTPConnection(u.hostname, u.port or 80, timeout=TIMEOUT_S), u
+
+
+class Handler(http.server.BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.1"
+    server_version = "agentroute/" + VERSION
+
+    def log_message(self, *a):                                 # ledger instead of stderr chatter
+        pass
+
+    # ---- entry points
+    def do_HEAD(self):
+        self._dispatch()
+
+    def do_GET(self):
+        self._dispatch()
+
+    def do_POST(self):
+        self._dispatch()
+
+    def _read_body(self):
+        """Bytes, or None when the body cannot be read whole. A chunked body used to be
+        silently dropped: the prompt vanished and, with no `model` left to route on, a
+        local request was relayed upstream on the seat's credential."""
+        if self.headers.get("transfer-encoding") and not self.headers.get("content-length"):
+            return None
+        try:
+            n = int(self.headers.get("content-length") or 0)
+        except ValueError:
+            return None
+        return self.rfile.read(n) if n else b""
+
+    def _send_json(self, status: int, obj: dict) -> None:
+        out = json.dumps(obj).encode()
+        self.send_response(status)
+        self.send_header("content-type", "application/json")
+        self.send_header("content-length", str(len(out)))
+        self.send_header("connection", "close")
+        self.end_headers()
+        if self.command != "HEAD":
+            self.wfile.write(out)
+
+    def _dispatch(self):
+        t0 = time.time()
+        path = urllib.parse.urlsplit(self.path).path
+        raw = self._read_body() if self.command == "POST" else b""
+        if raw is None:
+            self._send_json(411, {"type": "error", "error": {"type": "invalid_request_error",
+                "message": "agentroute needs a Content-Length; it does not decode chunked request bodies"}})
+            return
+        body = None
+        if raw:
+            try:
+                body = json.loads(raw)
+            except ValueError:
+                body = None
+        rec = {"ts": round(t0, 3), "iso": dt.datetime.fromtimestamp(t0).isoformat(timespec="seconds"),
+               "method": self.command, "path": self.path[:120],
+               "session_id": self.headers.get("x-claude-code-session-id"),
+               "agent_id": self.headers.get("x-claude-code-agent-id"),
+               "parent_agent_id": self.headers.get("x-claude-code-parent-agent-id"),
+               "user_agent": (self.headers.get("user-agent") or "")[:60]}
+        rec.update(auth_summary(self.headers))
+
+        if path == "/api/hello":                               # Claude Code's connection warm-up
+            self._send_json(200, {"ok": True, "agentroute": VERSION})
+            return
+
+        hit = resolve_local(body.get("model")) if isinstance(body, dict) else None
+        if hit and hit[0] is UNKNOWN_BACKEND:
+            declared = ", ".join(sorted(BACKENDS)) or "none"
+            msg = (f"agentroute: no local backend named {hit[1]!r}. Declared: {declared}. "
+                   f"Add it with `localrig up {hit[1]}`, then `localrig restart-router`.")
+            self._send_json(404, {"type": "error", "error": {"type": "not_found_error", "message": msg}})
+            rec.update({"route": "local-unknown-backend", "status": 404, "model_in": body.get("model"),
+                        "backend": hit[1], "error": msg, "wall_s": round(time.time() - t0, 3)})
+            write_ledger(rec)
+            return
+        if path.startswith("/v1/messages") and hit:
+            backend, backend_model = hit
+            rec["backend"] = next((n for n, b in BACKENDS.items() if b is backend), "default")
+            rec.update(adjust_local_body(body, backend_model, bool(backend.get("fold_system"))))
+            rec.update(shape(body))
+            if path.endswith("/count_tokens"):
+                est = max(1, len(json.dumps(body)) // 4)     # Ollama has no count_tokens
+                self._send_json(200, {"input_tokens": est})
+                rec.update({"route": "local-count-estimate", "status": 200, "wall_s": round(time.time() - t0, 3),
+                            "usage": {"input_tokens": est}})
+                write_ledger(rec)
+                return
+            rec["route"] = "local"
+            self._relay(backend["url"], "/v1/messages", json.dumps(body).encode(), body, rec, t0,
+                        lambda netloc, raw, _b=backend: self._local_headers(netloc, raw, _b["auth"]))
+            return
+
+        rec["route"] = "upstream"
+        if isinstance(body, dict):
+            rec["model_in"] = rec["model_out"] = body.get("model")
+            rec.update(shape(body))
+        self._relay(UPSTREAM, self.path, raw if self.command == "POST" else None, body, rec, t0, self._upstream_headers)
+
+    # ---- header policies
+    def _upstream_headers(self, netloc: str, raw) -> dict:
+        h = {k: v for k, v in self.headers.items() if k.lower() not in HOP_BY_HOP}
+        h["host"] = netloc
+        if raw is not None:
+            h["content-length"] = str(len(raw))
+        return h
+
+    def _local_headers(self, netloc: str, raw, auth: str = "") -> dict:
+        h = {k: v for k, v in self.headers.items()
+             if k.lower() in LOCAL_FORWARD_HEADERS or k.lower().startswith(LOCAL_FORWARD_PREFIXES)}
+        h["host"] = netloc
+        if auth:
+            h["authorization"] = auth
+        if raw is not None:
+            h["content-length"] = str(len(raw))
+        return h
+
+    # ---- the relay proper
+    def _relay(self, base: str, path: str, raw, body, rec: dict, t0: float, hdr_fn) -> None:
+        streaming = isinstance(body, dict) and body.get("stream") is True and self.command == "POST"
+        local = rec.get("route") == "local"
+        sem = LOCAL_SEM if local else None
+
+        # Pinger: after PING_AFTER_S of silence on a streaming request, commit a 200 +
+        # text/event-stream and emit `ping` events until the backend answers.
+        responded = threading.Event()
+        committed = {"yes": False, "pings": 0}
+        wlock = threading.Lock()
+
+        def pinger():
+            if not responded.wait(PING_AFTER_S):
+                with wlock:
+                    if not responded.is_set():
+                        self.send_response(200)
+                        self.send_header("content-type", "text/event-stream; charset=utf-8")
+                        self.send_header("cache-control", "no-cache")
+                        self.send_header("transfer-encoding", "chunked")
+                        self.send_header("connection", "close")
+                        self.end_headers()
+                        committed["yes"] = True
+                while not responded.wait(PING_EVERY_S):
+                    with wlock:
+                        if responded.is_set():
+                            break
+                        self._chunk(b'event: ping\ndata: {"type": "ping"}\n\n')
+                        committed["pings"] += 1
+
+        pt = None
+        if streaming and PING_AFTER_S > 0:
+            pt = threading.Thread(target=pinger, daemon=True)
+            pt.start()
+
+        if sem:
+            sem.acquire()
+        conn = None
+        try:
+            conn, u = connect(base)
+            try:
+                conn.request(self.command, path, body=raw, headers=hdr_fn(u.netloc, raw))
+                resp = conn.getresponse()
+            except (OSError, http.client.HTTPException) as exc:
+                responded.set()
+                if pt:
+                    pt.join()
+                with wlock:
+                    if committed["yes"]:
+                        self._chunk(self._sse_error(f"agentroute: backend unreachable: {exc}"))
+                        self._chunk(b"")
+                    else:
+                        self._send_json(502, {"type": "error", "error": {"type": "api_error",
+                                                                          "message": f"agentroute: backend unreachable: {exc}"}})
+                rec.update({"status": 502, "error": str(exc)[:200], "wall_s": round(time.time() - t0, 3)})
+                write_ledger(rec)
+                return
+
+            responded.set()
+            if pt:
+                pt.join()
+            t_headers = time.time() - t0
+            ttfb = None            # stamped at the first BODY byte: llama-server sends headers before
+            head = b""             # prefill, Ollama after it, so header time is not comparable
+            tail = b""
+            nbytes = 0
+            with wlock:
+                if committed["yes"]:
+                    # Already told the client 200/SSE; a non-200 backend answer becomes an SSE error.
+                    if resp.status != 200:
+                        err = resp.read()
+                        self._chunk(self._sse_error(f"backend {resp.status}: {err[:500].decode('utf-8', 'replace')}"))
+                        self._chunk(b"")
+                        rec.update({"status": resp.status, "error": err[:200].decode("utf-8", "replace"),
+                                    "pinged": committed["pings"], "ttfb_s": round(t_headers, 3),
+                                    "wall_s": round(time.time() - t0, 3)})
+                        write_ledger(rec)
+                        return
+                else:
+                    # RFC 9112: these carry no body, so they must not be framed as chunked.
+                    bodyless = (self.command == "HEAD" or resp.status in (204, 304)
+                                or 100 <= resp.status < 200)
+                    self.send_response(resp.status)
+                    for k, v in resp.getheaders():
+                        if k.lower() in HOP_BY_HOP or k.lower() == "content-length":
+                            continue
+                        self.send_header(k, v)
+                    if not bodyless:
+                        self.send_header("transfer-encoding", "chunked")
+                    self.send_header("connection", "close")
+                    self.end_headers()
+                    if bodyless:
+                        rec.update({"status": resp.status, "wall_s": round(time.time() - t0, 3),
+                                    "headers_s": round(t_headers, 3)})
+                        write_ledger(rec)
+                        return
+                try:
+                    while True:
+                        chunk = resp.read1(65536)
+                        if not chunk:
+                            break
+                        if ttfb is None:
+                            ttfb = time.time() - t0
+                        nbytes += len(chunk)
+                        if len(head) < 65536:
+                            head += chunk[:65536 - len(head)]
+                        tail = (tail + chunk)[-65536:]
+                        self._chunk(chunk)
+                    self._chunk(b"")
+                except (BrokenPipeError, ConnectionResetError):
+                    raise                      # the CLIENT went away; handled below
+                except Exception as exc:
+                    # The BACKEND died mid-stream (OOM, model eviction). Without this the
+                    # client got a chunked stream with no terminator and hung forever,
+                    # and no ledger row was ever written.
+                    self._chunk(self._sse_error(f"agentroute: backend stopped mid-response: {exc}"))
+                    self._chunk(b"")
+                    rec.update({"status": resp.status, "error": f"backend stopped mid-response: {exc}"[:200],
+                                "ttfb_s": round(ttfb if ttfb is not None else t_headers, 3),
+                                "wall_s": round(time.time() - t0, 3), "resp_bytes": nbytes,
+                                "pinged": committed["pings"], "truncated": True})
+                    write_ledger(rec)
+                    return
+            rec.update({"status": resp.status, "ttfb_s": round(ttfb if ttfb is not None else t_headers, 3),
+                        "headers_s": round(t_headers, 3), "wall_s": round(time.time() - t0, 3),
+                        "resp_bytes": nbytes, "pinged": committed["pings"]})
+            if resp.status == 200 and self.command == "POST":
+                rec["usage"] = parse_usage(head, tail)
+            elif resp.status != 200:
+                rec["error"] = tail[-300:].decode("utf-8", "replace")
+            write_ledger(rec)
+        except (BrokenPipeError, ConnectionResetError):
+            rec.update({"status": rec.get("status") or 499, "error": "client disconnected",
+                        "wall_s": round(time.time() - t0, 3)})
+            write_ledger(rec)
+        finally:
+            if sem:
+                sem.release()
+            if conn:
+                conn.close()
+
+    def _chunk(self, data: bytes) -> None:
+        if data:
+            self.wfile.write(b"%x\r\n%s\r\n" % (len(data), data))
+        else:
+            self.wfile.write(b"0\r\n\r\n")
+        self.wfile.flush()
+
+    @staticmethod
+    def _sse_error(msg: str) -> bytes:
+        return b"event: error\ndata: " + json.dumps(
+            {"type": "error", "error": {"type": "api_error", "message": msg}}).encode() + b"\n\n"
+
+
+class Server(http.server.ThreadingHTTPServer):
+    daemon_threads = True
+    allow_reuse_address = True
+
+
+# --------------------------------------------------------------------------- check
+def _get(url: str, timeout: float = 5.0, method: str = "GET", headers: dict | None = None):
+    conn, u = connect(url)
+    conn.timeout = timeout
+    path = u.path or "/"
+    if u.query:
+        path += "?" + u.query
+    try:
+        h = {"host": u.netloc, "user-agent": "agentroute-check/" + VERSION}
+        h.update(headers or {})
+        conn.request(method, path, headers=h)
+        r = conn.getresponse()
+        return r.status, r.read()
+    finally:
+        conn.close()
+
+
+def check() -> int:
+    """Preflight. A probe that fails is UNKNOWN and reported as a failure, never skipped."""
+    ok = True
+    rows = []
+
+    def row(state, what, detail):
+        nonlocal ok
+        rows.append((state, what, detail))
+        if state == "FAIL":
+            ok = False
+
+    # 1. router
+    try:
+        st, _ = _get(f"http://{LISTEN}/api/hello", 2.0, "HEAD")
+        row("ok" if st == 200 else "FAIL", "router", f"http://{LISTEN} answered {st}")
+    except OSError as exc:
+        row("FAIL", "router", f"http://{LISTEN} not answering ({exc}); start with `agentroute --serve`")
+    # 2. upstream reachability (no credential is sent; any HTTP answer proves the path)
+    try:
+        st, _ = _get(UPSTREAM + "/api/hello", 5.0, "HEAD")
+        row("ok", "upstream", f"{UPSTREAM} reachable (HEAD /api/hello -> {st})")
+    except OSError as exc:
+        row("FAIL", "upstream", f"{UPSTREAM} unreachable ({exc})")
+    # 3. every local backend: reachable, version (Ollama) and model presence
+    for name, b in BACKENDS.items():
+        url = b["url"]
+        label = f"backend {name}"
+        bad = "FAIL" if name == "default" else "warn"      # only the default backend gates a session
+        hdrs = {"authorization": b["auth"]} if b["auth"] else {}
+        is_ollama = False
+        try:
+            st, data = _get(url + "/api/version", 5.0, headers=hdrs)
+            if st == 200:
+                is_ollama = True
+                version = json.loads(data).get("version")
+                parts = tuple(int(x) for x in re.findall(r"\d+", version or "0")[:3])
+                good = parts >= (0, 33, 0)
+                row("ok" if good else bad, label,
+                    f"ollama {version} at {url}" + ("" if good else "  <-- need >= 0.33.0 (system-message + prefill-cache fixes)"))
+        except (OSError, ValueError) as exc:
+            hint = ("  -> start it, then retry (Ollama: `ollama serve`, or open the app)"
+                    if name == "default" else
+                    "  (optional backend; local/" + name + " will 502 until it is up)")
+            row(bad, label, f"{url} unreachable or not answering JSON ({exc})" + hint)
+            continue
+        try:
+            if is_ollama:
+                st, data = _get(url + "/api/tags", 5.0, headers=hdrs)
+                names = {m.get("name") for m in json.loads(data).get("models", [])} if st == 200 else set()
+            else:
+                st, data = _get(url + "/v1/models", 5.0, headers=hdrs)
+                if st != 200:
+                    row(bad, label, f"{url}/v1/models -> {st}")
+                    continue
+                names = {m.get("id") for m in json.loads(data).get("data", [])}
+                row("ok", label, f"Anthropic-format backend at {url} serving {', '.join(sorted(n for n in names if n))[:80]}")
+            want = {b["model"]} | (LOCAL_MODELS if name == "default" else set())
+            missing = sorted(w for w in want if w not in names)
+            hint = ("  -> `ollama pull " + missing[0] + "`" if missing and is_ollama else
+                    "  -> load it on that server" if missing else "")
+            row(bad if missing else "ok", "  model",
+                (f"missing on {name}: {', '.join(missing)}" + hint) if missing
+                else f"{', '.join(sorted(want))} present on {name}")
+        except (OSError, ValueError, AttributeError, KeyError, TypeError) as exc:
+            row(bad, label, f"could not list models at {url} ({exc})")
+    # 4. policy summary
+    row("ok", "local policy", f"effort default={LOCAL_DEFAULT_EFFORT} max={LOCAL_MAX_EFFORT}; max_tokens<={LOCAL_MAX_TOKENS}; "
+                              f"concurrency={LOCAL_CONCURRENCY}; strip_reminder={'on' if LOCAL_STRIP_TOKEN_REMINDER else 'OFF'}; "
+                              f"backends={', '.join(BACKENDS)}")
+    row("ok", "ledger", str(LOG_PATH))
+    for state, what, detail in rows:
+        print(f"  {state:<5} {what:<16} {detail}")
+    counts = {}
+    for state, _, _ in rows:
+        counts[state] = counts.get(state, 0) + 1
+    print("  " + "  ".join(f"{counts.get(k, 0)} {k}" for k in ("ok", "warn", "FAIL"))
+          + ("   (warn rows do not gate a session)" if counts.get("warn") else ""))
+    return 0 if ok else 1
+
+
+def serve() -> int:
+    if ":" not in LISTEN:
+        print(f"agentroute: AGENTROUTE_LISTEN={LISTEN!r} must be host:port", file=sys.stderr)
+        return 2
+    host, port = LISTEN.rsplit(":", 1)
+    if host not in ("127.0.0.1", "localhost", "::1"):
+        print(f"agentroute: refusing to bind {host}: this router relays the seat's credential and must stay on loopback",
+              file=sys.stderr)
+        return 2
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    os.chmod(STATE_DIR, 0o700)
+    srv = Server((host, int(port)), Handler)
+    (STATE_DIR / "agentroute.pid").write_text(str(os.getpid()))
+
+    def stop(*_):
+        threading.Thread(target=srv.shutdown, daemon=True).start()
+
+    signal.signal(signal.SIGTERM, stop)
+    signal.signal(signal.SIGINT, stop)
+    summary = ", ".join(f"{n}: {b['url']} {b['model']}" for n, b in BACKENDS.items())
+    print(f"agentroute {VERSION} on http://{LISTEN}  upstream={UPSTREAM}  backends={{{summary}}}  ledger={LOG_PATH}", flush=True)
+    try:
+        srv.serve_forever()
+    finally:
+        srv.server_close()
+        try:
+            (STATE_DIR / "agentroute.pid").unlink()
+        except OSError:
+            pass
+    return 0
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(prog="agentroute", description=__doc__.split("\n\n")[0])
+    g = ap.add_mutually_exclusive_group()
+    g.add_argument("--serve", action="store_true", help="run the router (foreground)")
+    g.add_argument("--check", action="store_true", help="preflight: router, upstream, local backend, model, policy")
+    g.add_argument("--version", action="store_true")
+    a = ap.parse_args()
+    if a.version:
+        print(VERSION)
+        return 0
+    if a.check:
+        return check()
+    if a.serve:
+        return serve()
+    ap.print_help()
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main())

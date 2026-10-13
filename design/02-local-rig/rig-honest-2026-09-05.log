@@ -1,0 +1,96 @@
+=== 1/4 unsloth (already up, 32 GB) ===
+  ok    backend unsloth Anthropic-format backend at http://127.0.0.1:8888 serving mlx-community/Qwen3-VL-32B-Instruct-8bit, mlx-community/Qwen3-VL-4B-Instruct-4bi
+  ok      model       unsloth/Qwen3.8-27B-GGUF present on unsloth
+  ok    backend default ollama 0.33.2 at http://127.0.0.1:11434
+  ok      model       qwen3.8:27b-mtp-q8_0 present on default
+  ok    local policy  effort default=low max=medium; max_tokens<=8192; concurrency=1; strip_reminder=on; backends=unsloth, default
+
+################ backend: unsloth ################
+  exit=0 wall=141s
+   {'is_error': False, 'subtype': 'success', 'num_turns': 1, 'duration_ms': 1836} result: 'gamma,beta,alpha'
+   modelUsage: {'claude-haiku-4-5-20251001': (63, 904), 'local/unsloth': (37995, 628)}
+  local rows (A turn1, A turn2, B turn1, B turn2, A turn1, A turn2 expected):
+    unsloth  unsloth/Qwen3.8-27B-GG agent a57b7e2b wall   44.2  ttfb  0.188  in  6267  cr     0  out  104  eff low
+    unsloth  unsloth/Qwen3.8-27B-GG agent a57b7e2b wall   15.5  ttfb  0.021  in  6398  cr     0  out  216  eff low
+    unsloth  unsloth/Qwen3.8-27B-GG agent afb76904 wall   37.0  ttfb  0.024  in  6265  cr     0  out  105  eff low
+    unsloth  unsloth/Qwen3.8-27B-GG agent afb76904 wall    5.6  ttfb  0.045  in  6397  cr     0  out   74  eff low
+    unsloth  unsloth/Qwen3.8-27B-GG agent a2a05fe4 wall   26.6  ttfb  0.019  in  6267  cr     0  out  117  eff low
+    unsloth  unsloth/Qwen3.8-27B-GG agent a2a05fe4 wall    1.2  ttfb   0.02  in  6401  cr     0  out   12  eff low
+
+=== free unsloth, register mlx ===
+localrig: unsloth stopped
+  backends.json: unsloth removed (empty)
+localrig: mlx: Ollama serves qwen3.8:27b-mxfp8 on demand (MLX runner: prefix cache across agents, MTP)
+localrig: restart the router to load the file: localrig restart-router
+  backends.json: mlx set (mlx)
+  ok    backend mlx   ollama 0.33.2 at http://127.0.0.1:11434
+  ok      model       qwen3.8:27b-mxfp8 present on mlx
+  ok    backend default ollama 0.33.2 at http://127.0.0.1:11434
+  ok      model       qwen3.8:27b-mtp-q8_0 present on default
+  ok    local policy  effort default=low max=medium; max_tokens<=8192; concurrency=1; strip_reminder=on; backends=mlx, default
+=== 2/4 default (Ollama GGUF runner, qwen3.8:27b-mtp-q8_0) ===
+
+################ backend: default ################
+  exit=0 wall=97s
+   {'is_error': False, 'subtype': 'success', 'num_turns': 4, 'duration_ms': 96293} result: 'alpha, beta, gamma'
+   modelUsage: {'claude-haiku-4-5-20251001': (33, 850), 'local/default': (37273, 344)}
+  local rows (A turn1, A turn2, B turn1, B turn2, A turn1, A turn2 expected):
+    default  qwen3.8:27b-mtp-q8_0   agent a0ebd65a wall   42.9  ttfb 38.897  in  5323  cr  None  out   99  eff low
+    default  qwen3.8:27b-mtp-q8_0   agent a0ebd65a wall    1.0  ttfb  0.407  in  5412  cr  None  out   12  eff low
+    default  qwen3.8:27b-mtp-q8_0   agent a89254ea wall   32.6  ttfb 28.361  in  5321  cr  None  out  104  eff low
+    default  qwen3.8:27b-mtp-q8_0   agent a89254ea wall    1.3  ttfb  0.367  in  5414  cr  None  out   18  eff low
+    default  qwen3.8:27b-mtp-q8_0   agent a28f3637 wall    6.5  ttfb  2.474  in  5323  cr  None  out   99  eff low
+    default  qwen3.8:27b-mtp-q8_0   agent a28f3637 wall    0.9  ttfb  0.362  in  5412  cr  None  out   12  eff low
+
+=== 3/4 mlx (Ollama MLX runner, qwen3.8:27b-mxfp8) ===
+
+################ backend: mlx ################
+  exit=0 wall=112s
+   {'is_error': False, 'subtype': 'success', 'num_turns': 4, 'duration_ms': 110355} result: 'gamma, beta, alpha'
+   modelUsage: {'claude-haiku-4-5-20251001': (33, 802), 'local/mlx': (37201, 602)}
+  local rows (A turn1, A turn2, B turn1, B turn2, A turn1, A turn2 expected):
+    mlx      qwen3.8:27b-mxfp8      agent ae788b09 wall   37.7  ttfb 34.316  in  5309  cr  None  out  103  eff low
+    mlx      qwen3.8:27b-mxfp8      agent ae788b09 wall    6.4  ttfb  0.347  in  5402  cr  None  out  152  eff low
+    mlx      qwen3.8:27b-mxfp8      agent a601f872 wall   28.6  ttfb 25.875  in  5307  cr  None  out  105  eff low
+    mlx      qwen3.8:27b-mxfp8      agent a601f872 wall    2.7  ttfb  0.314  in  5404  cr  None  out   80  eff low
+    mlx      qwen3.8:27b-mxfp8      agent a9e6b03e wall   22.0  ttfb 18.933  in  5309  cr  None  out  103  eff low
+    mlx      qwen3.8:27b-mxfp8      agent a9e6b03e wall    2.5  ttfb  0.371  in  5402  cr  None  out   59  eff low
+
+=== 4/4 llama (llama-server on the q8 blob) ===
+localrig: starting llama-server on :8081 (log: /Users/you/.local/state/agentroute/llama-server.log)
+/Users/you/code/claude-code-agents/bin/localrig: line 67: $!: unbound variable
+  ok    backend mlx   ollama 0.33.2 at http://127.0.0.1:11434
+  ok      model       qwen3.8:27b-mxfp8 present on mlx
+  ok    backend default ollama 0.33.2 at http://127.0.0.1:11434
+  ok      model       qwen3.8:27b-mtp-q8_0 present on default
+  ok    local policy  effort default=low max=medium; max_tokens<=8192; concurrency=1; strip_reminder=on; backends=mlx, default
+
+################ backend: llama ################
+  exit=0 wall=48s
+   {'is_error': False, 'subtype': 'success', 'num_turns': 3, 'duration_ms': 46614} result: "I'm unable to complete these delegations as requested. The probe-a agent is retu"
+   modelUsage: {'claude-haiku-4-5-20251001': (25, 879)}
+  local rows (A turn1, A turn2, B turn1, B turn2, A turn1, A turn2 expected):
+    default  qwen3.8:27b-mtp-q8_0   agent a985b13f wall   36.5  ttfb 36.513  in  None  cr  None  out None  eff low
+    default  qwen3.8:27b-mtp-q8_0   agent a985b13f wall    0.0  ttfb  0.026  in     0  cr  None  out    0  eff low
+    default  qwen3.8:27b-mtp-q8_0   agent a5e031d8 wall    0.0  ttfb  0.039  in  None  cr  None  out None  eff low
+    default  qwen3.8:27b-mtp-q8_0   agent a5e031d8 wall    0.0  ttfb  0.024  in     0  cr  None  out    0  eff low
+
+--- llama-server cache lines ---
+slot print_timing: id  0 | task 1134 | prompt eval time =    2628.69 ms /   516 tokens (    5.09 ms per token,   196.30 tokens per second)
+slot print_timing: id  0 | task 1244 | prompt eval time =     409.31 ms /    28 tokens (   14.62 ms per token,    68.41 tokens per second)
+slot print_timing: id  0 | task 1277 | prompt eval time =    2506.09 ms /   516 tokens (    4.86 ms per token,   205.90 tokens per second)
+slot print_timing: id  0 | task 1388 | prompt eval time =     396.81 ms /    28 tokens (   14.17 ms per token,    70.56 tokens per second)
+slot print_timing: id  0 | task 1415 | prompt eval time =     140.84 ms /     4 tokens (   35.21 ms per token,    28.40 tokens per second)
+slot print_timing: id  1 | task 1416 | prompt eval time =   34467.34 ms /  7169 tokens (    4.81 ms per token,   207.99 tokens per second)
+slot print_timing: id  0 | task 1533 | prompt eval time =     714.45 ms /    28 tokens (   25.52 ms per token,    39.19 tokens per second)
+slot print_timing: id  1 | task 1532 | prompt eval time =     711.58 ms /    28 tokens (   25.41 ms per token,    39.35 tokens per second)
+--- mlx runner cache lines (this run) ---
+time=2026-09-05T01:29:15.851-07:00 level=INFO source=prefix_cache.go:125 msg="cache miss" total=6133 matched=1633 cached=0 left=6133
+time=2026-09-05T01:29:44.426-07:00 level=INFO source=speculate_stats.go:62 msg="speculative decode stats" iterations=22 drafted=84 accepted=84 acceptance=1.00 avg_draft=3.82 max_draft=5 avg_accepted=3
+time=2026-09-05T01:29:44.467-07:00 level=INFO source=prefix_cache.go:125 msg="cache hit" total=6266 matched=6238 cached=6238 left=28
+time=2026-09-05T01:29:47.190-07:00 level=INFO source=speculate_stats.go:62 msg="speculative decode stats" iterations=19 drafted=77 accepted=63 acceptance=0.82 avg_draft=4.05 max_draft=5 avg_accepted=3
+time=2026-09-05T01:29:49.506-07:00 level=INFO source=prefix_cache.go:125 msg="cache hit" total=6135 matched=6123 cached=1633 left=4502
+time=2026-09-05T01:30:11.531-07:00 level=INFO source=speculate_stats.go:62 msg="speculative decode stats" iterations=22 drafted=94 accepted=83 acceptance=0.88 avg_draft=4.27 max_draft=6 avg_accepted=3
+time=2026-09-05T01:30:11.552-07:00 level=INFO source=prefix_cache.go:125 msg="cache hit" total=6266 matched=6238 cached=6238 left=28
+time=2026-09-05T01:30:14.028-07:00 level=INFO source=speculate_stats.go:62 msg="speculative decode stats" iterations=16 drafted=68 accepted=45 acceptance=0.66 avg_draft=4.25 max_draft=6 avg_accepted=2
+=== DONE ===

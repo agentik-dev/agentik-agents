@@ -1,0 +1,59 @@
+--- free our MLX trial model (the chat server's qwen3.6 stays) ---
+--- localrig up unsloth (downloads ~29 GB on first run) ---
+localrig: unsloth already answering on :8888
+localrig: could not find the Unsloth API key in /Users/you/.local/state/agentroute/unsloth.log; set LOCALRIG_UNSLOTH_KEY
+  up after 1s
+--- unsloth log: backend/model/flags ---
+{"timestamp": "2026-09-05T04:55:20.179122Z", "level": "info", "event": "request_completed", "method": "GET", "path": "/v1/models", "status_code": 401, "process_time_ms": 
+  ok    router        http://127.0.0.1:8787 answered 200
+  ok    upstream      https://api.anthropic.com reachable (HEAD /api/hello -> 200)
+  ok    backend default ollama 0.33.2 at http://127.0.0.1:11434
+  ok      model       qwen3.8:27b-mtp-q8_0 present on default
+  ok    local policy  effort default=low max=medium; max_tokens<=8192; concurrency=2; strip_reminder=on; backends=default
+  ok    ledger        /Users/you/.local/state/agentroute/requests.jsonl
+
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+    import json,os; d=json.load(open(os.path.expanduser("~/.config/agentroute/backends.json"))); print(d["unsloth"]["auth"])
+                                ~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+FileNotFoundError: [Errno 2] No such file or directory: '/Users/you/.config/agentroute/backends.json'
+=== U0: smoke tool call via Unsloth /v1/messages ===
+
+  wall=300s
+=== U0b: prose throughput ===
+  out None tokens
+  wall=173s
+
+=== U1 ===
+  exit=0 wall=66s
+   {'is_error': False, 'subtype': 'success', 'num_turns': 2, 'duration_ms': 65711} result: 'gamma'
+   modelUsage: {'local/unsloth': (14194, 169)}
+  local    200  wall   60.1 ttfb 55.877 | local/unsloth          -> qwen3.8:27b-mtp-q8_0   | eff    low->low    | strip 0 | msgs 2 tools 3 | in 6253 out 99 cr None | agent None | auth bearer+x-api-key:Bearer oll
+  local    200  wall    5.2 ttfb  0.401 | local/unsloth          -> qwen3.8:27b-mtp-q8_0   | eff    low->low    | strip 0 | msgs 4 tools 3 | in 6342 out 70 cr None | agent None | auth bearer+x-api-key:Bearer oll
+
+=== U2 ===
+  exit=0 wall=9s
+   {'is_error': False, 'subtype': 'success', 'num_turns': 2, 'duration_ms': 8459} result: 'beta'
+   modelUsage: {'local/unsloth': (14193, 110)}
+  local    200  wall    7.3 ttfb  2.761 | local/unsloth          -> qwen3.8:27b-mtp-q8_0   | eff    low->low    | strip 0 | msgs 2 tools 3 | in 6254 out 98 cr None | agent None | auth bearer+x-api-key:Bearer oll
+  local    200  wall    1.0 ttfb   0.38 | local/unsloth          -> qwen3.8:27b-mtp-q8_0   | eff    low->low    | strip 0 | msgs 4 tools 3 | in 6342 out 12 cr None | agent None | auth bearer+x-api-key:Bearer oll
+
+=== U3 ===
+  exit=0 wall=9s
+   {'is_error': False, 'subtype': 'success', 'num_turns': 2, 'duration_ms': 8266} result: 'alpha'
+   modelUsage: {'local/unsloth': (14185, 110)}
+  local    200  wall    6.6 ttfb  2.599 | local/unsloth          -> qwen3.8:27b-mtp-q8_0   | eff    low->low    | strip 0 | msgs 2 tools 3 | in 6254 out 90 cr None | agent None | auth bearer+x-api-key:Bearer oll
+  local    200  wall    1.4 ttfb  0.383 | local/unsloth          -> qwen3.8:27b-mtp-q8_0   | eff    low->low    | strip 0 | msgs 4 tools 3 | in 6335 out 20 cr None | agent None | auth bearer+x-api-key:Bearer oll
+
+=== U4: two agents at once ===
+  both done wall=23s
+   {'is_error': False, 'subtype': 'success', 'num_turns': 2, 'duration_ms': 22299} result: 'gamma'
+   modelUsage: {'local/unsloth': (14192, 129)}
+   {'is_error': False, 'subtype': 'success', 'num_turns': 2, 'duration_ms': 17948} result: 'alpha'
+   modelUsage: {'local/unsloth': (14197, 114)}
+  local    200  wall    6.7 ttfb  2.588 | local/unsloth          -> qwen3.8:27b-mtp-q8_0   | eff    low->low    | strip 0 | msgs 2 tools 3 | in 6254 out 102 cr None | agent None | auth bearer+x-api-key:Bearer oll
+  local    200  wall   13.6 ttfb  9.517 | local/unsloth          -> qwen3.8:27b-mtp-q8_0   | eff    low->low    | strip 0 | msgs 2 tools 3 | in 6253 out 97 cr None | agent None | auth bearer+x-api-key:Bearer oll
+  local    200  wall   11.1 ttfb 10.486 | local/unsloth          -> qwen3.8:27b-mtp-q8_0   | eff    low->low    | strip 0 | msgs 4 tools 3 | in 6346 out 12 cr None | agent None | auth bearer+x-api-key:Bearer oll
+  local    200  wall    8.5 ttfb  6.704 | local/unsloth          -> qwen3.8:27b-mtp-q8_0   | eff    low->low    | strip 0 | msgs 4 tools 3 | in 6340 out 32 cr None | agent None | auth bearer+x-api-key:Bearer oll
+--- unsloth log: cache/timing tail ---
+=== DONE ===

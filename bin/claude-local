@@ -1,0 +1,179 @@
+#!/usr/bin/env bash
+#
+# claude-local — an interactive `claude` session on the claude.ai seat whose subagents
+# run on the local model (design/01-local-agent-lane.md).
+#
+# What it does, and nothing more:
+#   1. makes sure `agentroute` is answering on loopback (starts it detached if not);
+#   2. runs `agentroute --check` and REFUSES to start if anything is unknown;
+#   3. execs `claude` with ANTHROPIC_BASE_URL pointed at the router and NO credential
+#      variable, so the saved claude.ai login stays the active credential (the router
+#      forwards the OAuth bearer verbatim). ANTHROPIC_API_KEY / ANTHROPIC_AUTH_TOKEN are
+#      unset in the child if present, because either would replace the seat.
+#
+# Plain `claude` is untouched. Every extra argument is passed to claude unchanged.
+#
+# Knobs (all optional):
+#   AGENTROUTE_LISTEN         host:port the router binds (default 127.0.0.1:8787)
+#   AGENTROUTE_LOCAL_MODEL    what `local/default` resolves to (default qwen3.8:27b-mtp-q8_0)
+#   CLAUDE_LOCAL_SUBAGENT     model for subagents that name none (default: sonnet — D5 as
+#                             REVISED after measurement: the unnamed agents are the built-in
+#                             general-purpose and friends, which carry every tool in the
+#                             session — 54 tools = a 31k-token prompt = 3 minutes of prefill
+#                             per turn on the 27B, measured 2026-09-04. Local is for agents
+#                             whose tool list is small. "local/default" is still accepted if
+#                             you want it; "inherit" leaves them on the session model)
+#   CLAUDE_LOCAL_EXPLORE      "local" (default) overrides the built-in Explore agent with a
+#                             session-scoped definition on local/default at effort low — the
+#                             env var above does NOT reach the built-ins (docs: "Setting
+#                             CLAUDE_CODE_SUBAGENT_MODEL by itself doesn't change the model
+#                             the built-in Explore and Plan subagents run on"). "inherit"
+#                             leaves Explore on the session model. Plan is never overridden:
+#                             planning is judgment, and judgment stays on the seat.
+#   CLAUDE_LOCAL_NO_PREFLIGHT=1   skip step 2
+#
+# Known trade-off: while ANTHROPIC_BASE_URL is a non-Anthropic host, Claude Code disables
+# Remote Control and voice dictation. Use plain `claude` for sessions that need them.
+
+set -euo pipefail
+
+PROG="$(basename -- "$0")"
+SELF="$0"
+command -v readlink >/dev/null 2>&1 && SELF="$(readlink -f -- "$0" 2>/dev/null || printf '%s' "$0")"
+BIN_DIR="$(cd -- "$(dirname -- "$SELF")" && pwd)"
+REPO="$(cd -- "${BIN_DIR}/.." && pwd)"
+ROUTER_BIN="${BIN_DIR}/agentroute"
+
+LISTEN="${AGENTROUTE_LISTEN:-127.0.0.1:8787}"
+ROUTER_URL="http://${LISTEN}"
+STATE_DIR="${AGENTROUTE_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/agentroute}"
+SUBAGENT_MODEL="${CLAUDE_LOCAL_SUBAGENT:-sonnet}"
+EXPLORE_MODE="${CLAUDE_LOCAL_EXPLORE:-local}"
+
+# Session-scoped override of the built-in Explore agent (same tools, same read-only role),
+# pinned to the local model. Passed with --agents, which outranks user/project scope.
+# The built-in Explore agent is overridden with THIS REPO'S plugin/agents/local-explore.md, built
+# at launch rather than copied here. An inlined copy drifted: the copy was live through the
+# symlink while the agent file needed `claude plugin update`, so the two diverged silently.
+explore_agent_json() {
+    /usr/bin/python3 - "$REPO/plugin/agents/local-explore.md" <<'PY'
+import json, pathlib, sys
+raw = pathlib.Path(sys.argv[1]).read_text()
+_, fm, body = raw.split("---", 2)
+meta = {}
+for line in fm.splitlines():
+    if ":" in line and not line.startswith(" "):
+        k, v = line.split(":", 1)
+        meta[k.strip()] = v.strip()
+tools = [t.strip() for t in meta.get("tools", "Read, Glob, Grep").split(",") if t.strip()]
+print(json.dumps({"Explore": {
+    "description": ("Fast read-only search agent for broad fan-out searches. Runs on the LOCAL "
+                    "model (free) in this session. " + meta.get("description", "")),
+    "prompt": body.strip(),
+    "tools": tools,
+    "model": meta.get("model", "local/default"),
+    "effort": meta.get("effort", "low"),
+    "maxTurns": int(meta.get("maxTurns", 12)),
+}}))
+PY
+}
+
+die()  { printf '%s: %s\n' "$PROG" "$1" >&2; exit "${2:-1}"; }
+warn() { printf '%s: %s\n' "$PROG" "$1" >&2; }
+
+case "${1:-}" in
+    -h|--help)
+        awk 'NR>2 && /^#/ { sub(/^# ?/, ""); print; next } NR>2 { exit }' "$SELF"
+        printf '\nEvery other argument is passed to `claude` unchanged.\n'
+        exit 0 ;;
+    --version)
+        printf '%s (claude-code-agents); router: ' "$PROG"
+        "$(dirname -- "$SELF")/agentroute" --version 2>/dev/null || echo unknown
+        exit 0 ;;
+esac
+
+[[ -x "$ROUTER_BIN" ]] || die "agentroute not found next to this launcher (${ROUTER_BIN})"
+command -v claude >/dev/null 2>&1 || die "'claude' is not on PATH"
+
+router_up() { curl -fsS -m 2 -o /dev/null -I "${ROUTER_URL}/api/hello" 2>/dev/null; }
+
+STARTED=""   # the pid of a router this launcher started, until the exec hands it over
+stop_started() { if [[ -n "$STARTED" ]]; then kill "$STARTED" 2>/dev/null || true; fi; }
+
+# 1. router
+if ! router_up; then
+    # Another agentroute may be mid-start (or wedged): starting a second one gives two
+    # daemons, only one of which holds the port, and the loser is invisible.
+    if pgrep -f 'bin/agentroute --serve' >/dev/null 2>&1; then
+        warn "an agentroute process is already running but not answering on ${LISTEN}."
+        warn "check it with 'localrig status'; restart it with 'localrig restart-router'."
+        die "refusing to start a second router"
+    fi
+    mkdir -p -- "$STATE_DIR" && chmod 700 "$STATE_DIR"   # BSD chmod rejects a bare --
+    warn "starting agentroute on ${LISTEN} (log: ${STATE_DIR}/agentroute.log)"
+    # A router this launcher started is stopped if the launcher exits before it answers: one
+    # that never answers would make the next claude-local refuse. Once it answers, another
+    # claude-local may already be using it, so it is never this launcher's to stop; from
+    # then on, as after the exec, the router outlives this process.
+    trap stop_started EXIT   # bash runs it on a fatal signal too
+    # Detached as before (the subshell exits, so the router is reparented), but its pid is kept.
+    STARTED="$( nohup "$ROUTER_BIN" --serve >>"${STATE_DIR}/agentroute.log" 2>&1 & echo "$!" )"
+    for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
+        router_up && break
+        sleep 0.25
+    done
+    router_up || die "agentroute did not come up; see ${STATE_DIR}/agentroute.log"
+    STARTED=""   # answering: disarm the kill (see above)
+fi
+
+# 2. preflight — a read that fails is unknown, and unknown does not get a seat session on top of it
+if [[ -z "${CLAUDE_LOCAL_NO_PREFLIGHT:-}" ]]; then
+    # The table goes to stderr: in `-p --output-format json` mode stdout must carry only the envelope.
+    if ! "$ROUTER_BIN" --check >&2; then
+        warn "the rows marked FAIL above are what blocks the local lane; each carries its remedy."
+        warn "your options:"
+        warn "  fix the FAIL row, then rerun ${PROG}"
+        warn "  CLAUDE_LOCAL_SUBAGENT=sonnet ${PROG}   # start anyway; subagents run on sonnet, not locally"
+        warn "  CLAUDE_LOCAL_NO_PREFLIGHT=1 ${PROG}    # start anyway and let local calls fail"
+        die "preflight failed"
+    fi
+fi
+
+# 3. the seat must stay the credential
+for v in ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN; do
+    if [[ -n "${!v:-}" ]]; then
+        warn "unsetting ${v} for this session: a credential variable would replace the claude.ai seat"
+        unset "$v"
+    fi
+done
+
+EXTRA_ARGS=()
+if [[ "$EXPLORE_MODE" == "local" ]]; then
+    for a in "$@"; do
+        if [[ "$a" == "--agents" || "$a" == --agents=* ]]; then
+            warn "you passed --agents, so the built-in Explore is NOT overridden (set CLAUDE_LOCAL_EXPLORE=inherit to silence this)"
+            EXPLORE_MODE="inherit"
+            break
+        fi
+    done
+fi
+if [[ "$EXPLORE_MODE" == "local" ]]; then
+    if ! EXPLORE_AGENT=$(explore_agent_json 2>/dev/null) || [[ -z "$EXPLORE_AGENT" ]]; then
+        warn "could not build the Explore override from ${REPO}/plugin/agents/local-explore.md; leaving Explore on the session model"
+    else
+        EXTRA_ARGS+=(--agents "$EXPLORE_AGENT")
+    fi
+fi
+
+ENV_ARGS=(
+    "ANTHROPIC_BASE_URL=${ROUTER_URL}"
+    "CLAUDE_CODE_ATTRIBUTION_HEADER=0"          # keep the attribution block out of the local prompt cache key
+    "CLAUDE_CODE_ALWAYS_ENABLE_EFFORT=1"        # send effort even for model ids Claude Code does not recognise
+    "API_TIMEOUT_MS=${API_TIMEOUT_MS:-1800000}" # a 27B's long turn must not trip the 10-minute default
+)
+if [[ "$SUBAGENT_MODEL" != "inherit" ]]; then
+    ENV_ARGS+=("CLAUDE_CODE_SUBAGENT_MODEL=${SUBAGENT_MODEL}")   # D5 (revised): unnamed subagents default to sonnet, not local
+fi
+
+trap - EXIT   # from here the router outlives this process (see step 1)
+exec env "${ENV_ARGS[@]}" claude "${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"}" "$@"

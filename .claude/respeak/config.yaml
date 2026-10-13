@@ -1,0 +1,7 @@
+version: 3
+narrative: { default_mode: technical, tech_level: 4, auto_narrative: false }   # the owner only; installed from a local path
+gate:
+  enabled: false   # the cross-repo ledger's entry 2: no write-time gate; the globs declare the human paths
+  include: [README.md, DECISIONS.md, DESIGN.md, NICE_TO_HAVE.md, OPEN-QUESTIONS.md, HANDOFF.md,
+            "design/*.md", design/03-review-2026-09/local-keys-setup.md]   # not the raw-*.md translator input
+  fail_on: error
