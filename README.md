@@ -217,10 +217,11 @@ the OAuth bearer and every `anthropic-beta` value reach Anthropic unchanged), bi
 anything but loopback, or hold a credential of its own.
 
 **Two things about this that will bite you if nobody says them.** The launcher's built-in
-`Explore` override is a *copy* of `plugin/agents/local-explore.md`'s prompt, inlined in
-`bin/agentik agents local` so it can be passed with `--agents`. The copy is live immediately
-through the symlink while the agent file needs `claude plugin update`, so the two drift;
-if you edit one, edit both. And `~/.config/agentik/agents/route/backends.json` holds the Unsloth API
+`Explore` override is built at launch: `bin/claude-local` (`explore_agent_json`) reads
+`plugin/agents/local-explore.md` from this checkout and passes its prompt and tools with
+`--agents`. An edit to that file reaches the override on the next launch through the
+symlink, while the installed plugin's `agents:local-explore` needs `claude plugin update`,
+so the two can differ until you update the plugin. And `~/.config/agentik/agents/route/backends.json` holds the Unsloth API
 key in cleartext at mode 600. It is per-machine state, deliberately outside git and
 outside sops, so a rebuild re-creates it with `agentik agents rig up`; do not freeze it into a
 dotfiles repo without encrypting it first.
