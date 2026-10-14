@@ -107,8 +107,14 @@ thread through a cloud gateway; changing Ollama's LAN duty for the chat server/L
   optional `/v1/messages/count_tokens` (falls back gracefully), `HEAD /api/hello`,
   optional `GET /v1/models` (discovery off unless `CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1`,
   and only IDs containing "claude"/"anthropic" are shown). Forward `anthropic-beta` and
-  `anthropic-version` verbatim; stream unbuffered; a stream silent for 300 s is aborted
-  (`API_FORCE_IDLE_TIMEOUT` overrides); `API_TIMEOUT_MS` default 600000.
+  `anthropic-version` verbatim; stream unbuffered. Watchdogs ("Enterprise network
+  configuration", code.claude.com/docs/en/network-config, "Streaming idle watchdogs", as
+  of 2026-10-14): on the direct Anthropic API, 180 s to first byte, 300 s between parsed
+  events and 180 s between bytes; behind a custom `ANTHROPIC_BASE_URL` such as this
+  router, no first-byte deadline, and 300 s for both the event and byte watchdogs
+  (`CLAUDE_STREAM_IDLE_TIMEOUT_MS`, `CLAUDE_BYTE_STREAM_IDLE_TIMEOUT_MS`; the body idle
+  timeout, `API_FORCE_IDLE_TIMEOUT`, does not run on these connections). `API_TIMEOUT_MS`
+  default 600000: read from the 2.1.261 docs, not re-checked against a current page.
 - Seat semantics (docs "llm-gateway"): "Setting only [`ANTHROPIC_BASE_URL`], without a
   gateway credential, doesn't replace the subscription … a saved claude.ai login remains
   the active credential." Proved in T5b. Cost of that mode ("Connect Claude Code to an
@@ -125,6 +131,8 @@ thread through a cloud gateway; changing Ollama's LAN duty for the chat server/L
   third-party upstream set `CLAUDE_CODE_ATTRIBUTION_HEADER=0` so it never enters the
   local prompt cache key.
 - Concurrency: default 20 subagents (`CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS`); spawn depth 3.
+  Both read from the 2.1.261 docs and not re-checked against a current page or
+  re-measured (NICE_TO_HAVE.md).
 
 ### 2.4 Ollama's Anthropic compatibility (server 0.32.12 running; brew has 0.33.2; 0.33.3 out 2026-09-02)
 
