@@ -47,7 +47,10 @@ import threading
 import time
 
 # A shard's own ceiling is checked between requests, so the request that trips
-# it still completes. Measured overshoot was 1.2x; carry margin above that.
+# it still completes. Measured overshoot was 1.2x on a $0.01 cap; carry margin above
+# that. The overshoot is one response's cost plus any running subagents' ("How the
+# agent loop works", code.claude.com/docs/en/agent-sdk/agent-loop, Budget headroom,
+# as of 2026-10-14), so it scales with response size, not with the cap.
 OVERSHOOT_FACTOR = 1.35
 
 # Below this ceiling a shard cannot do useful work, and a run that trips its

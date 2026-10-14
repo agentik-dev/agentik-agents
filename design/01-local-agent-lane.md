@@ -107,18 +107,32 @@ thread through a cloud gateway; changing Ollama's LAN duty for the chat server/L
   optional `/v1/messages/count_tokens` (falls back gracefully), `HEAD /api/hello`,
   optional `GET /v1/models` (discovery off unless `CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1`,
   and only IDs containing "claude"/"anthropic" are shown). Forward `anthropic-beta` and
-  `anthropic-version` verbatim; stream unbuffered; a stream silent for 300 s is aborted
-  (`API_FORCE_IDLE_TIMEOUT` overrides); `API_TIMEOUT_MS` default 600000.
+  `anthropic-version` verbatim; stream unbuffered. Watchdogs ("Enterprise network
+  configuration", code.claude.com/docs/en/network-config, "Streaming idle watchdogs", as
+  of 2026-10-14): on the direct Anthropic API, 180 s to first byte, 300 s between parsed
+  events and 180 s between bytes; behind a custom `ANTHROPIC_BASE_URL` such as this
+  router, no first-byte deadline, and 300 s for both the event and byte watchdogs
+  (`CLAUDE_STREAM_IDLE_TIMEOUT_MS`, `CLAUDE_BYTE_STREAM_IDLE_TIMEOUT_MS`; the body idle
+  timeout, `API_FORCE_IDLE_TIMEOUT`, does not run on these connections). `API_TIMEOUT_MS`
+  default 600000: read from the 2.1.261 docs, not re-checked against a current page.
 - Seat semantics (docs "llm-gateway"): "Setting only [`ANTHROPIC_BASE_URL`], without a
   gateway credential, doesn't replace the subscription … a saved claude.ai login remains
-  the active credential." Proved in T5b. Cost of that mode: **Remote Control and voice
-  dictation are disabled** while the base URL is a non-Anthropic host.
+  the active credential." Proved in T5b. Cost of that mode ("Connect Claude Code to an
+  LLM gateway", code.claude.com/docs/en/llm-gateway-connect, as of 2026-10-14): **Remote
+  Control is disabled** while the base URL is a non-Anthropic host. Voice dictation is
+  disabled only while `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN` or an `apiKeyHelper` is
+  active, which the launcher clears, so the docs say it stays on (not re-tested). A
+  credential, unlike a bare base URL, replaces the login and ends plan limits ("Other LLM
+  gateways", code.claude.com/docs/en/llm-gateway), and Anthropic does not support
+  non-Claude models behind a gateway, so this lane runs outside that support.
 - `ANTHROPIC_DEFAULT_HAIKU_MODEL` is "also used for background functionality" — the
   reason the local model must not be aliased as `haiku`.
 - Attribution block: stable since v2.1.181 behind a custom base URL, but for a
   third-party upstream set `CLAUDE_CODE_ATTRIBUTION_HEADER=0` so it never enters the
   local prompt cache key.
 - Concurrency: default 20 subagents (`CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS`); spawn depth 3.
+  Both read from the 2.1.261 docs and not re-checked against a current page or
+  re-measured (NICE_TO_HAVE.md).
 
 ### 2.4 Ollama's Anthropic compatibility (server 0.32.12 running; brew has 0.33.2; 0.33.3 out 2026-09-02)
 
@@ -144,7 +158,8 @@ thread through a cloud gateway; changing Ollama's LAN duty for the chat server/L
   shrinking countdown then lands in the prompt prefix, so llama.cpp logs "forcing
   full prompt re-processing" on every turn of a hybrid model. Measured on 0.33.2: turn
   two with the reminder present re-prefilled all 7,201 tokens in 35.6 s; with the
-  reminder absent it reused 7,106 of 7,133 cached tokens and prefilled in 0.38 s.
+  reminder absent it reused 7,106 of 7,133 cached tokens and prefilled in 0.38 s
+  (best case, not a guarantee: the two runs also differed in system-prompt length (3,682 against 3,629 characters) and were never compared directly, and 0.38 s was measured under `--exclude-dynamic-system-prompt-sections --setting-sources user`, not the flags the launcher uses (§14 Cache B)).
   Ollama's own `ollama launch claude` sets `CLAUDE_CODE_TOTAL_TOKENS_REMINDER=off` for
   exactly this reason (`cmd/launch/claude.go`). This design strips the message in the
   router for local routes only, so the main thread keeps its reminder.
@@ -349,7 +364,7 @@ Results arrive as the same JSON envelope; `claude-costs` books them as lane "loc
 | Sampling | leave Ollama defaults (temp 1.0, top_p 0.95, top_k 20, min_p 0) | equal to Qwen's official thinking-mode set; Claude Code sends none |
 | Context | leave 262,144 (KV is cheap on a 3:1 hybrid; q8 loads at 31.5 GB with full ctx) | per-request `num_ctx` can't be set on the Anthropic path anyway |
 | Prompt size | budget **≤ 15k tokens** per local agent turn; **tool count is the lever** — a local agent's `tools:` list should stay under ~8 | tool schemas ARE the prompt: 3 tools ≈ 5.4k tokens (a custom `local-*` agent), 50 tools ≈ 26k (built-in Explore under `_FORCE`, 146 s first turn), 54 tools ≈ 31k (`general-purpose`, 172 s first turn and again 180 s on turn two); the router ledger records `n_tools` and `input_tokens` per request so an oversize agent is visible |
-| Prompt cache | Ollama ≥ 0.33.0 (0.33.2 measured) **and** the `<total_tokens>` reminder stripped for local routes | measured on 0.33.2: turn two = 35.6 s with the reminder, **0.38 s** without (7,106 of 7,133 tokens cached). ⚠ measured with `--exclude-dynamic-system-prompt-sections --setting-sources user` and an API-key env — NOT the flag set `claude-local` uses — and one production run (§14 Live C3) re-prefilled in full on turn two *with* the strip active. Best case, not a guarantee |
+| Prompt cache | Ollama ≥ 0.33.0 (0.33.2 measured) **and** the `<total_tokens>` reminder stripped for local routes | measured on 0.33.2: turn two = 35.6 s with the reminder, **0.38 s** without (7,106 of 7,133 tokens cached). ⚠ measured with `--exclude-dynamic-system-prompt-sections --setting-sources user` and an API-key env — NOT the flag set `claude-local` uses —, the two runs' system prompts differed (3,682 against 3,629 characters) and were never compared directly (§14 Cache B), and one production run (§14 Live C3) re-prefilled in full on turn two *with* the strip active. Best case, not a guarantee |
 | Concurrency | 1 (router semaphore); at most 2 local agents in flight from Fable | single slot; a second agent's prefill invalidates the first's checkpoints; 4-way tests gave 1.39× at best (models.yaml) |
 | Output cap | router clamps `max_tokens` to 8192 for local | 32000 × 15 tok/s = 35 min worst case |
 | Keep-alive | `OLLAMA_KEEP_ALIVE=30m` (or `-1`) in the LaunchAgent | 5 m default evicts between agent calls; reload ≈ 15–26 s; ties to design/35 D5 sleep policy |
@@ -471,9 +486,15 @@ entry; rollback = flip `AGENTROUTE_LOCAL_URL` back.
 - **Attribution:** every subagent request carries `x-claude-code-agent-id` (lowercase, seen on
   the wire in T6); the main thread's rows carry only `X-Claude-Code-Session-Id`; the ledger plus
   `claude-costs --lane local` answer "what did that agent cost in wall time and tokens".
-- **What the session loses:** Remote Control and voice dictation (documented behaviour of
-  a non-Anthropic base URL). If a session needs Remote Control, use plain `claude` plus
-  the out-of-process lane (§5.5).
+- **What the session loses** under the loopback router (a non-Anthropic base URL, no
+  credential; "Connect Claude Code to an LLM gateway" and "How Claude Code uses prompt
+  caching", code.claude.com/docs, as of 2026-10-14): Remote Control; the first-byte
+  deadline (it does not run behind a custom base URL; the 300 s byte and event
+  watchdogs still do); MCP tool search, so MCP tools load upfront; and fast mode's
+  availability check still goes to the Anthropic API rather than the router. Voice
+  dictation is keyed on a credential (a key, token or helper), not on the base URL, so
+  it stays on while the launcher keeps those unset. If a session needs Remote Control,
+  use plain `claude` plus the out-of-process lane (§5.5).
 - **Sleep:** an unattended long session on this Mac still hits design/35 D5 (pmset sleep
   at ~11 min). Unresolved there; unchanged here.
 
@@ -515,7 +536,9 @@ Original list:
    the parent's rows stay upstream.
 4. A 3-tool local turn prefills in < 60 s and its second turn prefills in < 2 s. Passed
    2026-09-04 on 0.33.2 with the reminder stripped (0.38 s); fails with it present (35.6 s),
-   so this check also guards the router's strip rule.
+   so this check also guards the router's strip rule. (The pair is a best case, not a
+   direct comparison: the runs differed in system-prompt length, 3,682 against 3,629
+   characters, and 0.38 s was measured under flags the launcher does not use; §14 Cache B.)
 5. A local run with no effort in the request gets `effort: low` injected (router test),
    and `max_tokens` is clamped.
 6. `claude-costs` shows three lanes; the local lane is $0 with token and wall totals.

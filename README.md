@@ -52,8 +52,11 @@ first. All four are on `PATH` (`agentik agents api`, `agentik agents fanout`,
 | See what every agent on this Mac is doing now | `agentik agents status [--json] [--watch N] [--all] [--since MIN]` | One row per seat (a session the session plugin tracks) and per helper under it, in lane `seat`, `helper` or `local`, plus each `agentik agents api` run in lane `api` (nested under the seat that launched it): model, elapsed, turns, context, cost, last tool, state. Read-only; ids, names and numbers only, never prompt or tool-input text. Exit 1 when the session plugin's state dir cannot be read. |
 
 **The one boundary that matters: profiles are strictly read-only.** A
-`--profile` delegate has only `Read`, `Grep`, `Glob` — no `Bash`, no `Edit`, no
-`Write` (enforced by `--tools`; see below). So delegation is for *analysis that
+`--profile` delegate is allow-listed `Read`, `Grep`, `Glob` — no `Bash`, no `Edit`, no
+`Write` (enforced by `--tools`; see below). Under `--bare` its working toolset is
+`Read` alone: a probe of 2026-08-19 found Grep and Glob absent (observed; the Claude
+Code version was not recorded, and a re-test on the current CLI is filed in
+`NICE_TO_HAVE.md`). So delegation is for *analysis that
 produces a report*, never for *doing the work*. A delegate cannot edit a file,
 run a test, execute a command, or verify anything by running it. If the task
 needs any of that, do it yourself in this session or drop `--profile` (which
@@ -64,7 +67,10 @@ something that requires execution will typically reach for `Bash`, be refused,
 and thrash to a useless placeholder answer — burning full cost. Confirmed
 repeatedly, including in this repo's own investigation: the delegate that needed
 to run `claude --help` degenerated three times; the one handed the captured
-output succeeded. So:
+output succeeded. (Observed in August 2026 on the Claude Code of the day; the
+version was not recorded, no Claude Code page documents the behaviour, and the
+changelog has changed how denials reach subagents and `-p` runs since, so a
+re-test on the current CLI is filed in `NICE_TO_HAVE.md`.) So:
 
 - **Give the delegate the facts it would otherwise execute for.** Capture
   command output to a file, add its directory with `--add-dir`, and point the
@@ -194,7 +200,8 @@ agentik agents local  →  the router 127.0.0.1:8787  →  claude-* models: api.
 
 - Drops Claude Code's `<total_tokens>…</total_tokens>` reminder system message. It
   changes every turn and defeats Ollama's prompt cache on this hybrid model: turn two
-  prefilled in **35.6 s with it, 0.38 s without**. Upstream requests keep it.
+  prefilled in **35.6 s with it, 0.38 s without** (best case, not a guarantee: the two runs also differed in system-prompt length (3,682 against 3,629 characters) and were never compared directly, and 0.38 s was measured under `--exclude-dynamic-system-prompt-sections --setting-sources user`, not the flags the launcher uses (design/01 §14 Cache B)). Upstream
+  requests keep it.
 - Injects `output_config.effort: low` when absent and clamps anything above `medium`.
   Qwen 3.8 defaults to `xhigh` reasoning and spent **4,299 thinking tokens / 4m56s** on a
   three-line file when unpinned; at `low` the same task took 45 s.
@@ -211,10 +218,11 @@ the OAuth bearer and every `anthropic-beta` value reach Anthropic unchanged), bi
 anything but loopback, or hold a credential of its own.
 
 **Two things about this that will bite you if nobody says them.** The launcher's built-in
-`Explore` override is a *copy* of `plugin/agents/local-explore.md`'s prompt, inlined in
-`bin/agentik agents local` so it can be passed with `--agents`. The copy is live immediately
-through the symlink while the agent file needs `claude plugin update`, so the two drift;
-if you edit one, edit both. And `~/.config/agentik/agents/route/backends.json` holds the Unsloth API
+`Explore` override is built at launch: the `agentik agents local` launcher (`explore_agent_json`) reads
+`plugin/agents/local-explore.md` from this checkout and passes its prompt and tools with
+`--agents`. An edit to that file reaches the override on the next launch through the
+symlink, while the installed plugin's `agents:local-explore` needs `claude plugin update`,
+so the two can differ until you update the plugin. And `~/.config/agentik/agents/route/backends.json` holds the Unsloth API
 key in cleartext at mode 600. It is per-machine state, deliberately outside git and
 outside sops, so a rebuild re-creates it with `agentik agents rig up`; do not freeze it into a
 dotfiles repo without encrypting it first.
@@ -229,7 +237,10 @@ its turns under ~15k tokens; the ledger's `n_tools` and `input_tokens` columns s
 agent is oversize.
 
 **Trade-offs to know:** while `ANTHROPIC_BASE_URL` is a non-Anthropic host, Claude Code
-disables Remote Control and voice dictation — use plain `claude` for those sessions.
+disables Remote Control — use plain `claude` for those sessions. Voice dictation is
+disabled only while a key, token or `apiKeyHelper` is active, which the launcher keeps
+unset ("Connect Claude Code to an LLM gateway",
+<https://code.claude.com/docs/en/llm-gateway-connect>, as of 2026-10-14).
 Local agents get the same trust rules as API delegates: `Read` is not confined to
 `--add-dir`, prompt injection through read content is the threat, and a smaller model is
 *more* suggestible. Never point a local agent at untrusted content. The seat still pays
@@ -687,6 +698,21 @@ git diff | agentik agents api -p "Review this diff; list only actionable issues"
 3. `~/.config/claude-code/api-key` — plaintext fallback, mode 600, consulted only
    when the SOPS file is absent.
 
+### Which credential each lane uses, and what that does to plan limits
+
+Billing follows the credential, not the tool. As of 2026-10-14:
+
+| Lane | Credential | Billed to |
+| --- | --- | --- |
+| API (`agentik agents api`, `agentik agents fanout`) | the key above, exported to `claude --bare -p` | the key's Console organization. It never draws on plan limits: a `-p` run always uses `ANTHROPIC_API_KEY` when it is set, and `--bare` never reads the login ("Authentication", <https://code.claude.com/docs/en/authentication>). A Max or Team plan's monthly API credits cover it only when the key is from the plan's linked Console organization ("Monthly API credits for Max and Team plans", <https://support.claude.com/en/articles/17154008>). |
+| Seat (interactive `claude`) | the claude.ai login | plan limits. The monthly API credits never cover interactive Claude Code. |
+| Local (`agentik agents local`) | the claude.ai login; the launcher sets only `ANTHROPIC_BASE_URL` and keeps every key unset | nothing for local routes; the session's Claude routes draw on plan limits, as on the seat lane. |
+
+A plain `claude -p` or Agent SDK run on the plan login, with no key in its
+environment, also draws on plan limits: Anthropic paused the changes announced for
+15 June 2026 ("Use the Claude Agent SDK with your Claude plan",
+<https://support.claude.com/en/articles/15036540-use-the-agent-sdk-with-your-claude-plan>).
+
 ## Delegated runs (role profiles)
 
 Profiles are canned flag sets for agent-style delegation. All three are
@@ -856,7 +882,13 @@ Measured behaviour with a deliberately tight cap ($0.01 on a six-file task):
 
 Two consequences. The cap is evaluated *between* model requests, so the request
 that crosses it still completes — treat it as a bound on new work, not an exact
-stop. And a run that trips the cap returns **nothing**: you pay for the partial
+stop. The Agent SDK page "How the agent loop works"
+(<https://code.claude.com/docs/en/agent-sdk/agent-loop>, "Budget headroom", as of
+2026-10-14) gives the reason: spend is a client-side estimate from each response's
+usage, compared with the cap after the response arrives, so spend can pass the cap
+by the cost of that one response plus whatever running subagents spend before they
+stop. The overshoot therefore scales with the size of the last response, not with
+the cap: the 1.2× above is one measurement on a $0.01 cap, not a fixed ratio. And a run that trips the cap returns **nothing**: you pay for the partial
 work and get no result. **A tight cap is the expensive choice, not the safe
 one** — which is why profiles default to a generous `$10` ceiling meant to catch
 runaway loops rather than to shape normal spend.
@@ -932,7 +964,10 @@ bin/agentik agents fanout --budget-usd 2.00 --profile review -j 4 \
   a viable reserve is reported as `skipped_budget`, never silently dropped.
 - **The per-shard ceiling is deflated by 1.35x** because the wrapper's own
   ceiling is checked *between* requests — the request that crosses it still
-  completes (measured 1.2x overshoot).
+  completes (measured 1.2x overshoot on a $0.01 cap). The overshoot is one
+  response plus any running subagents ("How the agent loop works", Budget
+  headroom, as of 2026-10-14), so it scales with response size; 1.35x is a margin
+  for small caps, not a bound.
 - **Results are checked for substance, not just schema.** `is_error: false` and
   a schema-valid payload are not enough; see the degenerate-shard finding below.
   Statuses: `ok`, `degenerate`, `error`, `budget_exhausted`, `skipped_budget`,
@@ -962,11 +997,16 @@ bin/agentik agents costs --check-prices  # print the price table for review
 - **Subscription lane — equivalent dollars.** Interactive `claude` work covered
   by the seat, from the per-model usage Claude Code records in `~/.claude.json`,
   priced at API list rates. No money left the account; it consumed seat
-  capacity. Measured here: **$3.13 of API spend alongside $155.78 of
-  seat-absorbed work** — every $1 of cash accompanies ~$50 the seat absorbs.
+  capacity. Measured here on 2026-08-13: **$3.13 of API spend alongside $155.78 of
+  seat-absorbed work** — every $1 of cash accompanies ~$50 the seat absorbs. The
+  seat figure is a lower bound: the tool sums each project's `lastModelUsage`
+  field, and no Claude Code page says whether that field is cumulative or holds
+  only the project's last session; it also prices the seat's cache writes at the
+  five-minute 1.25×, while a subscription's main conversation gets one-hour writes
+  at 2× ("How Claude Code uses prompt caching", as of 2026-10-14).
 - **Prompt-cache saving, API lane only.** The same tokens repriced with every
-  cached token billed as fresh input. Measured on the fan-out: **$4.49 uncached
-  vs $3.12 actual — the cache saved 30%.**
+  cached token billed as fresh input. Measured on the fan-out (2026-08-13): **$4.49
+  uncached vs $3.12 actual — the cache saved 30%.**
 
 **The price table self-checks against real billing.** It is a copy of a
 published page, so it can be wrong for a given account. Every run compares what
@@ -1022,7 +1062,7 @@ smuggle some in.
 ### Token efficiency
 
 `agentik agents costs` derives the ratios that point at a specific lever, and pairs each
-with advice naming what to change. Measured on the eight-shard fan-out:
+with advice naming what to change. Measured on the eight-shard fan-out of 2026-08-13:
 
 | Measure | Here | Why it matters |
 | --- | --- | --- |
@@ -1130,8 +1170,16 @@ cost real time, in the order you hit them:
 
 Repeated calls with an identical prefix reuse the cache: a measured pair of
 identical *trivial* `review` runs cost **$0.0133** then **$0.0055**
-(`cache_creation: 0`, `cache_read: 4475`). Cache reads bill at ~0.1× input
-versus ~1.25× for a write, which is why every profile sets
+(`cache_creation: 0`, `cache_read: 4475`). Cache reads bill at 0.1× input
+(0.05× on Opus 5.5 and Sonnet 5.5, 0.025× on Fable 5.1) versus 1.25× for a
+five-minute write and 2× for a one-hour write (Anthropic "Pricing" page, as of
+2026-10-14). The API lane's `--bare -p` runs authenticate with a key, and on a key
+Claude Code gives the main conversation, subagents, forks and compaction the
+five-minute lifetime ("How Claude Code uses prompt caching",
+<https://code.claude.com/docs/en/prompt-caching>, as of 2026-10-14), so
+`agentik agents costs` prices the API lane's writes at 1.25×. Only a subscription
+session within plan usage gets one-hour writes, on its main conversation. This is
+why every profile sets
 `--exclude-dynamic-system-prompt-sections` — it keeps cwd, env, and git status
 out of the cached system prefix.
 

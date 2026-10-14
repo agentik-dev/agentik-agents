@@ -33,7 +33,10 @@
 #   CLAUDE_LOCAL_NO_PREFLIGHT=1   skip step 2
 #
 # Known trade-off: while ANTHROPIC_BASE_URL is a non-Anthropic host, Claude Code disables
-# Remote Control and voice dictation. Use plain `claude` for sessions that need them.
+# Remote Control. Voice dictation is disabled only while a key, token or apiKeyHelper is
+# active, which step 3 keeps unset ("Connect Claude Code to an LLM gateway",
+# code.claude.com/docs/en/llm-gateway-connect, as of 2026-10-14). Use plain `claude` for
+# sessions that need Remote Control.
 
 set -euo pipefail
 

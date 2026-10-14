@@ -804,8 +804,10 @@ def main() -> int:
               "a helper's cost sums each distinct message.id once (a repeated id is not billed twice)",
               str(c1))
         c3 = g(H3, "cost_usd")
-        check(isinstance(c3, float) and abs(c3 - 0.0014) < 1e-9,
-              "sonnet 5.5 is priced at 2/10 with cache reads at 0.20/M", str(c3))
+        # sonnet 5.5: 100*2 + 100*10 + 1000*0.10 = 1300 -> 0.0013 (cache read 0.05x input,
+        # Anthropic Pricing page as of 2026-10-14)
+        check(isinstance(c3, float) and abs(c3 - 0.0013) < 1e-9,
+              "sonnet 5.5 is priced at 2/10 with cache reads at 0.10/M", str(c3))
         check(g(H1, "turns") == 2 and g(H1, "context") == 120010 and g(H1, "window") is None,
               "no builders row: turns count distinct messages, context is the newest's in+cache, "
               "window null", str((g(H1, "turns"), g(H1, "context"), g(H1, "window"))))

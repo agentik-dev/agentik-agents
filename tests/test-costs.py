@@ -336,7 +336,7 @@ def main() -> int:
         check(cc.rates(m) == want, f"{m} is priced at {want[0]:g}/{want[1]:g}", str(cc.rates(m)))
         check(cc.rates(m + "[1m]") == want, f"{m}[1m] folds into {m}", str(cc.rates(m + "[1m]")))
     one_m_read = {"in": 0, "out": 0, "cr": 1_000_000, "cw": 0}
-    for m, want in (("claude-opus-5-5", 0.20), ("claude-sonnet-5-5", 0.20), ("claude-fable-5-1", 0.25),
+    for m, want in (("claude-opus-5-5", 0.20), ("claude-sonnet-5-5", 0.10), ("claude-fable-5-1", 0.25),
                     ("claude-haiku-5-5", 0.10 * cc.CACHE_READ_MULT),
                     ("claude-sonnet-5", 3.00 * cc.CACHE_READ_MULT)):
         got = cc.predicted_cost(m, one_m_read)
