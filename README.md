@@ -1130,8 +1130,16 @@ cost real time, in the order you hit them:
 
 Repeated calls with an identical prefix reuse the cache: a measured pair of
 identical *trivial* `review` runs cost **$0.0133** then **$0.0055**
-(`cache_creation: 0`, `cache_read: 4475`). Cache reads bill at ~0.1× input
-versus ~1.25× for a write, which is why every profile sets
+(`cache_creation: 0`, `cache_read: 4475`). Cache reads bill at 0.1× input
+(0.05× on Opus 5.5 and Sonnet 5.5, 0.025× on Fable 5.1) versus 1.25× for a
+five-minute write and 2× for a one-hour write (Anthropic "Pricing" page, as of
+2026-10-14). The API lane's `--bare -p` runs authenticate with a key, and on a key
+Claude Code gives the main conversation, subagents, forks and compaction the
+five-minute lifetime ("How Claude Code uses prompt caching",
+<https://code.claude.com/docs/en/prompt-caching>, as of 2026-10-14), so
+`agentik agents costs` prices the API lane's writes at 1.25×. Only a subscription
+session within plan usage gets one-hour writes, on its main conversation. This is
+why every profile sets
 `--exclude-dynamic-system-prompt-sections` — it keeps cwd, env, and git status
 out of the cached system prefix.
 
