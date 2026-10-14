@@ -218,7 +218,7 @@ the OAuth bearer and every `anthropic-beta` value reach Anthropic unchanged), bi
 anything but loopback, or hold a credential of its own.
 
 **Two things about this that will bite you if nobody says them.** The launcher's built-in
-`Explore` override is built at launch: `bin/claude-local` (`explore_agent_json`) reads
+`Explore` override is built at launch: the `agentik agents local` launcher (`explore_agent_json`) reads
 `plugin/agents/local-explore.md` from this checkout and passes its prompt and tools with
 `--agents`. An edit to that file reaches the override on the next launch through the
 symlink, while the installed plugin's `agents:local-explore` needs `claude plugin update`,
