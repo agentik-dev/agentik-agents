@@ -44,7 +44,11 @@ import sys
 # USD per million tokens, (input, output), by canonical model name.
 # Source: Anthropic first-party API list pricing.
 # The 5.x rows are the claude-api skill's table (cached 2026-10-06, first-party list
-# rates; packet a-s3 ruling 9).
+# rates; packet a-s3 ruling 9), checked row by row against the Anthropic "Pricing"
+# page (platform.claude.com/docs/en/about-claude/pricing) as of 2026-10-14.
+# claude-sonnet-5 stays at the $3/$15 this account was billed (see INTRO_PRICING),
+# although the page now lists $2/$10 as its standard price.
+# claude-haiku-5-5 is the tier for prompts up to 100,000 tokens; see LONG_PROMPT_TIERS.
 PRICES = {
     "claude-fable-5-1": (10.00, 50.00),
     "claude-opus-5-5": (4.00, 20.00),
@@ -68,8 +72,20 @@ PRICES = {
 # reads cache at the multiplier.
 CACHE_READ_RATES = {
     "claude-opus-5-5": 0.20,
-    "claude-sonnet-5-5": 0.20,
+    "claude-sonnet-5-5": 0.10,
     "claude-fable-5-1": 0.25,
+}
+# (0.05x input on Opus 5.5 and Sonnet 5.5, 0.025x on Fable 5.1; Pricing page,
+# as of 2026-10-14.)
+
+# Prompt-length tiers: a request whose prompt (input + cache reads + cache writes)
+# is over the threshold pays these (input, output) rates instead. Only Haiku 5.5
+# has one (Pricing page, "Long context pricing", as of 2026-10-14). It is recorded,
+# not applied: the usage log holds per-run totals, not each request's prompt length,
+# so predicted_cost bills the base tier and the price-table self-check withholds the
+# cache figure when a long-prompt run makes it disagree with the bill.
+LONG_PROMPT_TIERS = {
+    "claude-haiku-5-5": (100_000, (0.50, 2.50)),
 }
 
 # Introductory / promotional rates, by model. Deliberately empty.
@@ -85,12 +101,18 @@ INTRO_PRICING: dict[str, dict] = {}
 
 # Cache multipliers against the model's input rate.
 #
-# CACHE_WRITE_MULT assumes a 5-minute-TTL write (1.25x); a 1-hour-TTL write is
-# 2.0x, and the usage log records only a cache-creation token count, not the
-# TTL, so this cannot be derived per row (C4). Likewise canonical() folds the
-# `[1m]` long-context variant into its base model, though it bills a premium
-# above 200K tokens (C5). Both are deliberately left as documented assumptions
-# rather than guessed: the per-model price-table self-check (price_table_drift,
+# CACHE_WRITE_MULT is the 5-minute-TTL write (1.25x); a 1-hour-TTL write is
+# 2.0x. The API lane's `--bare -p` runs authenticate with a key, and Claude Code
+# gives a key's main conversation, subagents, forks and compaction the 5-minute
+# lifetime ("How Claude Code uses prompt caching", code.claude.com/docs/en/
+# prompt-caching, as of 2026-10-14), so 1.25x is the API lane's rate. Only a
+# subscription session within plan usage gets 1-hour writes on its main
+# conversation; the usage log records a cache-creation token count, not the TTL
+# (C4). canonical() folds the `[1m]` variant into its base model, which is
+# correct: Claude 4.6 and later bill the whole 1M window at standard rates, with
+# no premium above 200K (Pricing page, "Long context pricing", as of 2026-10-14;
+# C5). Only Haiku 5.5 prices by prompt length (LONG_PROMPT_TIERS). These stay
+# documented assumptions rather than guesses: the per-model price-table self-check (price_table_drift,
 # checked per model so errors cannot cancel across models) withholds the cache
 # figure whenever the assumed rate disagrees with what was actually billed by
 # more than 2%. So a TTL- or variant-driven mispricing fails safe -- the tool
