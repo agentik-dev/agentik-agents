@@ -229,7 +229,10 @@ its turns under ~15k tokens; the ledger's `n_tools` and `input_tokens` columns s
 agent is oversize.
 
 **Trade-offs to know:** while `ANTHROPIC_BASE_URL` is a non-Anthropic host, Claude Code
-disables Remote Control and voice dictation — use plain `claude` for those sessions.
+disables Remote Control — use plain `claude` for those sessions. Voice dictation is
+disabled only while a key, token or `apiKeyHelper` is active, which the launcher keeps
+unset ("Connect Claude Code to an LLM gateway",
+<https://code.claude.com/docs/en/llm-gateway-connect>, as of 2026-10-14).
 Local agents get the same trust rules as API delegates: `Read` is not confined to
 `--add-dir`, prompt injection through read content is the threat, and a smaller model is
 *more* suggestible. Never point a local agent at untrusted content. The seat still pays

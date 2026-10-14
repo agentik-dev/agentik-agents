@@ -111,8 +111,14 @@ thread through a cloud gateway; changing Ollama's LAN duty for the chat server/L
   (`API_FORCE_IDLE_TIMEOUT` overrides); `API_TIMEOUT_MS` default 600000.
 - Seat semantics (docs "llm-gateway"): "Setting only [`ANTHROPIC_BASE_URL`], without a
   gateway credential, doesn't replace the subscription … a saved claude.ai login remains
-  the active credential." Proved in T5b. Cost of that mode: **Remote Control and voice
-  dictation are disabled** while the base URL is a non-Anthropic host.
+  the active credential." Proved in T5b. Cost of that mode ("Connect Claude Code to an
+  LLM gateway", code.claude.com/docs/en/llm-gateway-connect, as of 2026-10-14): **Remote
+  Control is disabled** while the base URL is a non-Anthropic host. Voice dictation is
+  disabled only while `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN` or an `apiKeyHelper` is
+  active, which the launcher clears, so the docs say it stays on (not re-tested). A
+  credential, unlike a bare base URL, replaces the login and ends plan limits ("Other LLM
+  gateways", code.claude.com/docs/en/llm-gateway), and Anthropic does not support
+  non-Claude models behind a gateway, so this lane runs outside that support.
 - `ANTHROPIC_DEFAULT_HAIKU_MODEL` is "also used for background functionality" — the
   reason the local model must not be aliased as `haiku`.
 - Attribution block: stable since v2.1.181 behind a custom base URL, but for a
@@ -471,9 +477,15 @@ entry; rollback = flip `AGENTROUTE_LOCAL_URL` back.
 - **Attribution:** every subagent request carries `x-claude-code-agent-id` (lowercase, seen on
   the wire in T6); the main thread's rows carry only `X-Claude-Code-Session-Id`; the ledger plus
   `claude-costs --lane local` answer "what did that agent cost in wall time and tokens".
-- **What the session loses:** Remote Control and voice dictation (documented behaviour of
-  a non-Anthropic base URL). If a session needs Remote Control, use plain `claude` plus
-  the out-of-process lane (§5.5).
+- **What the session loses** under the loopback router (a non-Anthropic base URL, no
+  credential; "Connect Claude Code to an LLM gateway" and "How Claude Code uses prompt
+  caching", code.claude.com/docs, as of 2026-10-14): Remote Control; the first-byte
+  deadline (it does not run behind a custom base URL; the 300 s byte and event
+  watchdogs still do); MCP tool search, so MCP tools load upfront; and fast mode's
+  availability check still goes to the Anthropic API rather than the router. Voice
+  dictation is keyed on a credential (a key, token or helper), not on the base URL, so
+  it stays on while the launcher keeps those unset. If a session needs Remote Control,
+  use plain `claude` plus the out-of-process lane (§5.5).
 - **Sleep:** an unattended long session on this Mac still hits design/35 D5 (pmset sleep
   at ~11 min). Unresolved there; unchanged here.
 
