@@ -200,7 +200,8 @@ agentik agents local  →  the router 127.0.0.1:8787  →  claude-* models: api.
 
 - Drops Claude Code's `<total_tokens>…</total_tokens>` reminder system message. It
   changes every turn and defeats Ollama's prompt cache on this hybrid model: turn two
-  prefilled in **35.6 s with it, 0.38 s without**. Upstream requests keep it.
+  prefilled in **35.6 s with it, 0.38 s without** (best case, not a guarantee: the two runs also differed in system-prompt length (3,682 against 3,629 characters) and were never compared directly, and 0.38 s was measured under `--exclude-dynamic-system-prompt-sections --setting-sources user`, not the flags the launcher uses (design/01 §14 Cache B)). Upstream
+  requests keep it.
 - Injects `output_config.effort: low` when absent and clamps anything above `medium`.
   Qwen 3.8 defaults to `xhigh` reasoning and spent **4,299 thinking tokens / 4m56s** on a
   three-line file when unpinned; at `low` the same task took 45 s.

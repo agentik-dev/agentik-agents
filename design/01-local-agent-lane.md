@@ -158,7 +158,8 @@ thread through a cloud gateway; changing Ollama's LAN duty for the chat server/L
   shrinking countdown then lands in the prompt prefix, so llama.cpp logs "forcing
   full prompt re-processing" on every turn of a hybrid model. Measured on 0.33.2: turn
   two with the reminder present re-prefilled all 7,201 tokens in 35.6 s; with the
-  reminder absent it reused 7,106 of 7,133 cached tokens and prefilled in 0.38 s.
+  reminder absent it reused 7,106 of 7,133 cached tokens and prefilled in 0.38 s
+  (best case, not a guarantee: the two runs also differed in system-prompt length (3,682 against 3,629 characters) and were never compared directly, and 0.38 s was measured under `--exclude-dynamic-system-prompt-sections --setting-sources user`, not the flags the launcher uses (§14 Cache B)).
   Ollama's own `ollama launch claude` sets `CLAUDE_CODE_TOTAL_TOKENS_REMINDER=off` for
   exactly this reason (`cmd/launch/claude.go`). This design strips the message in the
   router for local routes only, so the main thread keeps its reminder.
@@ -363,7 +364,7 @@ Results arrive as the same JSON envelope; `claude-costs` books them as lane "loc
 | Sampling | leave Ollama defaults (temp 1.0, top_p 0.95, top_k 20, min_p 0) | equal to Qwen's official thinking-mode set; Claude Code sends none |
 | Context | leave 262,144 (KV is cheap on a 3:1 hybrid; q8 loads at 31.5 GB with full ctx) | per-request `num_ctx` can't be set on the Anthropic path anyway |
 | Prompt size | budget **≤ 15k tokens** per local agent turn; **tool count is the lever** — a local agent's `tools:` list should stay under ~8 | tool schemas ARE the prompt: 3 tools ≈ 5.4k tokens (a custom `local-*` agent), 50 tools ≈ 26k (built-in Explore under `_FORCE`, 146 s first turn), 54 tools ≈ 31k (`general-purpose`, 172 s first turn and again 180 s on turn two); the router ledger records `n_tools` and `input_tokens` per request so an oversize agent is visible |
-| Prompt cache | Ollama ≥ 0.33.0 (0.33.2 measured) **and** the `<total_tokens>` reminder stripped for local routes | measured on 0.33.2: turn two = 35.6 s with the reminder, **0.38 s** without (7,106 of 7,133 tokens cached). ⚠ measured with `--exclude-dynamic-system-prompt-sections --setting-sources user` and an API-key env — NOT the flag set `claude-local` uses — and one production run (§14 Live C3) re-prefilled in full on turn two *with* the strip active. Best case, not a guarantee |
+| Prompt cache | Ollama ≥ 0.33.0 (0.33.2 measured) **and** the `<total_tokens>` reminder stripped for local routes | measured on 0.33.2: turn two = 35.6 s with the reminder, **0.38 s** without (7,106 of 7,133 tokens cached). ⚠ measured with `--exclude-dynamic-system-prompt-sections --setting-sources user` and an API-key env — NOT the flag set `claude-local` uses —, the two runs' system prompts differed (3,682 against 3,629 characters) and were never compared directly (§14 Cache B), and one production run (§14 Live C3) re-prefilled in full on turn two *with* the strip active. Best case, not a guarantee |
 | Concurrency | 1 (router semaphore); at most 2 local agents in flight from Fable | single slot; a second agent's prefill invalidates the first's checkpoints; 4-way tests gave 1.39× at best (models.yaml) |
 | Output cap | router clamps `max_tokens` to 8192 for local | 32000 × 15 tok/s = 35 min worst case |
 | Keep-alive | `OLLAMA_KEEP_ALIVE=30m` (or `-1`) in the LaunchAgent | 5 m default evicts between agent calls; reload ≈ 15–26 s; ties to design/35 D5 sleep policy |
@@ -535,7 +536,9 @@ Original list:
    the parent's rows stay upstream.
 4. A 3-tool local turn prefills in < 60 s and its second turn prefills in < 2 s. Passed
    2026-09-04 on 0.33.2 with the reminder stripped (0.38 s); fails with it present (35.6 s),
-   so this check also guards the router's strip rule.
+   so this check also guards the router's strip rule. (The pair is a best case, not a
+   direct comparison: the runs differed in system-prompt length, 3,682 against 3,629
+   characters, and 0.38 s was measured under flags the launcher does not use; §14 Cache B.)
 5. A local run with no effort in the request gets `effort: low` injected (router test),
    and `max_tokens` is clamped.
 6. `claude-costs` shows three lanes; the local lane is $0 with token and wall totals.
