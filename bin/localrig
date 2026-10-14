@@ -29,16 +29,24 @@
 #   localrig status        what is up, what the router will route to, memory in use.
 #   localrig restart-router  reload backends.json into the running router.
 #
-# Every `up`/`default`/`down` rewrites ~/.config/agentroute/backends.json. THE RUNNING ROUTER
+# Every `up`/`default`/`down` rewrites backends.json in ~/.config/agentik/agents/route/ (the
+# old ~/.config/agentroute/ while it is the one that exists, agentik-r1 6.3). THE RUNNING ROUTER
 # DOES NOT RE-READ THAT FILE: it loads it once at start. After changing it you MUST run
 # `localrig restart-router`, or the router keeps serving the backend set it started with.
 # `claude-local` does not restart a router that is already up.
 set -euo pipefail
 PROG=$(basename -- "$0"); SELF=$0
+RIG="agentik agents rig"   # the form a printed next step names (agentik-r1 4.2)
 command -v readlink >/dev/null 2>&1 && SELF=$(readlink -f -- "$0" 2>/dev/null || printf '%s' "$0")
 REPO=$(cd -- "$(dirname -- "$SELF")/.." && pwd)
-STATE=${AGENTROUTE_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/agentroute}
-CONF_DIR=${XDG_CONFIG_HOME:-$HOME/.config}/agentroute
+# migrated NEW OLD: agentik-r1 6.3, the new folder when it exists, else the old one when it
+# exists, else the new; writers use it too, so old and new code share the old folder until
+# the cold window moves it.
+migrated() { if [ -e "$1" ]; then printf '%s' "$1"; elif [ -e "$2" ]; then printf '%s' "$2"; else printf '%s' "$1"; fi; }
+_state_home=${XDG_STATE_HOME:-$HOME/.local/state}
+_config_home=${XDG_CONFIG_HOME:-$HOME/.config}
+STATE=${AGENTROUTE_STATE_DIR:-$(migrated "$_state_home/agentik-agents/route" "$_state_home/agentroute")}
+CONF_DIR=$(migrated "$_config_home/agentik/agents/route" "$_config_home/agentroute")
 BACKENDS=$CONF_DIR/backends.json
 OLLAMA_URL=${LOCALRIG_OLLAMA_URL:-http://127.0.0.1:11434}
 # Resolve the GGUF from Ollama's manifest rather than hardcoding a content hash: a
@@ -187,7 +195,7 @@ up_llama() {
     # localrig hands the same value to the server and to backends.json in one call.
     LLAMA_KEY="lk-$(openssl rand -hex 24 2>/dev/null || /usr/bin/python3 -c 'import secrets;print(secrets.token_hex(24))')"
     note "no llama key in the environment or sops; using a per-run random one"
-    note "  to persist it across restarts:  $PROG keys init"
+    note "  to persist it across restarts:  $RIG keys init"
   fi
   if answering "http://127.0.0.1:$LLAMA_PORT/health"; then note "llama-server already answering on :$LLAMA_PORT"; else
     # the key goes in a 600 file, not argv, so it is not readable in `ps` by every process
@@ -217,15 +225,15 @@ up_flash() {
     # `down llama` (or a hand-started server) first — we never kill what we did not start.
     local holder; holder=$(curl -fsS -m 3 "http://127.0.0.1:$LLAMA_PORT/props" 2>/dev/null \
       | /usr/bin/python3 -c 'import sys,json; print(json.load(sys.stdin).get("model_path",""))' 2>/dev/null || true)
-    [[ "$holder" == "$FLASH_GGUF" ]] || die ":$LLAMA_PORT is held by ${holder:-an unknown server}; stop it first ($PROG down llama, or kill the hand-started one)"
+    [[ "$holder" == "$FLASH_GGUF" ]] || die ":$LLAMA_PORT is held by ${holder:-an unknown server}; stop it first ($RIG down llama, or kill the hand-started one)"
     note "flash already answering on :$LLAMA_PORT"
     # reuse the key the running server was started with, else the caller's
     [[ -z "$KEY" && -r "$keyfile" ]] && KEY=$(tr -d '\r\n' < "$keyfile")
-    [[ -n "$KEY" ]] || die "flash is up but its key is unknown (no $keyfile, no LOCALRIG_FLASH_KEY, nothing in sops); restart it: $PROG down flash && $PROG up flash"
+    [[ -n "$KEY" ]] || die "flash is up but its key is unknown (no $keyfile, no LOCALRIG_FLASH_KEY, nothing in sops); restart it: $RIG down flash && $RIG up flash"
   else
     if [[ -z "$KEY" ]]; then
       KEY="lk-$(openssl rand -hex 24 2>/dev/null || /usr/bin/python3 -c 'import secrets;print(secrets.token_hex(24))')"
-      note "no flash key in the environment or sops; using a per-run random one (persist: $PROG keys set flash)"
+      note "no flash key in the environment or sops; using a per-run random one (persist: $RIG keys set flash)"
     fi
     ( umask 077; printf '%s\n' "$KEY" > "$keyfile" )
     note "starting llama-server (flash) on :$LLAMA_PORT (log: $STATE/flash.log)"
@@ -257,7 +265,7 @@ up_unsloth() {
   local key; key=$(resolve_key unsloth_api_key "$(env_key_for unsloth)")
   [[ -n "$key" ]] || key=$(grep -oE 'sk-unsloth-[A-Za-z0-9_-]+' "$STATE/unsloth.log" 2>/dev/null | tail -1 || true)
   [[ -n "$key" ]] || die "no Unsloth key in the environment, in sops, or in $STATE/unsloth.log.
-  Set one with:  $PROG keys set unsloth      (or capture a running server's:  $PROG keys sync-unsloth)"
+  Set one with:  $RIG keys set unsloth      (or capture a running server's:  $RIG keys sync-unsloth)"
   # the model id appears only once the download + load finish; the key goes over stdin, not argv
   local want=${LOCALRIG_UNSLOTH_MODEL:-unsloth/Qwen3.8-27B-GGUF}
   local model="" end=$(( $(date +%s) + 3600 ))
@@ -275,7 +283,7 @@ print(next((i for i in ids if i == w), next((i for i in ids if w.split("/")[-1].
   done
   [[ "$model" == "$want" ]] || note "unsloth serves '$model' (asked for '$want')"
   set_backend unsloth "http://127.0.0.1:$UNSLOTH_PORT" "$model" "Bearer $key" true
-  [[ -n "$(sops_get unsloth_api_key || true)" ]] || note "tip: persist this key with  $PROG keys sync-unsloth"
+  [[ -n "$(sops_get unsloth_api_key || true)" ]] || note "tip: persist this key with  $RIG keys sync-unsloth"
 }
 up_mlx() {
   local tags; tags=$(curl -fsS -m 5 "$OLLAMA_URL/api/tags" 2>/dev/null) \
@@ -310,27 +318,27 @@ keys_cmd() {
         v=$(sops_get "$k" || true)
         printf '  %-22s %-12s %s\n' "$k" "$src" "$( [[ -n "$v" ]] && echo "stored, ${#v} chars" || echo "empty in sops" )"
       done
-      echo "  (values are never printed; rotate with \`$PROG keys set <name>\`)" ;;
+      echo "  (values are never printed; rotate with \`$RIG keys set <name>\`)" ;;
     init)
       local cur; cur=$(sops_get llama_api_key || true)
-      if [[ -n "$cur" ]]; then note "llama_api_key is already set; use \`$PROG keys set llama\` to rotate"; return 0; fi
+      if [[ -n "$cur" ]]; then note "llama_api_key is already set; use \`$RIG keys set llama\` to rotate"; return 0; fi
       local gen; gen="lk-$(openssl rand -hex 24 2>/dev/null || /usr/bin/python3 -c 'import secrets;print(secrets.token_hex(24))')"
       sops_set llama_api_key "$gen"; note "generated and stored llama_api_key"
-      note "restart the backend to pick it up:  $PROG down llama && $PROG up llama" ;;
+      note "restart the backend to pick it up:  $RIG down llama && $RIG up llama" ;;
     set)
       local name=${2:-}; local yk
-      [[ -n "$name" ]] || die "usage: $PROG keys set <provider>   (llama, unsloth, or any backend you route to)"
+      [[ -n "$name" ]] || die "usage: $RIG keys set <provider>   (llama, unsloth, or any backend you route to)"
       [[ "$name" =~ ^[A-Za-z][A-Za-z0-9_-]*$ ]] || die "provider name must be alphanumeric: got '$name'"
       yk=$(yaml_key_for "$name")
       local v; read -r -s -p "value for $yk (input hidden): " v; echo >&2
       [[ -n "$v" ]] || die "empty value; nothing written"
       sops_set "$yk" "$v"; note "stored $yk"
-      note "restart the backend to pick it up:  $PROG down $name && $PROG up $name" ;;
+      note "restart the backend to pick it up:  $RIG down $name && $RIG up $name" ;;
     sync-unsloth)
       local k; k=$(grep -oE 'sk-unsloth-[A-Za-z0-9_-]+' "$STATE/unsloth.log" 2>/dev/null | tail -1 || true)
-      [[ -n "$k" ]] || die "no Unsloth key found in $STATE/unsloth.log (start it once with \`$PROG up unsloth\`)"
+      [[ -n "$k" ]] || die "no Unsloth key found in $STATE/unsloth.log (start it once with \`$RIG up unsloth\`)"
       sops_set unsloth_api_key "$k"; note "captured the running Unsloth key into sops" ;;
-    *) die "usage: $PROG keys status|init|set llama|unsloth|sync-unsloth" ;;
+    *) die "usage: $RIG keys status|init|set llama|unsloth|sync-unsloth" ;;
   esac
 }
 
@@ -364,18 +372,18 @@ restart_router() {
 }
 
 case "${1:-}" in
-  up) shift; [[ $# -ge 1 ]] || die "usage: $PROG up llama|flash|unsloth|mlx [more...]"
+  up) shift; [[ $# -ge 1 ]] || die "usage: $RIG up llama|flash|unsloth|mlx [more...]"
       for b in "$@"; do case "$b" in llama) up_llama;; flash) up_flash;; unsloth) up_unsloth;; mlx) up_mlx;; *) die "unknown backend $b (llama|flash|mlx|unsloth)";; esac; done
-      note "the running router will NOT see this until: $PROG restart-router" ;;
+      note "the running router will NOT see this until: $RIG restart-router" ;;
   down) shift; if [[ $# -eq 0 ]]; then for b in llama flash unsloth mlx; do down_one "$b"; done; else for b in "$@"; do down_one "$b"; done; fi
-        note "the running router will NOT see this until: $PROG restart-router" ;;
+        note "the running router will NOT see this until: $RIG restart-router" ;;
   keys) shift; keys_cmd "${@:-status}" ;;
-  default) shift; [[ $# -eq 1 ]] || die "usage: $PROG default llama|flash|mlx|unsloth"; set_default "$1"
-           note "the running router will NOT see this until: $PROG restart-router" ;;
+  default) shift; [[ $# -eq 1 ]] || die "usage: $RIG default llama|flash|mlx|unsloth"; set_default "$1"
+           note "the running router will NOT see this until: $RIG restart-router" ;;
   status) status ;;
   restart-router) restart_router ;;
   -h|--help|help) usage; exit 0 ;;
-  --version) printf '%s (claude-code-agents)\n' "$PROG"; exit 0 ;;
+  --version) printf '%s (agentik-agents)\n' "$PROG"; exit 0 ;;
   "") usage; exit 0 ;;
-  *) die "unknown command: $1 (try: $PROG --help)" 2 ;;
+  *) die "unknown command: $1 (try: $RIG --help)" 2 ;;
 esac

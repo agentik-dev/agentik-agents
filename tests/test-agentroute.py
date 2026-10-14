@@ -523,6 +523,33 @@ def main() -> int:
         proc.kill()
     check(not (tmp / "agentroute.pid").exists(), "pidfile removed on SIGTERM")
 
+    print("== the folders: the new one, else the old one while it alone exists, else the new ==")
+    # agentik-r1 6.3 c17 (state) and c19 (config), read at import; AGENTROUTE_STATE_DIR wins.
+    probe = ("import runpy; g = runpy.run_path(%r, run_name='probe'); "
+             "print(g['STATE_DIR']); print(g['BACKENDS_FILE'])" % str(ROUTER))
+    with tempfile.TemporaryDirectory() as fd:
+        x = pathlib.Path(fd)
+        base = {k: v for k, v in os.environ.items()
+                if not k.startswith("AGENTROUTE_") and not k.startswith("XDG_")}
+        base.update(XDG_STATE_HOME=str(x / "state"), XDG_CONFIG_HOME=str(x / "config"))
+
+        def folders(extra=None) -> list[str]:
+            out = subprocess.run([PY, "-c", probe], env=dict(base, **(extra or {})),
+                                 capture_output=True, text=True, timeout=30).stdout
+            return [os.path.relpath(line, fd) for line in out.split()]
+        new = ["state/agentik-agents/route", "config/agentik/agents/route/backends.json"]
+        old = ["state/agentroute", "config/agentroute/backends.json"]
+        check(folders() == new, "neither folder: the new ones", str(folders()))
+        (x / "state" / "agentroute").mkdir(parents=True)
+        (x / "config" / "agentroute").mkdir(parents=True)
+        check(folders() == old, "only the old folders: the old ones", str(folders()))
+        (x / "state" / "agentik-agents" / "route").mkdir(parents=True)
+        (x / "config" / "agentik" / "agents" / "route").mkdir(parents=True)
+        check(folders() == new, "both: the new ones", str(folders()))
+        check(folders({"AGENTROUTE_STATE_DIR": str(x / "pinned")})[0] == "pinned",
+              "AGENTROUTE_STATE_DIR still wins")
+        check(not (x / "pinned").exists(), "importing the router makes no folder")
+
     print(f"\n{passed} passed, {failed} failed")
     return 1 if failed else 0
 

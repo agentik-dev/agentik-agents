@@ -17,7 +17,7 @@ trap 'rm -rf -- "$TMP"' EXIT
 # runs that set no CLAUDE_API_AGENT_LOG out of the real state dir.
 export XDG_STATE_HOME="${TMP}/state"
 # ... and a caller's exported CLAUDE_API_AGENT_LOG is never written either.
-export CLAUDE_API_AGENT_LOG="${TMP}/state/claude-api-agent/usage.jsonl"
+export CLAUDE_API_AGENT_LOG="${TMP}/state/agentik-agents/api/usage.jsonl"
 
 # Emits a large JSON envelope, then exits 7. Large enough that a downstream
 # reader closing early produces a real SIGPIPE.

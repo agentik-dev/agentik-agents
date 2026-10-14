@@ -46,7 +46,12 @@ ROUTER_BIN="${BIN_DIR}/agentroute"
 
 LISTEN="${AGENTROUTE_LISTEN:-127.0.0.1:8787}"
 ROUTER_URL="http://${LISTEN}"
-STATE_DIR="${AGENTROUTE_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/agentroute}"
+# migrated NEW OLD: agentik-r1 6.3, the new folder when it exists, else the old one when it
+# exists, else the new; writers use it too, so old and new code share the old folder until
+# the cold window moves it.
+migrated() { if [ -e "$1" ]; then printf '%s' "$1"; elif [ -e "$2" ]; then printf '%s' "$2"; else printf '%s' "$1"; fi; }
+_state_home="${XDG_STATE_HOME:-$HOME/.local/state}"
+STATE_DIR="${AGENTROUTE_STATE_DIR:-$(migrated "${_state_home}/agentik-agents/route" "${_state_home}/agentroute")}"
 SUBAGENT_MODEL="${CLAUDE_LOCAL_SUBAGENT:-sonnet}"
 EXPLORE_MODE="${CLAUDE_LOCAL_EXPLORE:-local}"
 
@@ -87,7 +92,7 @@ case "${1:-}" in
         printf '\nEvery other argument is passed to `claude` unchanged.\n'
         exit 0 ;;
     --version)
-        printf '%s (claude-code-agents); router: ' "$PROG"
+        printf '%s (agentik-agents); router: ' "$PROG"
         "$(dirname -- "$SELF")/agentroute" --version 2>/dev/null || echo unknown
         exit 0 ;;
 esac
@@ -106,7 +111,7 @@ if ! router_up; then
     # daemons, only one of which holds the port, and the loser is invisible.
     if pgrep -f 'bin/agentroute --serve' >/dev/null 2>&1; then
         warn "an agentroute process is already running but not answering on ${LISTEN}."
-        warn "check it with 'localrig status'; restart it with 'localrig restart-router'."
+        warn "check it with 'agentik agents rig status'; restart it with 'agentik agents rig restart-router'."
         die "refusing to start a second router"
     fi
     mkdir -p -- "$STATE_DIR" && chmod 700 "$STATE_DIR"   # BSD chmod rejects a bare --
@@ -132,9 +137,9 @@ if [[ -z "${CLAUDE_LOCAL_NO_PREFLIGHT:-}" ]]; then
     if ! "$ROUTER_BIN" --check >&2; then
         warn "the rows marked FAIL above are what blocks the local lane; each carries its remedy."
         warn "your options:"
-        warn "  fix the FAIL row, then rerun ${PROG}"
-        warn "  CLAUDE_LOCAL_SUBAGENT=sonnet ${PROG}   # start anyway; subagents run on sonnet, not locally"
-        warn "  CLAUDE_LOCAL_NO_PREFLIGHT=1 ${PROG}    # start anyway and let local calls fail"
+        warn "  fix the FAIL row, then rerun agentik agents local"
+        warn "  CLAUDE_LOCAL_SUBAGENT=sonnet agentik agents local   # start anyway; subagents run on sonnet, not locally"
+        warn "  CLAUDE_LOCAL_NO_PREFLIGHT=1 agentik agents local    # start anyway and let local calls fail"
         die "preflight failed"
     fi
 fi

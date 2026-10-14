@@ -106,7 +106,7 @@ def u(i, o, cr, cw):
 
 def build(root: pathlib.Path) -> dict:
     """The synthetic world: three seats, four helpers, one ledger."""
-    sessions = root / "state" / "claude-code-session" / "sessions"
+    sessions = root / "state" / "agentik-session" / "sessions"
     proj = root / "projects" / "-Users-x-code-myproj"
     tpath = proj / f"{BUSY}.jsonl"
     # -- the busy seat: activity 5 s ago, newer than its turn end
@@ -707,6 +707,34 @@ def watch_rescan_checks() -> None:
         check(proc.returncode == 0, "SIGINT exits 0", str(proc.returncode))
 
 
+def folder_checks() -> None:
+    """agentik-r1 6.3 c1: the session plugin's folder is agentik-session, else the old
+    claude-code-session while it alone exists, else agentik-session; the override wins."""
+    print("== the session plugin's folder: the new one, else the old one, else the new ==")
+    mod = load_tool()
+    keys = ("XDG_STATE_HOME", "CLAUDE_AGENTS_SESSIONS_DIR")
+    keep = {k: os.environ.get(k) for k in keys}
+    try:
+        with tempfile.TemporaryDirectory() as fd:
+            x = pathlib.Path(fd)
+            os.environ["XDG_STATE_HOME"] = fd
+            os.environ.pop("CLAUDE_AGENTS_SESSIONS_DIR", None)
+            new, old = x / "agentik-session" / "sessions", x / "claude-code-session" / "sessions"
+            check(mod.sessions_dir() == new, "neither folder: the new one", str(mod.sessions_dir()))
+            old.mkdir(parents=True)
+            check(mod.sessions_dir() == old, "only the old folder: the old one", str(mod.sessions_dir()))
+            new.mkdir(parents=True)
+            check(mod.sessions_dir() == new, "both: the new one", str(mod.sessions_dir()))
+            os.environ["CLAUDE_AGENTS_SESSIONS_DIR"] = str(x / "pinned")
+            check(mod.sessions_dir() == x / "pinned", "CLAUDE_AGENTS_SESSIONS_DIR still wins")
+    finally:
+        for k, v in keep.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+
+
 def main() -> int:
     with tempfile.TemporaryDirectory() as d:
         root = pathlib.Path(d)
@@ -918,6 +946,7 @@ def main() -> int:
         check(not changed, "the tool writes nothing anywhere under HOME or in bin/", str(changed[:5]))
 
     watch_rescan_checks()
+    folder_checks()
     print(f"\n{passed} passed, {failed} failed")
     return 1 if failed else 0
 
