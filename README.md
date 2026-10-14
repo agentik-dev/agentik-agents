@@ -52,8 +52,11 @@ first. All four are on `PATH` (`agentik agents api`, `agentik agents fanout`,
 | See what every agent on this Mac is doing now | `agentik agents status [--json] [--watch N] [--all] [--since MIN]` | One row per seat (a session the session plugin tracks) and per helper under it, in lane `seat`, `helper` or `local`, plus each `agentik agents api` run in lane `api` (nested under the seat that launched it): model, elapsed, turns, context, cost, last tool, state. Read-only; ids, names and numbers only, never prompt or tool-input text. Exit 1 when the session plugin's state dir cannot be read. |
 
 **The one boundary that matters: profiles are strictly read-only.** A
-`--profile` delegate has only `Read`, `Grep`, `Glob` — no `Bash`, no `Edit`, no
-`Write` (enforced by `--tools`; see below). So delegation is for *analysis that
+`--profile` delegate is allow-listed `Read`, `Grep`, `Glob` — no `Bash`, no `Edit`, no
+`Write` (enforced by `--tools`; see below). Under `--bare` its working toolset is
+`Read` alone: a probe of 2026-08-19 found Grep and Glob absent (observed; the Claude
+Code version was not recorded, and a re-test on the current CLI is filed in
+`NICE_TO_HAVE.md`). So delegation is for *analysis that
 produces a report*, never for *doing the work*. A delegate cannot edit a file,
 run a test, execute a command, or verify anything by running it. If the task
 needs any of that, do it yourself in this session or drop `--profile` (which
@@ -64,7 +67,10 @@ something that requires execution will typically reach for `Bash`, be refused,
 and thrash to a useless placeholder answer — burning full cost. Confirmed
 repeatedly, including in this repo's own investigation: the delegate that needed
 to run `claude --help` degenerated three times; the one handed the captured
-output succeeded. So:
+output succeeded. (Observed in August 2026 on the Claude Code of the day; the
+version was not recorded, no Claude Code page documents the behaviour, and the
+changelog has changed how denials reach subagents and `-p` runs since, so a
+re-test on the current CLI is filed in `NICE_TO_HAVE.md`.) So:
 
 - **Give the delegate the facts it would otherwise execute for.** Capture
   command output to a file, add its directory with `--add-dir`, and point the
