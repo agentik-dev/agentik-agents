@@ -859,7 +859,13 @@ Measured behaviour with a deliberately tight cap ($0.01 on a six-file task):
 
 Two consequences. The cap is evaluated *between* model requests, so the request
 that crosses it still completes — treat it as a bound on new work, not an exact
-stop. And a run that trips the cap returns **nothing**: you pay for the partial
+stop. The Agent SDK page "How the agent loop works"
+(<https://code.claude.com/docs/en/agent-sdk/agent-loop>, "Budget headroom", as of
+2026-10-14) gives the reason: spend is a client-side estimate from each response's
+usage, compared with the cap after the response arrives, so spend can pass the cap
+by the cost of that one response plus whatever running subagents spend before they
+stop. The overshoot therefore scales with the size of the last response, not with
+the cap: the 1.2× above is one measurement on a $0.01 cap, not a fixed ratio. And a run that trips the cap returns **nothing**: you pay for the partial
 work and get no result. **A tight cap is the expensive choice, not the safe
 one** — which is why profiles default to a generous `$10` ceiling meant to catch
 runaway loops rather than to shape normal spend.
@@ -935,7 +941,10 @@ bin/agentik agents fanout --budget-usd 2.00 --profile review -j 4 \
   a viable reserve is reported as `skipped_budget`, never silently dropped.
 - **The per-shard ceiling is deflated by 1.35x** because the wrapper's own
   ceiling is checked *between* requests — the request that crosses it still
-  completes (measured 1.2x overshoot).
+  completes (measured 1.2x overshoot on a $0.01 cap). The overshoot is one
+  response plus any running subagents ("How the agent loop works", Budget
+  headroom, as of 2026-10-14), so it scales with response size; 1.35x is a margin
+  for small caps, not a bound.
 - **Results are checked for substance, not just schema.** `is_error: false` and
   a schema-valid payload are not enough; see the degenerate-shard finding below.
   Statuses: `ok`, `degenerate`, `error`, `budget_exhausted`, `skipped_budget`,
