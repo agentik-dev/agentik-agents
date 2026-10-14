@@ -12,6 +12,7 @@ Three lanes, three different kinds of number, deliberately never summed:
       Interactive `claude` work covered by the Team Premium seat, read from
       the per-model usage Claude Code records in ~/.claude.json. Priced at API
       list rates, this is what that work *would* have cost had it been billed.
+      A lower bound (see read_subscription_lane's docstring).
       No money left the account -- it consumed seat capacity instead.
 
   Local lane (zero dollars, real tokens and wall time)
@@ -535,7 +536,14 @@ def read_local_lane(path: pathlib.Path, since: dt.date | None) -> dict:
 
 
 def read_subscription_lane(path: pathlib.Path) -> dict:
-    """Seat-covered work, from the per-model usage Claude Code records."""
+    """Seat-covered work, from the per-model usage Claude Code records.
+
+    A lower bound. `lastModelUsage` is kept per project and no Claude Code page says
+    whether it is cumulative or holds only the project's last session; if the latter,
+    every earlier session is missing from the sum. Its cache writes are also priced at
+    the 5-minute 1.25x, while a subscription's main conversation gets 1-hour writes
+    at 2x. Unverified against a known session as of 2026-10-14 (NICE_TO_HAVE.md).
+    """
     if not path.exists():
         return {"available": False, "by_model": {}, "total": 0.0,
                 "projects": 0, "tier": None, "org_tier": None}

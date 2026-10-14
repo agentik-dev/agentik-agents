@@ -982,11 +982,16 @@ bin/agentik agents costs --check-prices  # print the price table for review
 - **Subscription lane — equivalent dollars.** Interactive `claude` work covered
   by the seat, from the per-model usage Claude Code records in `~/.claude.json`,
   priced at API list rates. No money left the account; it consumed seat
-  capacity. Measured here: **$3.13 of API spend alongside $155.78 of
-  seat-absorbed work** — every $1 of cash accompanies ~$50 the seat absorbs.
+  capacity. Measured here on 2026-08-13: **$3.13 of API spend alongside $155.78 of
+  seat-absorbed work** — every $1 of cash accompanies ~$50 the seat absorbs. The
+  seat figure is a lower bound: the tool sums each project's `lastModelUsage`
+  field, and no Claude Code page says whether that field is cumulative or holds
+  only the project's last session; it also prices the seat's cache writes at the
+  five-minute 1.25×, while a subscription's main conversation gets one-hour writes
+  at 2× ("How Claude Code uses prompt caching", as of 2026-10-14).
 - **Prompt-cache saving, API lane only.** The same tokens repriced with every
-  cached token billed as fresh input. Measured on the fan-out: **$4.49 uncached
-  vs $3.12 actual — the cache saved 30%.**
+  cached token billed as fresh input. Measured on the fan-out (2026-08-13): **$4.49
+  uncached vs $3.12 actual — the cache saved 30%.**
 
 **The price table self-checks against real billing.** It is a copy of a
 published page, so it can be wrong for a given account. Every run compares what
@@ -1042,7 +1047,7 @@ smuggle some in.
 ### Token efficiency
 
 `agentik agents costs` derives the ratios that point at a specific lever, and pairs each
-with advice naming what to change. Measured on the eight-shard fan-out:
+with advice naming what to change. Measured on the eight-shard fan-out of 2026-08-13:
 
 | Measure | Here | Why it matters |
 | --- | --- | --- |
