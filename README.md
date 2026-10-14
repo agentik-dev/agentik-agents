@@ -698,6 +698,21 @@ git diff | agentik agents api -p "Review this diff; list only actionable issues"
 3. `~/.config/claude-code/api-key` — plaintext fallback, mode 600, consulted only
    when the SOPS file is absent.
 
+### Which credential each lane uses, and what that does to plan limits
+
+Billing follows the credential, not the tool. As of 2026-10-14:
+
+| Lane | Credential | Billed to |
+| --- | --- | --- |
+| API (`agentik agents api`, `agentik agents fanout`) | the key above, exported to `claude --bare -p` | the key's Console organization. It never draws on plan limits: a `-p` run always uses `ANTHROPIC_API_KEY` when it is set, and `--bare` never reads the login ("Authentication", <https://code.claude.com/docs/en/authentication>). A Max or Team plan's monthly API credits cover it only when the key is from the plan's linked Console organization ("Monthly API credits for Max and Team plans", <https://support.claude.com/en/articles/17154008>). |
+| Seat (interactive `claude`) | the claude.ai login | plan limits. The monthly API credits never cover interactive Claude Code. |
+| Local (`agentik agents local`) | the claude.ai login; the launcher sets only `ANTHROPIC_BASE_URL` and keeps every key unset | nothing for local routes; the session's Claude routes draw on plan limits, as on the seat lane. |
+
+A plain `claude -p` or Agent SDK run on the plan login, with no key in its
+environment, also draws on plan limits: Anthropic paused the changes announced for
+15 June 2026 ("Use the Claude Agent SDK with your Claude plan",
+<https://support.claude.com/en/articles/15036540-use-the-agent-sdk-with-your-claude-plan>).
+
 ## Delegated runs (role profiles)
 
 Profiles are canned flag sets for agent-style delegation. All three are
