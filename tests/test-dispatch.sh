@@ -1,0 +1,107 @@
+#!/usr/bin/env bash
+# tests/test-dispatch.sh: bin/agentik-agents execs the tool beside it with the args
+# unchanged (agentik-r1 4.2). The tools here are stubs that echo `$#:$*`, in a temp dir
+# beside a copy of the dispatcher, and one installed link, so nothing real runs and
+# nothing is spent.
+set -u
+REPO="$(cd "$(dirname "$0")/.." && pwd -P)"
+D="$(mktemp -d)"
+trap 'rm -r "${D:?}"' EXIT
+cp "$REPO/bin/agentik-agents" "$D/"
+for s in claude-api-agent claude-fanout claude-costs claude-local claude-agents localrig agentroute; do
+  printf '#!/bin/sh\necho "$#:$*"\n' > "$D/$s"
+  chmod +x "$D/$s"
+done
+A="$D/agentik-agents"
+pass=0 fail=0
+
+# expect NAME WANT CMD...: CMD's stdout is WANT and it exits 0.
+expect() {
+  local name=$1 want=$2 got code
+  shift 2
+  got="$("$@" 2>/dev/null)"; code=$?
+  if [ "$got" = "$want" ] && [ "$code" = 0 ]; then
+    pass=$((pass + 1))
+  else
+    fail=$((fail + 1))
+    printf 'FAIL %s: got [%s] exit %s, want [%s]\n' "$name" "$got" "$code" "$want"
+  fi
+}
+
+# expect_exit NAME CODE CMD...: CMD exits CODE with nothing on stdout.
+expect_exit() {
+  local name=$1 want=$2 got code
+  shift 2
+  got="$("$@" 2>/dev/null)"; code=$?
+  if [ "$code" = "$want" ] && [ -z "$got" ]; then
+    pass=$((pass + 1))
+  else
+    fail=$((fail + 1))
+    printf 'FAIL %s: exit %s stdout [%s], want exit %s\n' "$name" "$code" "$got" "$want"
+  fi
+}
+
+# the API lane
+expect "api" "2:p1 a b" "$A" api p1 'a b'
+expect "api bare" "0:" "$A" api
+for v in setup-key key-status edit-key remove-key pin-proxy usage; do
+  expect "$v" "1:--$v" "$A" "$v"
+done
+expect "pin-proxy args" "2:--pin-proxy x" "$A" pin-proxy x
+expect "profiles" "1:--list-profiles" "$A" profiles
+expect "help api" "1:--wrapper-help" "$A" help api
+# the fan-out, costs and local lanes
+expect "fanout" "2:--plan p.json" "$A" fanout --plan p.json
+expect "costs" "1:--today" "$A" costs --today
+expect "local" "2:-p hi" "$A" local -p hi
+# the status tool's two verbs
+expect "status" "1:status" "$A" status
+expect "status args" "2:status --json" "$A" status --json
+expect "fold" "2:fold run1" "$A" fold run1
+# the local rig and the router
+expect "rig" "1:up" "$A" rig up
+expect "route" "1:--check" "$A" route --check
+# version and help
+expect "--version" "agentik-agents 1.2.0" "$A" --version
+for h in --help help -h; do
+  got="$("$A" "$h")"; code=$?
+  if [ "$code" = 0 ] && printf '%s\n' "$got" | grep -q '^  route \.\.\. *agentroute \.\.\.$'; then
+    pass=$((pass + 1))
+  else
+    fail=$((fail + 1)); printf 'FAIL %s: exit %s\n' "$h" "$code"
+  fi
+done
+# usage: no verb, an unknown verb, a stray arg; usage goes to stderr only
+expect_exit "no verb" 2 "$A"
+expect_exit "unknown verb" 2 "$A" nosuch
+expect_exit "help unknown" 2 "$A" help nosuch
+expect_exit "--version arg" 2 "$A" --version x
+expect_exit "doctor arg" 2 "$A" doctor x
+expect_exit "queue-mvp has no verb" 2 "$A" queue-mvp
+if "$A" nosuch 2>&1 >/dev/null | grep -q '^usage: agentik agents'; then
+  pass=$((pass + 1))
+else
+  fail=$((fail + 1)); echo "FAIL usage line on stderr"
+fi
+# exit codes pass through
+printf '#!/bin/sh\nexit 7\n' > "$D/localrig"
+expect_exit "exit passes through" 7 "$A" rig status
+# an installed link runs the tools beside its target, not beside the link
+mkdir "$D/bin"
+ln -s "$A" "$D/bin/agentik-agents"
+expect "via link" "1:--check" "$D/bin/agentik-agents" route --check
+# doctor reports and exits 0, the key status and the router's check from beside it
+got="$(PATH="$D/bin:/usr/bin:/bin" "$A" doctor)"; code=$?
+if [ "$code" = 0 ] && printf '%s\n' "$got" | grep -q '^    1:--key-status$' \
+   && printf '%s\n' "$got" | grep -q '^    1:--check$' \
+   && printf '%s\n' "$got" | grep -q "^  agentik-agents  *$D/bin/agentik-agents$" \
+   && printf '%s\n' "$got" | grep -q '^  agentik  *NOT ON PATH$'; then
+  pass=$((pass + 1))
+else
+  fail=$((fail + 1)); printf 'FAIL doctor: exit %s\n%s\n' "$code" "$got"
+fi
+# the dispatcher is POSIX sh
+if sh -n "$REPO/bin/agentik-agents"; then pass=$((pass + 1)); else fail=$((fail + 1)); echo "FAIL sh -n"; fi
+
+printf 'test-dispatch: %d passed, %d failed\n' "$pass" "$fail"
+[ "$fail" = 0 ]

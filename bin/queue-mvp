@@ -1852,7 +1852,7 @@ def render_report(args, journal: Journal) -> str:
         L.append(f"> **WARNING** the database could not be read, so job rows and the transition "
                  f"audit trail are missing from this report: `{md_escape(db_error)}`")
     L.append("")
-    L.append("This run was orchestrated by `claude-code-agents/bin/queue-mvp`, the interim orchestrator. "
+    L.append("This run was orchestrated by `agentik-agents/bin/queue-mvp`, the interim orchestrator. "
              "A real orchestrator agent is future work; everything below is durable in the "
              "queue database and `<state-dir>/orchestrator.log`.")
     L.append("")

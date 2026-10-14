@@ -142,7 +142,7 @@ read_sops_key() {
     value="${value%"${value##*[![:space:]]}"}"
 
     [[ -n "$value" ]] || die "the decrypted ${SECRET_KEY_NAME} is empty.
-  Re-enter it with:  ${PROG} --setup-key"
+  Re-enter it with:  agentik agents setup-key"
 
     API_KEY="$value"
 }
@@ -167,7 +167,7 @@ read_plain_key() {
     line="${line%"${line##*[![:space:]]}"}"
 
     [[ -n "$line" ]] || die "key file is empty: ${PLAIN_FILE}
-  Store a key with:  ${PROG} --setup-key"
+  Store a key with:  agentik agents setup-key"
 
     API_KEY="$line"
 }
@@ -317,7 +317,7 @@ key_status() {
 edit_key() {
     need_tool sops
     [[ -e "$SECRET_FILE" ]] || die "no encrypted secret at ${SECRET_FILE}
-  Create one with:  ${PROG} --setup-key"
+  Create one with:  agentik agents setup-key"
     cd -- "$REPO_ROOT"
     exec sops edit -- "$SECRET_FILE"
 }
@@ -545,7 +545,7 @@ pin_proxy() {
     ( umask 077; {
         printf '# Known-good proxy on the API key'"'"'s egress path.\n'
         printf '# A run whose proxy differs from this value prints a warning.\n'
-        printf '# Re-pin with: %s --pin-proxy\n' "$PROG"
+        printf '# Re-pin with: agentik agents pin-proxy\n'
         printf '%s\n' "$val"
     } > "$PROXY_PIN_FILE" ) || die "could not write ${PROXY_PIN_FILE}"
     chmod 600 -- "$PROXY_PIN_FILE" || die "could not set ${PROXY_PIN_FILE} to mode 600"
@@ -811,9 +811,16 @@ EOF
 # signal -- did the delegate try to escape its allow-list -- without content.
 #
 # Disable with CLAUDE_API_AGENT_NO_LOG=1. Override the path with
-# CLAUDE_API_AGENT_LOG. Logging failure never fails the run.
+# CLAUDE_API_AGENT_LOG. Logging failure never fails the run. The default folder is
+# agentik-agents/api under the state home, else the old claude-api-agent folder while it
+# is the one that exists (agentik-r1 6.3 c18).
 # ---------------------------------------------------------------------------
-USAGE_LOG="${CLAUDE_API_AGENT_LOG:-${XDG_STATE_HOME:-${HOME}/.local/state}/claude-api-agent/usage.jsonl}"
+# migrated NEW OLD: agentik-r1 6.3, the new folder when it exists, else the old one when it
+# exists, else the new; writers use it too, so old and new code share the old folder until
+# the cold window moves it.
+migrated() { if [ -e "$1" ]; then printf '%s' "$1"; elif [ -e "$2" ]; then printf '%s' "$2"; else printf '%s' "$1"; fi; }
+_state_home="${XDG_STATE_HOME:-${HOME}/.local/state}"
+USAGE_LOG="${CLAUDE_API_AGENT_LOG:-$(migrated "${_state_home}/agentik-agents/api" "${_state_home}/claude-api-agent")/usage.jsonl}"
 
 append_usage_log() {
     local envelope="$1" profile="${2:-}"
@@ -1506,7 +1513,7 @@ elif [[ -e "$PLAIN_FILE" ]]; then
     read_plain_key
 else
     die "no API key found.
-  Set one up with:  ${PROG} --setup-key
+  Set one up with:  agentik agents setup-key
   (or export ANTHROPIC_API_KEY for a single invocation)"
 fi
 

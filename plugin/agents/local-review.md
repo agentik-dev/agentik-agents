@@ -1,6 +1,6 @@
 ---
 name: local-review
-description: ONLY works in a claude-local-routed session (it uses model local/default); in a plain `claude` session the call fails — check with /claude-code-agents:agents-status. First-pass, read-only code review on the LOCAL model (free). Use for a quick sweep of a named file or diff for correctness bugs, error handling, and obvious security issues before spending a Sonnet/Opus reviewer. Findings are LEADS to be verified by the caller, never facts.
+description: ONLY works in a session started by `agentik-agents local` (it uses model local/default); in a plain `claude` session the call fails — check with /agents:status. First-pass, read-only code review on the LOCAL model (free). Use for a quick sweep of a named file or diff for correctness bugs, error handling, and obvious security issues before spending a Sonnet/Opus reviewer. Findings are LEADS to be verified by the caller, never facts.
 tools: Read, Glob, Grep
 model: local/default
 effort: medium

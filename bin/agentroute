@@ -64,6 +64,15 @@ def env(name: str, default: str) -> str:
     return default if v is None or v == "" else v
 
 
+def migrated(new: pathlib.Path, old: pathlib.Path) -> pathlib.Path:
+    """agentik-r1 6.3 (c17, c19): the new folder when it exists, else the old one when it
+    exists, else the new. Writers use what this returns, so until the cold window moves a
+    folder, old and new code share the old one."""
+    if new.exists():
+        return new
+    return old if old.exists() else new
+
+
 def env_num(name: str, default: str, cast=int):
     """A malformed number in the environment must not kill the process at import."""
     raw = env(name, default)
@@ -85,8 +94,9 @@ LOCAL_MAX_EFFORT = env("LOCAL_MAX_EFFORT", "medium")
 LOCAL_MAX_TOKENS = env_num("LOCAL_MAX_TOKENS", "8192")
 LOCAL_CONCURRENCY = max(1, env_num("LOCAL_CONCURRENCY", "1"))
 LOCAL_STRIP_TOKEN_REMINDER = env("LOCAL_STRIP_TOKEN_REMINDER", "1") not in ("0", "off", "false")
+CONFIG_HOME = pathlib.Path(os.environ.get("XDG_CONFIG_HOME") or (pathlib.Path.home() / ".config"))
 BACKENDS_FILE = pathlib.Path(env("BACKENDS_FILE", str(
-    pathlib.Path(os.environ.get("XDG_CONFIG_HOME") or (pathlib.Path.home() / ".config")) / "agentroute" / "backends.json")))
+    migrated(CONFIG_HOME / "agentik" / "agents" / "route", CONFIG_HOME / "agentroute") / "backends.json")))
 
 
 def load_backends() -> dict:
@@ -124,8 +134,9 @@ BACKENDS.setdefault("default", {"url": LOCAL_URL, "model": LOCAL_MODEL, "auth": 
 PING_AFTER_S = env_num("PING_AFTER_S", "20", float)
 PING_EVERY_S = env_num("PING_EVERY_S", "15", float)
 TIMEOUT_S = env_num("TIMEOUT_S", "1800", float)
+STATE_HOME = pathlib.Path(os.environ.get("XDG_STATE_HOME") or (pathlib.Path.home() / ".local" / "state"))
 STATE_DIR = pathlib.Path(env("STATE_DIR", str(
-    pathlib.Path(os.environ.get("XDG_STATE_HOME") or (pathlib.Path.home() / ".local" / "state")) / "agentroute")))
+    migrated(STATE_HOME / "agentik-agents" / "route", STATE_HOME / "agentroute"))))
 LOG_PATH = pathlib.Path(env("LOG", str(STATE_DIR / "requests.jsonl")))
 
 UNKNOWN_BACKEND = object()   # sentinel: model named local/<name> for an undeclared <name>

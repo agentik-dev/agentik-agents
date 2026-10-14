@@ -13,7 +13,7 @@
 # and the cold-start tests run a copy of claude-local beside a stub router. Every process the
 # suite starts is stopped in its EXIT trap, and the developer's own router is never signalled.
 #
-#     tests/test-localrig.sh
+#     tests/test-rig.sh
 set -uo pipefail
 REPO="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 LOCALRIG="$REPO/bin/localrig"
@@ -50,7 +50,8 @@ exit 2
 EOF
 chmod +x "$TMP/fakebin/claude"
 export PATH="$TMP/fakebin:$PATH"
-BACKENDS="$TMP/config/agentroute/backends.json"
+# neither folder exists under $TMP, so the new one is used (agentik-r1 6.3 c19)
+BACKENDS="$TMP/config/agentik/agents/route/backends.json"
 
 # A stub Ollama: /api/tags lists one tag, and a model id chosen to break naive JSON building.
 STUB_PORT=$(/usr/bin/python3 -c 'import socket;s=socket.socket();s.bind(("127.0.0.1",0));print(s.getsockname()[1]);s.close()')
@@ -137,6 +138,32 @@ out="$("$LOCALRIG" status 2>&1)"
 check "$( contains "$out" "short11chr" && echo 1 || echo 0 )" \
   "a short API key is masked too (the old mask needed 12+ characters and printed it in full)" "$out"
 check "$( contains "$out" "Bearer" && echo 0 || echo 1 )" "  the auth line is still shown, just masked"
+
+echo "== the folders: the new one, else the old one while it alone exists, else the new =="
+# agentik-r1 6.3 c17 (state) and c19 (config); AGENTROUTE_STATE_DIR still wins. The router
+# address is a dead port, so status asks no router.
+X="$TMP/folders"
+for m in neither old new; do
+  rm -rf "${X:?}"; mkdir -p "$X/config" "$X/state"
+  case $m in
+    old) mkdir -p "$X/config/agentroute" "$X/state/agentroute" ;;
+    new) mkdir -p "$X/config/agentroute" "$X/state/agentroute" \
+           "$X/config/agentik/agents/route" "$X/state/agentik-agents/route" ;;
+  esac
+  out="$(env -u AGENTROUTE_STATE_DIR XDG_CONFIG_HOME="$X/config" XDG_STATE_HOME="$X/state" \
+         AGENTROUTE_LISTEN=127.0.0.1:1 "$LOCALRIG" status 2>&1)"
+  case $m in
+    old) want_c="$X/config/agentroute"; want_s="$X/state/agentroute"; other="$X/state/agentik-agents" ;;
+    *) want_c="$X/config/agentik/agents/route"; want_s="$X/state/agentik-agents/route"; other="" ;;
+  esac
+  check "$( contains "$out" "backends.json ($want_c/backends.json)" && echo 0 || echo 1 )" \
+    "$m: backends.json is read from ${want_c#"$X"/}" "$out"
+  check "$( [ -d "$want_s" ] && { [ -z "$other" ] || [ ! -e "$other" ]; } && echo 0 || echo 1 )" \
+    "$m: the state folder is ${want_s#"$X"/}, and no other is made"
+done
+out="$(env AGENTROUTE_STATE_DIR="$X/pinned" XDG_CONFIG_HOME="$X/config" XDG_STATE_HOME="$X/state" \
+       AGENTROUTE_LISTEN=127.0.0.1:1 "$LOCALRIG" status 2>&1)"
+check "$( [ -d "$X/pinned" ] && echo 0 || echo 1 )" "AGENTROUTE_STATE_DIR still wins over both folders"
 
 echo "== keys: sops-backed, env-overridable, never printed =="
 # The store lives outside the repo ($AGENTIK_AGENTS_SECRETS, else the config home's

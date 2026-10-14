@@ -1,5 +1,5 @@
 {
-  "name": "claude-code-agents",
+  "name": "agents",
   "version": "1.2.0",
   "description": "Delegate Claude Code work to the lane that fits it: read-only review on API-billed headless agents under a budget cap, mechanical work on a local model, and cost reporting.",
   "author": {"name": "Kevin Tegtmeier"},

@@ -98,10 +98,19 @@ INTRO_PRICING: dict[str, dict] = {}
 CACHE_READ_MULT = 0.10
 CACHE_WRITE_MULT = 1.25
 
+def migrated(new: pathlib.Path, old: pathlib.Path) -> pathlib.Path:
+    """agentik-r1 6.3 (c17, c18): the new folder when it exists, else the old one when it
+    exists, else the new -- the folder the tools that write it resolve."""
+    if new.exists():
+        return new
+    return old if old.exists() else new
+
+
+STATE_HOME = pathlib.Path(os.environ.get("XDG_STATE_HOME") or (pathlib.Path.home() / ".local/state"))
 USAGE_LOG = pathlib.Path(
     os.environ.get("CLAUDE_API_AGENT_LOG")
-    or (pathlib.Path(os.environ.get("XDG_STATE_HOME") or (pathlib.Path.home() / ".local/state"))
-        / "claude-api-agent" / "usage.jsonl")
+    or (migrated(STATE_HOME / "agentik-agents" / "api", STATE_HOME / "claude-api-agent")
+        / "usage.jsonl")
 )
 CLAUDE_CONFIG = pathlib.Path(os.environ.get("CLAUDE_CONFIG_FILE")
                              or (pathlib.Path.home() / ".claude.json"))
@@ -110,8 +119,7 @@ CLAUDE_CONFIG = pathlib.Path(os.environ.get("CLAUDE_CONFIG_FILE")
 LOCAL_LEDGER = pathlib.Path(
     os.environ.get("AGENTROUTE_LOG")
     or pathlib.Path(os.environ.get("AGENTROUTE_STATE_DIR")
-                    or pathlib.Path(os.environ.get("XDG_STATE_HOME")
-                                    or pathlib.Path.home() / ".local" / "state") / "agentroute")
+                    or migrated(STATE_HOME / "agentik-agents" / "route", STATE_HOME / "agentroute"))
     / "requests.jsonl")
 LOCAL_EQUIV_MODEL = "claude-sonnet-5"      # the rung the local lane usually replaces
 

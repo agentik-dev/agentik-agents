@@ -1,6 +1,6 @@
 ---
 name: local-summarize
-description: ONLY works in a claude-local-routed session (it uses model local/default); in a plain `claude` session the call fails — check with /claude-code-agents:agents-status. Condense a named file, directory listing, transcript, or log into a short brief on the LOCAL model (free). Use to keep large material out of the main context — "summarize X in N lines", "what does this log say happened", "list the sections of this document". Input must be named files; the agent cannot fetch or run anything.
+description: ONLY works in a session started by `agentik-agents local` (it uses model local/default); in a plain `claude` session the call fails — check with /agents:status. Condense a named file, directory listing, transcript, or log into a short brief on the LOCAL model (free). Use to keep large material out of the main context — "summarize X in N lines", "what does this log say happened", "list the sections of this document". Input must be named files; the agent cannot fetch or run anything.
 tools: Read, Glob
 model: local/default
 effort: low

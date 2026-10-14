@@ -21,7 +21,12 @@ REGEXES = ["quuxvill[e]\\.example", "zorbla[x]-ops", "glimmerwic[k]"]
 PRIVATE = ("# the tests' private list: invented terms\n\n"
            "domain\t%s\n   \nprivate\t%s\n  # an indented comment\nperson\t%s\n"
            % tuple(REGEXES))
-GENERIC = ["home", "lan", "sibling", "secret", "email"]
+def lf(g):
+    """A group's all-hit counts; the outside_* pair is checked where it matters."""
+    return {"lines": g["lines"], "files": g["files"]}
+
+
+GENERIC = ["home", "lan", "sibling", "secret", "email", "renamed"]
 
 # One fixture per group; each assembled so the literal never sits in this file.
 FIXTURES = {
@@ -90,11 +95,11 @@ class HygieneTest(unittest.TestCase):
 
     def test_counts_per_group(self):
         code, d = self.json_result()
-        self.assertEqual(code, 2)
+        self.assertEqual(code, 1)
         for group in ("home", "lan", "private", "person"):
-            self.assertEqual(d["groups"][group], {"lines": 2, "files": 1}, group)
-        self.assertEqual(d["groups"]["domain"], {"lines": 3, "files": 2})
-        self.assertEqual(d["groups"]["sibling"], {"lines": 4, "files": 3})
+            self.assertEqual(lf(d["groups"][group]), {"lines": 2, "files": 1}, group)
+        self.assertEqual(lf(d["groups"]["domain"]), {"lines": 3, "files": 2})
+        self.assertEqual(lf(d["groups"]["sibling"]), {"lines": 4, "files": 3})
 
     def test_allowlist_and_binary_and_untracked(self):
         code, d = self.json_result()
@@ -119,7 +124,7 @@ class HygieneTest(unittest.TestCase):
     def test_never_prints_matched_text(self):
         for args in ((), ("--json",)):
             code, out, err = run(self.repo, *args)
-            self.assertEqual(code, 2)
+            self.assertEqual(code, 1)
             for token in MATCHED:
                 self.assertNotIn(token, (out + err).lower(), args)
         self.check_text_table()  # folded, so the README's test count holds
@@ -133,7 +138,7 @@ class HygieneTest(unittest.TestCase):
                     + FIXTURES["person"].encode() + b"\0\x01")
             Path(repo, "b.bin").write_bytes(data)
             code, d = self.json_in(repo)
-            self.assertEqual(code, 2)
+            self.assertEqual(code, 1)
             self.assertEqual(sorted((f["path"], f["group"], f["lines"]) for f in d["files"]),
                              [("b.bin", "email", 1), ("b.bin", "home", 1),
                               ("b.bin", "secret", 1)])
@@ -154,7 +159,7 @@ class HygieneTest(unittest.TestCase):
             code, out, _ = run(repo, "--json")
             d = json.loads(out)
             # untracked a.md is scanned, ignored b.md never
-            self.assertEqual((code, d["groups"]["person"]["files"]), (2, 1))
+            self.assertEqual((code, d["groups"]["person"]["files"]), (1, 1))
             self.assertEqual([f["path"] for f in d["files"]], ["a.md"])
 
     def test_person_evaluated_under_sittings(self):
@@ -199,13 +204,13 @@ class HygieneTest(unittest.TestCase):
             self.assertEqual((code, json.loads(out)["hits_outside_allowlist"]), (0, 0))
 
     def test_usage_and_git_failure_exit_one(self):
-        self.assertEqual(run(self.repo, "--bogus")[0], 1)
-        self.assertEqual(run(self.repo, "--allow")[0], 1)
-        self.assertEqual(run(self.repo, "--allow", "missing")[0], 1)
+        self.assertEqual(run(self.repo, "--bogus")[0], 2)
+        self.assertEqual(run(self.repo, "--allow")[0], 2)
+        self.assertEqual(run(self.repo, "--allow", "missing")[0], 2)
         Path(self.repo, ".hygiene-allow").write_text("no-colon-here\n")
-        self.assertEqual(run(self.repo)[0], 1)
+        self.assertEqual(run(self.repo)[0], 2)
         with tempfile.TemporaryDirectory() as notgit:
-            self.assertEqual(run(notgit)[0], 1)
+            self.assertEqual(run(notgit)[0], 2)
 
     def test_hygiene_catches_secret_symlink_and_path(self):
         # ADV6-1: a key, a symlink to a home path, a file named for a private repo.
@@ -215,7 +220,7 @@ class HygieneTest(unittest.TestCase):
             os.symlink("/Us" + "ers/x", os.path.join(repo, "l"))
             Path(repo, "zorbla" + "x-ops.md").write_text("")
             code, d = self.json_in(repo)
-            self.assertEqual((code, d["hits_outside_allowlist"]), (2, 3))
+            self.assertEqual((code, d["hits_outside_allowlist"]), (1, 3))
             self.assertEqual({(f["path"], f["group"]) for f in d["files"]},
                              {("k.md", "secret"), ("l", "home"),
                               ("zorbla" + "x-ops.md", "private")})
@@ -237,8 +242,8 @@ class HygieneTest(unittest.TestCase):
             Path(repo, "keys.md").write_text("\n".join(keys) + "\n")
             Path(repo, "prose.md").write_text("\n".join(prose) + "\n")
             code, d = self.json_in(repo)
-            self.assertEqual(code, 2)
-            self.assertEqual(d["groups"]["secret"], {"lines": len(keys), "files": 1})
+            self.assertEqual(code, 1)
+            self.assertEqual(lf(d["groups"]["secret"]), {"lines": len(keys), "files": 1})
             out = run(repo)[1] + run(repo, "--json")[1]
             for key in keys:
                 self.assertNotIn(key, out)
@@ -251,9 +256,9 @@ class HygieneTest(unittest.TestCase):
                 "172." + "20.1.2\n172." + "31.0.1\nnas" + ".local here\n"
                 "172.32.0.1\n172.15.0.1\n~/.local/state\n")
             code, d = self.json_in(repo)
-            self.assertEqual(code, 2)
-            self.assertEqual(d["groups"]["email"], {"lines": 1, "files": 1})
-            self.assertEqual(d["groups"]["lan"], {"lines": 3, "files": 1})
+            self.assertEqual(code, 1)
+            self.assertEqual(lf(d["groups"]["email"]), {"lines": 1, "files": 1})
+            self.assertEqual(lf(d["groups"]["lan"]), {"lines": 3, "files": 1})
 
     def test_binary_scanned_for_home_over_printable_runs(self):
         with tempfile.TemporaryDirectory() as repo:
@@ -265,7 +270,7 @@ class HygieneTest(unittest.TestCase):
             code, d = self.json_in(repo)
             # one run of 8+ bytes carries the home path; the 7-byte run and the
             # person text are not evaluated in a binary
-            self.assertEqual(code, 2)
+            self.assertEqual(code, 1)
             self.assertEqual(d["files"], [{"path": "a.png", "group": "home", "lines": 1}])
             self.assertEqual(d["oversize"], 0)
             # UTF-16 (a BOM, or NULs on 90% of the odd or even bytes) is text (ADV10-8)
@@ -289,7 +294,7 @@ class HygieneTest(unittest.TestCase):
             Path(repo, "f").write_bytes(b"x" * (4 * 1024 * 1024 + 1)
                                         + ("\n/Us" + "ers/me/x\n").encode())
             code, d = self.json_in(repo)
-            self.assertEqual(code, 2)
+            self.assertEqual(code, 1)
             self.assertEqual(d["groups"]["home"]["lines"], 1)
             self.assertEqual(d["oversize"], 1)
             # a binary and a UTF-16 file over the cap stream too, a run across a chunk seen
@@ -304,7 +309,7 @@ class HygieneTest(unittest.TestCase):
             self.assertEqual(d["oversize"], 2)
 
     def test_hygiene_relay_adv11_15_first_line(self):
-        # agent-relay's ADV11-15: a tracked file over 4 MiB whose first line holds a home
+        # the relay's ADV11-15: a tracked file over 4 MiB whose first line holds a home
         # path and an email passed by path only, exit 0; streamed now (S14), both counted.
         # Binaries still skip lan, domain, private, person and sibling (ADV10-17, unchanged)
         with tempfile.TemporaryDirectory() as repo:
@@ -313,7 +318,7 @@ class HygieneTest(unittest.TestCase):
                                               + "example.com\n").encode() + b"y" * (5 << 20))
             git(repo, "add", "big.md")
             code, d = self.json_in(repo)
-            self.assertEqual(code, 2)
+            self.assertEqual(code, 1)
             self.assertEqual(sorted((f["path"], f["group"], f["lines"]) for f in d["files"]),
                              [("big.md", "email", 1), ("big.md", "home", 1)])
             self.assertEqual(d["oversize"], 1)
@@ -327,7 +332,7 @@ class HygieneTest(unittest.TestCase):
             self.assertEqual(self.json_in(repo)[0], 0)
             for row in ("*.md: secret", "tests/*.md: secret,home", "tests/fixture*/k.md: secret"):
                 Path(repo, ".hygiene-allow").write_text(row + "\n")
-                self.assertEqual(run(repo)[0], 1, row)
+                self.assertEqual(run(repo)[0], 2, row)
 
     def test_symlink_target_not_followed(self):
         with tempfile.TemporaryDirectory() as repo, tempfile.TemporaryDirectory() as out:
@@ -343,11 +348,11 @@ class HygieneTest(unittest.TestCase):
         code, d = self.json_result()
         self.assertEqual(list(d["groups"]), sorted(GENERIC + ["domain", "private", "person"]))
         code, out, err = run(self.repo)
-        groups = [row.split()[0] for row in out.splitlines()[1:9]]
+        groups = [row.split()[0] for row in out.splitlines()[1:len(GENERIC) + 4]]
         self.assertEqual(groups, GENERIC + ["domain", "private", "person"])
         for args in ((), ("--json",), ("--require-private",)):
             code, out, err = run(self.repo, *args)
-            self.assertEqual(code, 2)
+            self.assertEqual(code, 1)
             for rx in REGEXES:
                 self.assertNotIn(rx, out + err, args)
             self.assertEqual(err, "", args)
@@ -360,17 +365,17 @@ class HygieneTest(unittest.TestCase):
                              % missing)
             # the scan runs on the generic groups, and its exit follows them
             d = json.loads(out)
-            self.assertEqual((code, sorted(d["groups"])), (2, sorted(GENERIC)))
+            self.assertEqual((code, sorted(d["groups"])), (1, sorted(GENERIC)))
             with tempfile.TemporaryDirectory() as repo:
                 git(repo, "init", "-q")
                 Path(repo, "p.md").write_text(FIXTURES["person"] + "\n" + FIXTURES["domain"])
                 self.assertEqual(run(repo, env={ENV: missing})[0], 0)
-                self.assertEqual(run(repo)[0], 2)
+                self.assertEqual(run(repo)[0], 1)
                 # an allow row naming a group the absent list would add is tolerated
                 Path(repo, ".hygiene-allow").write_text("p.md: person\n")
                 self.assertEqual(run(repo, env={ENV: missing})[0], 0)
                 Path(repo, ".hygiene-allow").write_text("p.md: nosuchgroup\n")
-                self.assertEqual(run(repo)[0], 1)
+                self.assertEqual(run(repo)[0], 2)
 
     def test_require_private_exits_two(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -388,7 +393,7 @@ class HygieneTest(unittest.TestCase):
                 self.assertIn("unreadable; generic groups only", err)
                 self.assertEqual(sorted(json.loads(out)["groups"]), sorted(GENERIC))
             # present: the flag changes nothing
-            self.assertEqual(run(self.repo, "--require-private")[0], 2)
+            self.assertEqual(run(self.repo, "--require-private")[0], 1)
             Path(self.repo, ".hygiene-allow").write_text(
                 "*.txt: home,lan,domain,private,person,sibling\ndocs/*.md: sibling\n"
                 "docs/*/*.md: sibling\n")
@@ -411,9 +416,9 @@ class HygieneTest(unittest.TestCase):
                         {ENV: "", "XDG_CONFIG_HOME": "", "HOME": str(Path(tmp, "home"))}):
                 code, out, err = run(repo, "--json", env=env)
                 d = json.loads(out)
-                self.assertEqual((code, err), (2, ""), env)
-                self.assertEqual(d["groups"]["codename"], {"lines": 1, "files": 1})
-                self.assertEqual(d["groups"]["home"], {"lines": 1, "files": 1})
+                self.assertEqual((code, err), (1, ""), env)
+                self.assertEqual(lf(d["groups"]["codename"]), {"lines": 1, "files": 1})
+                self.assertEqual(lf(d["groups"]["home"]), {"lines": 1, "files": 1})
                 code, out, err = run(repo, env=env)
                 self.assertIn("x.md  codename  1", out.splitlines())
                 self.assertNotIn("frobni[z]", out + err)
@@ -427,7 +432,7 @@ class HygieneTest(unittest.TestCase):
                 path = os.path.join(tmp, "p.tsv")
                 Path(path).write_text("# ok\n" + line + "\n")
                 code, out, err = run(self.repo, env={ENV: path})
-                self.assertEqual((code, out), (1, ""), line)
+                self.assertEqual((code, out), (2, ""), line)
                 self.assertIn("%s:2: bad entry" % path, err)
                 self.assertNotIn("glimmer", err.lower(), line)
 

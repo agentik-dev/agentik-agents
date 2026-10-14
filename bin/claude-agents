@@ -11,16 +11,19 @@ seat that launched it when that seat is listed, else a row of its own.
 
 Sources, all read-only (status writes nothing anywhere):
 
-  the session plugin's dirs   ${XDG_STATE_HOME:-~/.local/state}/claude-code-session/sessions/<sid>/
+  the session plugin's dirs   ${XDG_STATE_HOME:-~/.local/state}/agentik-session/sessions/<sid>/
+                              (the old claude-code-session/ while it is the one there);
                               (meter.json, measure.json, activity.json, turn-ended.json);
                               CLAUDE_AGENTS_SESSIONS_DIR overrides the sessions dir
   Claude Code's transcripts   the seat's transcript (its first 4 KB, for the cwd) and each
                               helper's subagents/agent-<id>.jsonl (first 4 KB, last 64 KB;
                               the cost scan streams it once) beside agent-<id>.meta.json
-  agentroute's ledger         $AGENTROUTE_LOG, else ${AGENTROUTE_STATE_DIR:-…/agentroute}/requests.jsonl
+  agentroute's ledger         $AGENTROUTE_LOG, else ${AGENTROUTE_STATE_DIR:-…/agentik-agents/route}/requests.jsonl
                               (its last 2 MB)
   claude-api-agent's runs     runs/<id>/run.json and progress.json beside its usage log
-                              ($CLAUDE_API_AGENT_LOG's dir, else ${XDG_STATE_HOME:-…}/claude-api-agent)
+                              ($CLAUDE_API_AGENT_LOG's dir, else ${XDG_STATE_HOME:-…}/agentik-agents/api)
+                              Each default folder falls back to its old name (agentroute/,
+                              claude-api-agent/) while that is the one that exists.
 
 Only ids, model and tool names, numbers, timestamps and the `what` labels (a cwd
 basename, a helper's description) leave this tool: never prompt, result or
@@ -97,18 +100,28 @@ def state_home() -> pathlib.Path:
     return pathlib.Path(os.environ.get("XDG_STATE_HOME") or (pathlib.Path.home() / ".local" / "state"))
 
 
+def migrated(new: pathlib.Path, old: pathlib.Path) -> pathlib.Path:
+    """agentik-r1 6.3: the new folder when it exists, else the old one when it exists, else
+    the new. The env overrides are read before this and still win."""
+    if new.exists():
+        return new
+    return old if old.exists() else new
+
+
 def sessions_dir() -> pathlib.Path:
+    """The session plugin's state folder (c1): agentik-session, else claude-code-session."""
     over = os.environ.get("CLAUDE_AGENTS_SESSIONS_DIR")
     if over:
         return pathlib.Path(over)
-    return state_home() / "claude-code-session" / "sessions"
+    return migrated(state_home() / "agentik-session", state_home() / "claude-code-session") / "sessions"
 
 
 def ledger_path() -> pathlib.Path:
     """Found as agentroute finds it (bin/agentroute STATE_DIR / LOG_PATH)."""
     if os.environ.get("AGENTROUTE_LOG"):
         return pathlib.Path(os.environ["AGENTROUTE_LOG"])
-    sd = os.environ.get("AGENTROUTE_STATE_DIR") or str(state_home() / "agentroute")
+    sd = os.environ.get("AGENTROUTE_STATE_DIR") or str(
+        migrated(state_home() / "agentik-agents" / "route", state_home() / "agentroute"))
     return pathlib.Path(sd) / "requests.jsonl"
 
 
@@ -116,7 +129,7 @@ def runs_dir() -> pathlib.Path:
     """claude-api-agent's run dirs, found as it makes them: beside its usage log."""
     if os.environ.get("CLAUDE_API_AGENT_LOG"):
         return pathlib.Path(os.environ["CLAUDE_API_AGENT_LOG"]).parent / "runs"
-    return state_home() / "claude-api-agent" / "runs"
+    return migrated(state_home() / "agentik-agents" / "api", state_home() / "claude-api-agent") / "runs"
 
 
 # -- small readers ------------------------------------------------------------

@@ -1,30 +1,28 @@
 # .hygiene-allow: <path-glob>: <group>[,<group>]; `*` stays inside one path segment.
-# Read by scripts/hygiene. No row excepts the owner's own terms except where public-r1
-# keeps them; every other row is `sibling` (the plugin's own name, claude-code-agents,
-# until its rename, and the sibling plugins it names) or `home` on a placeholder path.
+# Read by scripts/hygiene (vendored from agentik-commons). No row excepts the owner's own
+# terms except where public-r1 keeps them; a `sibling` row names a sibling tool, a `home`
+# row a placeholder path, and a `renamed` row (agentik-r1 6.1) an old name kept on purpose.
 # LICENSE's copyright line and plugin.json's author field carry the owner's name.
 LICENSE: person
-plugin/.claude-plugin/plugin.json: sibling,person
-# The marketplace and the Makefile carry the plugin's name.
-.claude-plugin/marketplace.json: sibling
-Makefile: sibling
-# The README: the plugin's name, its command namespace and its install lines.
-README.md: sibling
+plugin/.claude-plugin/plugin.json: person
 # The open items cite the session plugin's conventions doc by name.
 NICE_TO_HAVE.md: sibling
-# The README renderer's config path names the plugin that renders it; this file names it.
+# The README renderer's config path names the plugin that renders it.
 .claude/respeak/config.yaml: sibling
-.hygiene-allow: sibling
-# The tools name the plugin (its command namespace, its paths) or a sibling plugin.
-bin/agentroute: sibling
-bin/claude-agents: sibling
-bin/claude-local: sibling
-bin/localrig: sibling
-bin/queue-mvp: sibling
-# The plugin's agents, commands and skills name its command namespace.
-plugin/agents/*.md: sibling
-plugin/commands/delegate-local.md: sibling
-plugin/skills/*/SKILL.md: sibling
+# This file names the old names its rows except, and the sibling tools.
+.hygiene-allow: renamed,sibling
+# The Makefile's alias install lines: the eight tools keep their names until 2026-12-31.
+Makefile: renamed
+# The tools: the eight are the aliases (their own names, usage, the files they run), the
+# readers keep the old folders as fallbacks (6.3), and the dispatcher maps each verb to one.
+bin/*: renamed
+# The router forwards Claude Code's x-claude-code-session-id header, a name not ours, and
+# the status tool falls back to the session plugin's old state folder (c1).
+bin/agentroute: renamed,sibling
+bin/claude-agents: renamed,sibling
+# A local agent's description names a task kind, design decisions.
+plugin/agents/local-implement.md: sibling
+
 # The design records name the plugin and the siblings they read, one row per file.
 design/01-local-agent-lane.md: sibling
 design/02-local-rig.md: sibling
@@ -46,7 +44,9 @@ design/02-local-rig/rig-unsloth-misrouted-2026-09-05.log: home
 design/packets/a-s3-status.md: sibling
 design/packets/a-s4-layout.md: sibling
 design/packets/a-s5-status-api.md: sibling
-# Tests: the router's fixtures name the plugin's namespace; the status fixtures put their
-# session cwds in the home of an invented user, `x`.
-tests/test-agentroute.py: sibling
-tests/test-status.py: home,sibling
+# Tests: they drive the tools under their alias names, cover the old folders as fallbacks,
+# and the router's fixtures carry Claude Code's session header; the status fixtures put
+# their session cwds in the home of an invented user, `x`.
+tests/*: renamed
+tests/test-route.py: renamed,sibling
+tests/test-status.py: home,renamed,sibling

@@ -1,6 +1,6 @@
 ---
 name: local-implement
-description: ONLY works in a claude-local-routed session (it uses model local/default); in a plain `claude` session the call fails — check with /claude-code-agents:agents-status. Bounded mechanical implementation on the LOCAL model (free), in an isolated worktree — bulk edits, renames, boilerplate, a small function with a named test as the contract. The task MUST name the files to edit and the exact test or command that proves it done; the caller verifies. Not for design decisions or open-ended work.
+description: ONLY works in a session started by `agentik-agents local` (it uses model local/default); in a plain `claude` session the call fails — check with /agents:status. Bounded mechanical implementation on the LOCAL model (free), in an isolated worktree — bulk edits, renames, boilerplate, a small function with a named test as the contract. The task MUST name the files to edit and the exact test or command that proves it done; the caller verifies. Not for design decisions or open-ended work.
 tools: Read, Edit, Write, Bash, Glob, Grep
 model: local/default
 effort: medium

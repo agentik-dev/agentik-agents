@@ -1,0 +1,105 @@
+#!/bin/sh
+# agentik-agents: the one command for the agents tools (agentik-r1 section 4.2).
+#
+#   agentik agents <verb> [args...]    through the agentik front door, or
+#   agentik-agents <verb> [args...]    directly
+#
+# Each verb execs one of the tools beside this file, its args unchanged (the table
+# in `--help`). The tools are found in this file's resolved directory (readlink -f),
+# so the installed link runs the checkout's own copies. Exit: the tool's own code on
+# dispatch; 0 for --help, help, --version and doctor (it reports, it does not gate);
+# 2 for usage, no verb or an unknown one. POSIX sh, no interpreter.
+VERSION=1.2.0
+
+self=$(readlink -f -- "$0" 2>/dev/null) || self=$0
+here=$(CDPATH= cd -P -- "$(dirname -- "$self")" >/dev/null && pwd -P) || exit 2
+
+usage() {
+	echo "usage: agentik agents <verb> [args...] | agentik agents --help | --version" >&2
+	echo "verbs: api setup-key key-status edit-key remove-key pin-proxy usage profiles help" >&2
+	echo "       fanout costs local status fold rig route doctor" >&2
+	exit 2
+}
+
+table() {
+	cat <<EOF
+usage: agentik agents <verb> [args...]
+
+  verb                runs (beside this file)
+  api [profile] ...   claude-api-agent ...
+  setup-key           claude-api-agent --setup-key ...
+  key-status          claude-api-agent --key-status ...
+  edit-key            claude-api-agent --edit-key ...
+  remove-key          claude-api-agent --remove-key ...
+  pin-proxy           claude-api-agent --pin-proxy ...
+  usage               claude-api-agent --usage ...
+  profiles            claude-api-agent --list-profiles ...
+  help api            claude-api-agent --wrapper-help
+  fanout ...          claude-fanout ...
+  costs ...           claude-costs ...
+  local ...           claude-local ...
+  status ...          claude-agents status ...
+  fold ...            claude-agents fold ...
+  rig ...             localrig ...
+  route ...           agentroute ...
+  doctor              each tool on PATH, the API key's status, the local lane's check
+
+The old names on the right stay on PATH as aliases until 2026-12-31.
+EOF
+	exit 0
+}
+
+run() {
+	tool=$1 && shift
+	exec "$here/$tool" "$@"
+}
+
+doctor() {
+	for t in claude-api-agent claude-fanout claude-costs agentroute claude-local localrig \
+		claude-agents queue-mvp agentik-agents agentik; do
+		p=$(command -v "$t" 2>/dev/null) || p=
+		printf '  %-18s %s\n' "$t" "${p:-NOT ON PATH}"
+	done
+	echo ""
+	echo "  API lane:"
+	"$here/claude-api-agent" --key-status 2>&1 | sed 's/^/    /'
+	echo ""
+	echo "  Local lane:"
+	"$here/agentroute" --check 2>&1 | sed 's/^/    /'
+	echo ""
+	echo "  doctor reports; it does not gate. For a script, use the verb that returns a"
+	echo "  status: 'agentik agents route --check' exits non-zero on a FAIL row."
+	exit 0
+}
+
+[ $# -gt 0 ] || usage
+verb=$1 && shift
+case $verb in
+api) run claude-api-agent "$@" ;;
+setup-key | key-status | edit-key | remove-key | pin-proxy | usage)
+	run claude-api-agent "--$verb" "$@" ;;
+profiles) run claude-api-agent --list-profiles "$@" ;;
+help | -h | --help)
+	case $#:${1-} in
+	0:) table ;;
+	1:api) run claude-api-agent --wrapper-help ;;
+	*) usage ;;
+	esac
+	;;
+--version)
+	[ $# -eq 0 ] || usage
+	echo "agentik-agents $VERSION"
+	exit 0
+	;;
+fanout) run claude-fanout "$@" ;;
+costs) run claude-costs "$@" ;;
+local) run claude-local "$@" ;;
+status | fold) run claude-agents "$verb" "$@" ;;
+rig) run localrig "$@" ;;
+route) run agentroute "$@" ;;
+doctor)
+	[ $# -eq 0 ] || usage
+	doctor
+	;;
+*) usage ;;
+esac
