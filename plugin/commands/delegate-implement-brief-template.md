@@ -5,7 +5,7 @@ disable-model-invocation: true
 
 # Delegated-implement brief template
 
-A reusable header for briefing a headless **implementer** run (`claude-api-agent
+A reusable header for briefing a headless **implementer** run (`agentik-agents api
 --profile analyze --model claude-opus-5`, or a fresh un-profiled run when the
 implementer must edit — the profiles are read-only). Distilled from measured
 failures driving this lane against a job-queue service's repo.

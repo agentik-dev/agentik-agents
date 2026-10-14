@@ -1,19 +1,19 @@
 ---
 name: delegated-review
-description: Delegate read-only code review to headless API-billed agents under a hard budget cap, running in the background. Use when the user asks to review, audit, or find bugs in code "in the background", "in parallel", "with the API key / API budget", "while I keep working", "with claude-fanout", or "have the agents review X" — i.e. when the review should be offloaded to the separate API key rather than done inline on the seat. Do NOT use for applying fixes (the delegates are read-only) or for a quick inline review the user wants answered directly in this session.
-allowed-tools: Bash(claude-fanout:*), Bash(claude-costs:*), Bash(claude-api-agent:*), Bash(mktemp:*), Bash(cat:*), Bash(jq:*), Write, Read
+description: Delegate read-only code review to headless API-billed agents under a hard budget cap, running in the background. Use when the user asks to review, audit, or find bugs in code "in the background", "in parallel", "with the API key / API budget", "while I keep working", "with the fan-out", or "have the agents review X" — i.e. when the review should be offloaded to the separate API key rather than done inline on the seat. Do NOT use for applying fixes (the delegates are read-only) or for a quick inline review the user wants answered directly in this session.
+allowed-tools: Bash(agentik-agents *), Bash(mktemp:*), Bash(cat:*), Bash(jq:*), Write, Read
 ---
 
 # Delegated code review
 
 Offload a **read-only** code review to headless `claude --bare` agents billed to
 the separate API key, under one hard budget cap, in the background — then report
-the confirmed findings. This is the same workflow as the `/claude-code-agents:delegate-review`
+the confirmed findings. This is the same workflow as the `/agents:delegate-review`
 slash command; prefer the command when the user types it, and use this skill
 when they ask for the same thing in natural language.
 
-The tools (`claude-fanout`, `claude-costs`, `claude-api-agent`) are on `PATH`; if one is
-not, say `run make install in the repo` and stop.
+The tool, `agentik-agents` (its verbs `fanout`, `costs` and `api`), is on `PATH`; if it is
+not, say `run make install in the agentik-agents repo` and stop.
 
 **The boundary that governs everything:** a delegate has only `Read`, `Grep`,
 `Glob` — no `Bash`, `Edit`, or `Write`. So delegation is for *analysis that
@@ -34,7 +34,7 @@ something makes it thrash to a useless, still-billed placeholder.
    working and is notified on completion:
 
    ```
-   claude-fanout --budget-usd <N> --profile review -j <dimensions> \
+   agentik-agents fanout --budget-usd <N> --profile review -j <dimensions> \
      --id <recognisable-slug> --phase review \
      --add-dir <target-dir> --tasks <tempfile> --out <tempdir>/run --json
    ```
@@ -61,5 +61,5 @@ something makes it thrash to a useless, still-billed placeholder.
    code yourself before stating it plainly; mark anything unconfirmed as
    "reported, unverified". A delegate's finding is a lead, not a fact.
 
-Never apply fixes here — reviewing is the deliverable. Use `claude-costs` (or the
-`/claude-code-agents:delegate-costs` command) afterward to see what it cost.
+Never apply fixes here — reviewing is the deliverable. Use `agentik-agents costs` (or the
+`/agents:delegate-costs` command) afterward to see what it cost.

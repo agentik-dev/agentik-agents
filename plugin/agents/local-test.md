@@ -1,6 +1,6 @@
 ---
 name: local-test
-description: ONLY works in a claude-local-routed session (it uses model local/default); in a plain `claude` session the call fails — check with /claude-code-agents:agents-status. Run a NAMED test, lint, or build command on the LOCAL model (free) and report the output verbatim. Use to keep long test output out of the main context — "run go test ./... and tell me what failed", "run make check". The task must name the exact command; the agent does not choose or fix anything.
+description: ONLY works in a session started by `agentik-agents local` (it uses model local/default); in a plain `claude` session the call fails — check with /agents:status. Run a NAMED test, lint, or build command on the LOCAL model (free) and report the output verbatim. Use to keep long test output out of the main context — "run go test ./... and tell me what failed", "run make check". The task must name the exact command; the agent does not choose or fix anything.
 tools: Bash, Read
 model: local/default
 effort: low

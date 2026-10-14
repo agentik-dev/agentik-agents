@@ -1,11 +1,11 @@
 ---
-allowed-tools: Bash(claude-fanout:*), Bash(claude-costs:*), Bash(mktemp:*), Bash(cat:*), Bash(jq:*), Write, Read
+allowed-tools: Bash(agentik-agents *), Bash(mktemp:*), Bash(cat:*), Bash(jq:*), Write, Read
 description: Delegate a read-only code review to headless API-billed agents under a hard budget cap, in the background
 disable-model-invocation: false
 ---
 
 Delegate a read-only code review of `$ARGUMENTS` to headless `claude --bare`
-agents (billed to the separate API key via `claude-fanout`), running in the
+agents (billed to the separate API key via `agentik-agents fanout`), running in the
 background under one hard budget cap, then report the confirmed findings.
 
 `$ARGUMENTS` is what to review — one or more file paths, a directory, or a short
@@ -29,12 +29,12 @@ Follow these steps precisely.
    `--budget-usd` = (number of dimensions) × $1.00 unless the user gave a
    figure. State the budget you chose.
 
-3. **Launch in the background.** (If `claude-fanout` is not on PATH, say `run make install
-   in the repo` and stop.) Run `claude-fanout` with `run_in_background`
+3. **Launch in the background.** (If `agentik-agents` is not on PATH, say `run make install
+   in the agentik-agents repo` and stop.) Run `agentik-agents fanout` with `run_in_background`
    (so the user keeps working and gets notified on completion):
 
    ```
-   claude-fanout --budget-usd <N> --profile review -j <dimensions> \
+   agentik-agents fanout --budget-usd <N> --profile review -j <dimensions> \
      --id <short-slug-for-this-review> --phase review \
      --add-dir <repo-or-target-dir> \
      --tasks <tempfile> --out <tempdir>/run --json
@@ -43,7 +43,7 @@ Follow these steps precisely.
    Use `--add-dir` for every directory whose files the prompts reference — a
    delegate can only read paths under an added dir plus its own reasoning. Tag
    `--id` with something the user will recognise (a ticket, a branch, a short
-   description) so `claude-costs --by id` can roll it up later.
+   description) so `agentik-agents costs --by id` can roll it up later.
 
 4. **When it completes, read `<tempdir>/run/fanout.json`** and report:
    - Findings from shards whose `status` is `ok`, grouped by severity, each as
