@@ -5,8 +5,7 @@
 # LICENSE's copyright line and plugin.json's author field carry the owner's name.
 LICENSE: person
 plugin/.claude-plugin/plugin.json: sibling,person
-# The marketplace and the Makefile carry the plugin's name.
-.claude-plugin/marketplace.json: sibling
+# The Makefile carries the plugin's name.
 Makefile: sibling
 # The README: the plugin's name, its command namespace and its install lines.
 README.md: sibling

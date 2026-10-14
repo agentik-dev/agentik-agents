@@ -51,11 +51,13 @@ test: ## Run every test suite (stub-driven ones spend nothing; pinning needs cla
 .PHONY: check check-unlocked
 # conventions §5: one gate per tree (.check.lock), walled at 840 s (inside the relay's 900),
 # held off above load 4 x cores. A last stderr line `bounded: stop: lock|load|wall` is unrun,
-# never red. scripts/bounded is byte-identical to claude-code-session's; never edit it here.
+# never red. scripts/{agentik,hygiene,bounded} are vendored from agentik-commons by its
+# scripts/sync, which writes scripts/vendored.sha256; never edit them here.
 check: ## The gate: check-unlocked under scripts/bounded (lock, 840 s wall, load 4)
 	scripts/bounded --lock .check.lock --wall 840 --load 4 -- $(MAKE) check-unlocked
 
-check-unlocked: ## The gate unbounded: syntax-check every tool, every test suite, then hygiene
+check-unlocked: ## The gate unbounded: the vendored copies, syntax-check every tool, every test suite, then hygiene
+	@shasum -a 256 -c --status scripts/vendored.sha256 && echo "  scripts/vendored.sha256: vendored copies OK"
 	@bash -n bin/claude-api-agent && echo "  bin/claude-api-agent: bash syntax OK"
 	@bash -n bin/claude-local && echo "  bin/claude-local: bash syntax OK"
 	@bash -n bin/localrig && echo "  bin/localrig: bash syntax OK"
@@ -66,10 +68,10 @@ check-unlocked: ## The gate unbounded: syntax-check every tool, every test suite
 	@$(MAKE) --no-print-directory hygiene
 
 .PHONY: hygiene
-# conventions §6: scripts/hygiene is byte-identical to agentik-session's; never edit it here.
+# conventions §6: scripts/hygiene is vendored from agentik-commons; never edit it here.
 # It scans for the generic groups in the file and the owner's terms in the private list kept
 # outside the repo ($$AGENTIK_HYGIENE_PRIVATE, else ~/.config/agentik/hygiene-private.tsv).
-hygiene: ## The public-hygiene scan (conventions §6): counts only, exit 2 on a hit outside .hygiene-allow
+hygiene: ## The public-hygiene scan (conventions §6): counts only, exit 1 on a hit outside .hygiene-allow
 	scripts/hygiene
 
 .PHONY: plugin-dev
