@@ -2,7 +2,7 @@
 #
 # The stores live outside the repo, in the secrets directory: $AGENTIK_AGENTS_SECRETS, else
 # ${XDG_CONFIG_HOME:-$HOME/.config}/agentik/agents/secrets. sops looks for this file from the
-# current directory up, so run `sops updatekeys` from the repo; `claude-api-agent --setup-key`
+# current directory up, so run `sops updatekeys` from the repo; `agentik agents setup-key`
 # does so itself. The rule below matches a store's absolute path by its `secrets/` segment.
 #
 # Only secret VALUES are encrypted (see encrypted_regex); the surrounding YAML keys stay
@@ -13,7 +13,7 @@
 # it, and the API lane had never been run on this machine. Its ciphertext remains in git
 # history, so the key itself was retired by REVOKING it in the Anthropic Console --
 # deleting the file does not do that. Anyone who wants the API lane runs
-# `claude-api-agent --setup-key`, which writes a fresh store under the rule below.
+# `agentik agents setup-key`, which writes a fresh store under the rule below.
 #
 # One recipient, the owner's Mac. On your own machine, put yours in its place
 # (`age-keygen -y ~/.config/sops/age/keys.txt` prints it).
@@ -27,6 +27,6 @@ creation_rules:
     # cleartext -- reproduced on 2026-09-05 with `openrouter_key`. Suffixes covered:
     #   _api_key  _key  _token  _secret  _password  _credential
     # Anything else in a secrets file stays readable, which is what keeps diffs reviewable.
-    # tests/test-localrig.sh fails if a store made under this rule leaves a value unencrypted.
+    # tests/test-rig.sh fails if a store made under this rule leaves a value unencrypted.
     encrypted_regex: '(_api_key|_key|_token|_secret|_password|_credential)$'
 

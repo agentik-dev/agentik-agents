@@ -47,10 +47,10 @@ uninstall: ## Remove the symlinks from BINDIR (only if they point back here); ag
 .PHONY: test
 test: ## Run every test suite (stub-driven ones spend nothing; pinning needs claude)
 	@fail=0; \
-	for t in tests/test-dispatch.sh tests/test-arg-handling.sh tests/test-run-path.sh tests/test-flag-pinning.sh tests/test-localrig.sh; do \
+	for t in tests/test-dispatch.sh tests/test-arg-handling.sh tests/test-run-path.sh tests/test-flag-pinning.sh tests/test-rig.sh; do \
 	  printf '=== %s ===\n' "$$t"; bash "$$t" || fail=1; \
 	done; \
-	for t in tests/test-fanout.py tests/test-costs.py tests/test-agentroute.py tests/test-status.py tests/test-apirun.py tests/test-hygiene.py; do \
+	for t in tests/test-fanout.py tests/test-costs.py tests/test-route.py tests/test-status.py tests/test-apirun.py tests/test-hygiene.py; do \
 	  printf '=== %s ===\n' "$$t"; python3 "$$t" || fail=1; \
 	done; \
 	exit $$fail

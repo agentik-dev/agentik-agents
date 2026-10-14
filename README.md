@@ -1,26 +1,55 @@
-# claude-code-agents
+# agentik-agents
 
 Headless / delegated Claude Code runs billed to an **Anthropic API key** (a Claude
-Console project) instead of the interactive **Team Premium** subscription seat.
+Console project) instead of the interactive **Team Premium** subscription seat, a
+local-model lane, and the cost and status reports for both.
 
 Interactive `claude` is untouched and keeps using the Team Premium login. Only the
-`claude-api-agent` wrapper uses the API key.
+`agentik agents api` verb and the verbs built on it use the API key.
+
+Everything here is one command, `agentik agents <verb>` (or `agentik-agents <verb>`;
+`agentik` is the front door every agentik tool installs):
+
+| verb | what it does |
+|---|---|
+| `api [profile] ...` | one headless run billed to the API key |
+| `setup-key`, `key-status`, `edit-key`, `remove-key` | the API key's SOPS store |
+| `pin-proxy`, `usage`, `profiles`, `help api` | the proxy pin, the usage log, the role profiles, the wrapper's help |
+| `fanout ...` | concurrent shards under one hard budget |
+| `costs ...` | API spend vs. seat-absorbed work vs. the free local lane |
+| `local ...` | a seat session whose subagents run on the local model |
+| `status`, `fold` | every seat, helper, local agent and API run now (read-only) |
+| `rig ...` | bring local backends up and down |
+| `route ...` | the loopback router: Claude models to Anthropic, local models to the local server |
+| `doctor` | what is on PATH, the key's status, the local lane's check (reports, never gates) |
+
+`agentik agents --help` prints the table with the tool each verb runs.
+
+The plugin is `agents@agentik`, from the agentik marketplace:
+
+```sh
+claude plugin marketplace add agentik-dev/agentik-commons
+claude plugin install agents@agentik
+```
+
+It gives `/agents:status`, `/agents:delegate-review`, `/agents:delegate-costs`,
+`/agents:delegate-local`, the `agents:local-*` agents, and two skills.
 
 ## Driving this from a Claude Code session
 
 If you are a Claude Code session about to use these tools to do work, read this
-first. All four are on `PATH` (`claude-api-agent`, `claude-fanout`,
-`claude-costs`, `claude-agents`).
+first. All four are on `PATH` (`agentik agents api`, `agentik agents fanout`,
+`agentik agents costs`, `agentik agents status`).
 
 **Pick the tool by the job:**
 
 | You want to… | Use | Notes |
 | --- | --- | --- |
-| Delegate one read-only review/exploration, billed to the API key | `claude-api-agent --profile review\|explore\|analyze` | Returns a JSON envelope; parse `.structured_output` (review) or `.result` (explore/analyze). |
-| Run many read-only shards under one hard dollar cap | `claude-fanout --budget-usd N --tasks file.json` | Bounded aggregate spend; per-shard substance checks; Ctrl-C kills the delegates. |
-| Run mechanical work on the local model for free | in a `claude-local` session: `/claude-code-agents:delegate-local <task>`, or name a `claude-code-agents:local-*` agent | Zero dollars, zero seat use. Only routed sessions can reach it — see Lane 3. |
-| See what you have spent and where the tokens go | `claude-costs [--by id\|phase]` | Three lanes (real API cash, seat-absorbed, free local), plus tuning advice. |
-| See what every agent on this Mac is doing now | `claude-agents status [--json] [--watch N] [--all] [--since MIN]` | One row per seat (a session the session plugin tracks) and per helper under it, in lane `seat`, `helper` or `local`, plus each `claude-api-agent` run in lane `api` (nested under the seat that launched it): model, elapsed, turns, context, cost, last tool, state. Read-only; ids, names and numbers only, never prompt or tool-input text. Exit 1 when the session plugin's state dir cannot be read. |
+| Delegate one read-only review/exploration, billed to the API key | `agentik agents api --profile review\|explore\|analyze` | Returns a JSON envelope; parse `.structured_output` (review) or `.result` (explore/analyze). |
+| Run many read-only shards under one hard dollar cap | `agentik agents fanout --budget-usd N --tasks file.json` | Bounded aggregate spend; per-shard substance checks; Ctrl-C kills the delegates. |
+| Run mechanical work on the local model for free | in a `agentik agents local` session: `/agents:delegate-local <task>`, or name a `agents:local-*` agent | Zero dollars, zero seat use. Only routed sessions can reach it — see Lane 3. |
+| See what you have spent and where the tokens go | `agentik agents costs [--by id\|phase]` | Three lanes (real API cash, seat-absorbed, free local), plus tuning advice. |
+| See what every agent on this Mac is doing now | `agentik agents status [--json] [--watch N] [--all] [--since MIN]` | One row per seat (a session the session plugin tracks) and per helper under it, in lane `seat`, `helper` or `local`, plus each `agentik agents api` run in lane `api` (nested under the seat that launched it): model, elapsed, turns, context, cost, last tool, state. Read-only; ids, names and numbers only, never prompt or tool-input text. Exit 1 when the session plugin's state dir cannot be read. |
 
 **The one boundary that matters: profiles are strictly read-only.** A
 `--profile` delegate has only `Read`, `Grep`, `Glob` — no `Bash`, no `Edit`, no
@@ -50,10 +79,10 @@ cat > /tmp/shards.json <<'JSON'
 [{"label":"correctness","prompt":"Review bin/foo.py for correctness bugs. Cite file:line."},
  {"label":"security","prompt":"Review bin/foo.py for security issues. Cite file:line."}]
 JSON
-claude-fanout --budget-usd 2.00 --profile review -j 2 \
+agentik agents fanout --budget-usd 2.00 --profile review -j 2 \
               --id TASK-123 --phase review --add-dir "$PWD" \
               --tasks /tmp/shards.json --json | jq '.findings'
-claude-costs --by id        # what TASK-123 cost
+agentik agents costs --by id        # what TASK-123 cost
 ```
 
 Then **verify the findings yourself before acting on them** — a delegate's
@@ -69,16 +98,16 @@ file the delegate reads can exfiltrate any file this user can read. See
 **Watch for, and report back on:**
 
 - **`degenerate` / `unparseable` shards, or `denial_count > 0`** — the delegate
-  hit its read-only limit and gave up. `claude-costs` flags the wasted spend.
+  hit its read-only limit and gave up. `agentik agents costs` flags the wasted spend.
   The fix is almost always to pre-supply facts, not to re-prompt.
 - **`spent_usd_is_upper_bound: true`** in a fan-out aggregate — some shard ran
   without a usable cost figure and was charged its reservation as an estimate;
   the real total is lower.
-- **`PRICE TABLE DISAGREES` from `claude-costs`** — the built-in list prices no
-  longer match what your account is billed; update `PRICES` in `bin/claude-costs`.
+- **`PRICE TABLE DISAGREES` from `agentik agents costs`** — the built-in list prices no
+  longer match what your account is billed; update `PRICES` in `bin/agentik agents costs`.
 - **`PROXY CHANGED` / endpoint or interpreter env warnings** from the wrapper —
   the key's egress path or runtime changed; investigate before trusting the run.
-- **Cost dispersion and output-share advice** from `claude-costs` — the levers
+- **Cost dispersion and output-share advice** from `agentik agents costs` — the levers
   for making delegation cheaper (fund the tail, shorten prompts, drop effort).
 
 The rest of this document is the reference behind these instructions.
@@ -92,41 +121,41 @@ the work inline, forget the tools exist, or defer it. The fix is a
 Code **plugin** providing two slash commands and a skill:
 
 Plugin commands are namespaced by the plugin name, so they are typed as
-`/claude-code-agents:<command>` (the bare `/delegate-review` form is not found — verified).
+`/agents:<command>` (the bare `/delegate-review` form is not found — verified).
 
 | Invoke | What it does |
 | --- | --- |
-| `/claude-code-agents:delegate-review <target>` | Deterministic. Builds review shards for `<target>`, runs `claude-fanout` in the background under a budget cap, reports confirmed findings. This is the reliable path — you type it. |
-| `/claude-code-agents:delegate-costs [id\|phase]` | Reports API spend, seat-absorbed work, the free local lane, and tuning advice. |
-| `/claude-code-agents:delegate-local <task>` | Deterministic. Preflights that the session is routed through `agentroute`, picks the `local-*` agent for the job, briefs it, verifies the lead. This is the reliable way to say "use my local LLM". |
-| `/claude-code-agents:agents-status` | Runs `claude-agents status` (every seat, helper and local agent now) and `agentroute --check` (is the local lane usable), and relays both. Starts nothing. |
+| `/agents:delegate-review <target>` | Deterministic. Builds review shards for `<target>`, runs `agentik agents fanout` in the background under a budget cap, reports confirmed findings. This is the reliable path — you type it. |
+| `/agents:delegate-costs [id\|phase]` | Reports API spend, seat-absorbed work, the free local lane, and tuning advice. |
+| `/agents:delegate-local <task>` | Deterministic. Preflights that the session is routed through the local router, picks the `local-*` agent for the job, briefs it, verifies the lead. This is the reliable way to say "use my local LLM". |
+| `/agents:status` | Runs `agentik agents status` (every seat, helper and local agent now) and `agentik agents route --check` (is the local lane usable), and relays both. Starts nothing. |
 | the `delegated-review` skill | Model-triggered fallback: fires when you ask for delegated/background review in natural language. Still the model's choice, so the command is the guarantee. |
-| the `local-delegation` skill | Model-triggered fallback for "use my local model / run it locally / for free / on Qwen". Same preflight and agent table as `/claude-code-agents:delegate-local`. |
+| the `local-delegation` skill | Model-triggered fallback for "use my local model / run it locally / for free / on Qwen". Same preflight and agent table as `/agents:delegate-local`. |
 
 **Load it for one session** (no persistent change — good for trying it):
 
 ```sh
 claude --plugin-dir ~/src/agentik-agents/plugin       # API lanes + commands
-claude-local --plugin-dir ~/src/agentik-agents/plugin # same, with the local lane reachable
+agentik agents local --plugin-dir ~/src/agentik-agents/plugin # same, with the local lane reachable
 ```
 
 **Install it persistently** (available in every session; mutates `~/.claude`
 global plugin config, so run these yourself):
 
 ```sh
-claude plugin marketplace add ~/src/agentik-agents
-claude plugin install claude-code-agents@claude-code-agents
+claude plugin marketplace add agentik-dev/agentik-commons
+claude plugin install agents@agentik
 ```
 
-Then start sessions with `claude-local` whenever you want the local lane; plain `claude`
+Then start sessions with `agentik agents local` whenever you want the local lane; plain `claude`
 keeps everything else (the plugin's API lanes still work there, the `local-*` agents do
-not, and `/claude-code-agents:delegate-local` will say so instead of failing).
+not, and `/agents:delegate-local` will say so instead of failing).
 
 **The installed copy is a snapshot.** `claude plugin install` copies the plugin into
-`~/.claude/plugins/cache/claude-code-agents/claude-code-agents/<version>/`, so sessions
+`~/.claude/plugins/cache/agentik/agents/<version>/`, so sessions
 load *that*, not this working tree. After editing an agent, command, or skill here, run
-`claude plugin update claude-code-agents@claude-code-agents` (or bump `version` in
-`plugin/.claude-plugin/plugin.json` and in `.claude-plugin/marketplace.json`'s entry);
+`claude plugin update agents@agentik` (or bump `version` in
+`plugin/.claude-plugin/plugin.json` and in the agentik marketplace's entry);
 `--plugin-dir ~/src/agentik-agents/plugin` always loads the live tree and is the way to try an edit first. The `bin/` tools are unaffected — they are
 symlinks into this tree.
 
@@ -135,10 +164,10 @@ agents, commands and skills, not the tests or `design/`.
 
 `make plugin-dev` / `make plugin-install` print these; `claude plugin validate plugin`
 checks the manifest (it fails on the reserved `claude-` name until the rename). The plugin's commands still just shell out to the same
-`claude-api-agent` / `claude-fanout` / `claude-costs` on `PATH` — the plugin only
+`agentik agents api` / `agentik agents fanout` / `agentik agents costs` on `PATH` — the plugin only
 makes a session *reach for them reliably*, it does not change what they do.
 
-## Lane 3: the local agent lane (`claude-local`, `agentroute`)
+## Lane 3: the local agent lane (`agentik agents local`, `agentik agents route`)
 
 The two lanes above cost money (API) or seat capacity (subscription). The third costs
 neither: an interactive session stays on the **claude.ai seat** (Fable on the main
@@ -149,17 +178,17 @@ Claude Code allows one API endpoint per session, so the split happens in a tiny
 loopback router that routes **by model name**:
 
 ```
-claude-local  →  agentroute 127.0.0.1:8787  →  claude-* models: api.anthropic.com, headers verbatim (seat kept)
+agentik agents local  →  the router 127.0.0.1:8787  →  claude-* models: api.anthropic.com, headers verbatim (seat kept)
                                              →  local/* or name:tag: Ollama /v1/messages (Anthropic format, native)
 ```
 
 | You want to… | Do | Notes |
 | --- | --- | --- |
-| A seat session whose subagents are local | `claude-local [claude args]` | Starts the router if needed, runs `agentroute --check`, refuses to start on a FAIL, then execs `claude` with no credential variable so the seat stays active. It also sets `CLAUDE_CODE_ATTRIBUTION_HEADER=0`, `CLAUDE_CODE_ALWAYS_ENABLE_EFFORT=1`, `API_TIMEOUT_MS`, `CLAUDE_CODE_SUBAGENT_MODEL=sonnet`, and passes `--agents` with a local `Explore` override (skipped, with a warning, if you pass your own `--agents`). Plain `claude` is untouched. |
+| A seat session whose subagents are local | `agentik agents local [claude args]` | Starts the router if needed, runs `agentik agents route --check`, refuses to start on a FAIL, then execs `claude` with no credential variable so the seat stays active. It also sets `CLAUDE_CODE_ATTRIBUTION_HEADER=0`, `CLAUDE_CODE_ALWAYS_ENABLE_EFFORT=1`, `API_TIMEOUT_MS`, `CLAUDE_CODE_SUBAGENT_MODEL=sonnet`, and passes `--agents` with a local `Explore` override (skipped, with a warning, if you pass your own `--agents`). Plain `claude` is untouched. |
 | Send a specific piece of work local | Ask for `local-explore`, `local-summarize`, `local-review`, `local-implement`, `local-test` — or the built-in `Explore` | Plugin agents (`plugin/agents/`), each with `model: local/default` and an explicit `effort`. The launcher also overrides the built-in `Explore` with a 3-tool session-scoped definition on the local model. Agents that name no model (`general-purpose` and kin) default to **`sonnet`**, not local: they carry every tool in the session, and 54 tool schemas are a 31k-token prompt — three minutes of prefill per turn on the 27B (measured). `CLAUDE_LOCAL_SUBAGENT=local/default` or `inherit` changes that; `CLAUDE_LOCAL_EXPLORE=inherit` leaves Explore alone. |
 | Keep a piece of work on Claude | name `sonnet` / `opus` / `fable` in the Agent call | Model names decide the route; nothing else does. Forks always stay on the main model. |
-| See what the lane did | `claude-costs` (LOCAL LANE block) or the ledger `~/.local/state/agentroute/requests.jsonl` | $0 by construction; tokens, wall time, agent ids, and a "Sonnet 5 list" figure sizing what it spared. No prompt content is ever logged. |
-| Preflight only | `agentroute --check` | router · upstream · Ollama version ≥ 0.33.0 (0.33.2 is what was measured) · model present · policy. |
+| See what the lane did | `agentik agents costs` (LOCAL LANE block) or the ledger `~/.local/state/agentik-agents/route/requests.jsonl` | $0 by construction; tokens, wall time, agent ids, and a "Sonnet 5 list" figure sizing what it spared. No prompt content is ever logged. |
+| Preflight only | `agentik agents route --check` | router · upstream · Ollama version ≥ 0.33.0 (0.33.2 is what was measured) · model present · policy. |
 
 **What the router changes on local routes, and why (all measured on this Mac, 2026-09-04):**
 
@@ -183,11 +212,11 @@ anything but loopback, or hold a credential of its own.
 
 **Two things about this that will bite you if nobody says them.** The launcher's built-in
 `Explore` override is a *copy* of `plugin/agents/local-explore.md`'s prompt, inlined in
-`bin/claude-local` so it can be passed with `--agents`. The copy is live immediately
+`bin/agentik agents local` so it can be passed with `--agents`. The copy is live immediately
 through the symlink while the agent file needs `claude plugin update`, so the two drift;
-if you edit one, edit both. And `~/.config/agentroute/backends.json` holds the Unsloth API
+if you edit one, edit both. And `~/.config/agentik/agents/route/backends.json` holds the Unsloth API
 key in cleartext at mode 600. It is per-machine state, deliberately outside git and
-outside sops, so a rebuild re-creates it with `localrig up`; do not freeze it into a
+outside sops, so a rebuild re-creates it with `agentik agents rig up`; do not freeze it into a
 dotfiles repo without encrypting it first.
 
 **Sizing the local model (Qwen 3.8 27B q8_0, Ollama 0.33.2, M4 Max 128 GB):** prefill
@@ -208,23 +237,23 @@ for every delegation turn on the main thread, so batch small asks into one local
 
 **Local lane requirements** (the API lane needs none of these): Ollama **≥ 0.33.0**
 running, the model pulled (`ollama pull qwen3.8:27b-mtp-q8_0`, ~30 GB), and python3.
-`localrig up llama` also needs `brew install llama.cpp`; `localrig up unsloth` needs
+`agentik agents rig up llama` also needs `brew install llama.cpp`; `agentik agents rig up unsloth` needs
 Unsloth (`curl -fsSL https://unsloth.ai/install.sh | sh`) and downloads ~29 GB on first
-run. `agentroute --check` names whichever of these is missing.
+run. `agentik agents route --check` names whichever of these is missing.
 
-**The rig: more than one local backend.** `localrig up llama` starts llama-server on the
+**The rig: more than one local backend.** `agentik agents rig up llama` starts llama-server on the
 GGUF Ollama already has (two slots, host prompt cache, dense checkpoints, Qwen's template
-from `share/`), `localrig up flash` starts llama-server on Qwen3.8 Flash-Next (Unsloth's
+from `share/`), `agentik agents rig up flash` starts llama-server on Qwen3.8 Flash-Next (Unsloth's
 UD-IQ4_XS from `~/models`, the full 262144 ctx, one slot, mlock, and `--metrics` for
 example-mac's llm-exporter; it shares :8081 with `llama`, so bring up one or the other),
-`localrig up mlx` registers Ollama's MLX build (`qwen3.8:27b-mxfp8`,
+`agentik agents rig up mlx` registers Ollama's MLX build (`qwen3.8:27b-mxfp8`,
 2x the prose decode via MTP and a 10 s reload; its cross-conversation prefix cache did
-**not** speed up a new agent shape when measured, see design/02 §3.6d), `localrig up unsloth` starts Unsloth's API server on
-its Dynamic GGUF. Each writes `~/.config/agentroute/backends.json`, which `agentroute`
+**not** speed up a new agent shape when measured, see design/02 §3.6d), `agentik agents rig up unsloth` starts Unsloth's API server on
+its Dynamic GGUF. Each writes `~/.config/agentik/agents/route/backends.json`, which the router
 reads at start, so an agent selects a backend with `model: local/<name>` (or
-`local/<name>/<model>`) and nothing else changes; `localrig default <name>` makes one of
-them the `local/default` every `local-*` agent uses (restart the router after either). `localrig status` shows what is up and
-what the router sees; `localrig down` stops it. Measurements and the reasoning are in
+`local/<name>/<model>`) and nothing else changes; `agentik agents rig default <name>` makes one of
+them the `local/default` every `local-*` agent uses (restart the router after either). `agentik agents rig status` shows what is up and
+what the router sees; `agentik agents rig down` stops it. Measurements and the reasoning are in
 `design/02-local-rig.md`.
 
 **Knobs** (env, all optional). Router: `AGENTROUTE_BACKENDS` (JSON, overrides the
@@ -240,12 +269,12 @@ backends, with `AGENTROUTE_LOCAL_AUTH="Bearer sk-unsloth-…"`), `AGENTROUTE_LOC
 (what `local/default` resolves to), `AGENTROUTE_LOCAL_DEFAULT_EFFORT` / `_MAX_EFFORT`,
 `AGENTROUTE_LOCAL_MAX_TOKENS`, `AGENTROUTE_LOCAL_CONCURRENCY`,
 `AGENTROUTE_LOCAL_STRIP_TOKEN_REMINDER=0` to keep the reminder, `AGENTROUTE_LOG`.
-`tests/test-agentroute.py` drives the real router against stub backends (87 checks, no
+`tests/test-route.py` drives the real router against stub backends (87 checks, no
 network, no model).
 
 ## Local agent lane credentials
 
-No setup is required to start. Run `claude-local` and the lane works with no key configured anywhere. If `localrig` finds no llama key in the environment or in sops, it generates a random one for that run. It hands that key to `llama-server` through a 0600 file, and writes the same value into the router's `backends.json`. That is safer than a shared fixed key: the value is never reused and never written anywhere shared. `localrig` prints a one-line note on how to persist it, if you choose to.
+No setup is required to start. Run `agentik agents local` and the lane works with no key configured anywhere. If `agentik agents rig` finds no llama key in the environment or in sops, it generates a random one for that run. It hands that key to `llama-server` through a 0600 file, and writes the same value into the router's `backends.json`. That is safer than a shared fixed key: the value is never reused and never written anywhere shared. `agentik agents rig` prints a one-line note on how to persist it, if you choose to.
 
 ### What these keys are, and are not
 
@@ -259,26 +288,26 @@ Resolution order, per key:
 2. Otherwise, sops, decrypted only at the moment the key is needed.
 3. Otherwise, a fallback: a fresh random key for llama, or the key Unsloth Studio printed to its own log for unsloth. This is the last resort before an error.
 
-`localrig keys status` shows which source is in play per key, plus the stored value's length. It never shows the value itself.
+`agentik agents rig keys status` shows which source is in play per key, plus the stored value's length. It never shows the value itself.
 
 ### Where a new provider's key goes
 
 One file, one naming rule, and nothing to edit in `.sops.yaml`.
 
 Put it in `local-backends.sops.yaml` in the secrets directory under the name `<provider>_api_key`, using
-`localrig keys set <provider>`. The provider name is whatever you call that backend in
-`AGENTROUTE_BACKENDS` or `localrig`, so a vLLM server you route to as `local/vllm` uses
+`agentik agents rig keys set <provider>`. The provider name is whatever you call that backend in
+`AGENTROUTE_BACKENDS` or `agentik agents rig`, so a vLLM server you route to as `local/vllm` uses
 `vllm_api_key`.
 
 | You are adding | Key name | How |
 | --- | --- | --- |
-| A local server the router talks to (llama.cpp, Unsloth, vLLM, LM Studio, an MLX server) | `<provider>_api_key` | `localrig keys set <provider>` |
-| A cloud endpoint you route to instead of Anthropic | `<provider>_api_key`, plus `AGENTROUTE_UPSTREAM` or a backend entry carrying its `auth` | `localrig keys set <provider>` |
-| The Anthropic key for the API lane (`claude-api-agent`, `claude-fanout`) | `anthropic_api_key` in `anthropic-api-key.sops.yaml` in the secrets directory | `claude-api-agent --setup-key` |
+| A local server the router talks to (llama.cpp, Unsloth, vLLM, LM Studio, an MLX server) | `<provider>_api_key` | `agentik agents rig keys set <provider>` |
+| A cloud endpoint you route to instead of Anthropic | `<provider>_api_key`, plus `AGENTROUTE_UPSTREAM` or a backend entry carrying its `auth` | `agentik agents rig keys set <provider>` |
+| The Anthropic key for the API lane (`agentik agents api`, `agentik agents fanout`) | `anthropic_api_key` in `anthropic-api-key.sops.yaml` in the secrets directory | `agentik agents setup-key` |
 
 `secrets/` is ignored whole in `.gitignore`: the store lives outside the repo, so neither a
 copy an old checkout left in the tree nor a decrypted spill can be committed.
-`tests/test-localrig.sh` checks that git tracks nothing there and that both are refused.
+`tests/test-agentik agents rig.sh` checks that git tracks nothing there and that both are refused.
 
 `.sops.yaml` needs no edit because `encrypted_regex` matches by suffix, not by a list of
 names: anything ending `_api_key`, `_key`, `_token`, `_secret`, `_password`, or
@@ -289,32 +318,32 @@ writes that value to git in the clear. That failure was reproduced on 2026-09-05
 One sharp edge worth knowing: **the rule is copied into each file when it is created.**
 Editing `.sops.yaml` does not change files that already exist, so a file written under an
 older rule keeps that older rule and can still admit a cleartext value. To bring a file up
-to date, decrypt it, delete it, and re-encrypt it. `tests/test-localrig.sh` builds a store of invented values
+to date, decrypt it, delete it, and re-encrypt it. `tests/test-agentik agents rig.sh` builds a store of invented values
 under a throwaway identity, never reading the real one, and fails if a credential-shaped
 value in it is unencrypted, or if its embedded rule has drifted from `.sops.yaml`.
 
 Any key is also overridable per run without touching sops, as `LOCALRIG_<PROVIDER>_KEY`.
-That wins over the stored value, which is what `localrig keys status` reports in its source
+That wins over the stored value, which is what `agentik agents rig keys status` reports in its source
 column.
 
 ### Commands
 
 | Command | What it does | When to use it |
 | --- | --- | --- |
-| `localrig keys status` | Prints each key's source (environment, sops, or unset) and whether a value is stored, with its length. Never prints the value. | Check where a key is coming from, e.g. before debugging a 401. |
-| `localrig keys init` | Generates a llama key and stores it in sops if none exists. Idempotent: if one is already stored, it says so and points to `set` instead. | First time you want a persistent llama key instead of a per-run random one. |
-| `localrig keys set llama` / `localrig keys set unsloth` | Prompts for the value with input hidden, then writes it to sops. The value goes in on stdin, never in argv, so it never appears in `ps` or shell history. | Rotating a key, or entering one you already have. |
-| `localrig keys sync-unsloth` | Captures the key Unsloth Studio printed once into its own log at first start, and stores it in sops. | After a fresh Unsloth Studio start, so a rebuild does not have to scrape the log again. |
-| `localrig down llama` then `localrig up llama` | Restarts the llama backend so it picks up a changed key. | Right after `keys set llama` or `keys init`. |
-| `localrig restart-router` | Restarts the router, which otherwise keeps the old key because it reads `backends.json` only at startup. | Right after any key change, alongside restarting the backend. |
+| `agentik agents rig keys status` | Prints each key's source (environment, sops, or unset) and whether a value is stored, with its length. Never prints the value. | Check where a key is coming from, e.g. before debugging a 401. |
+| `agentik agents rig keys init` | Generates a llama key and stores it in sops if none exists. Idempotent: if one is already stored, it says so and points to `set` instead. | First time you want a persistent llama key instead of a per-run random one. |
+| `agentik agents rig keys set llama` / `agentik agents rig keys set unsloth` | Prompts for the value with input hidden, then writes it to sops. The value goes in on stdin, never in argv, so it never appears in `ps` or shell history. | Rotating a key, or entering one you already have. |
+| `agentik agents rig keys sync-unsloth` | Captures the key Unsloth Studio printed once into its own log at first start, and stores it in sops. | After a fresh Unsloth Studio start, so a rebuild does not have to scrape the log again. |
+| `agentik agents rig down llama` then `agentik agents rig up llama` | Restarts the llama backend so it picks up a changed key. | Right after `keys set llama` or `keys init`. |
+| `agentik agents rig restart-router` | Restarts the router, which otherwise keeps the old key because it reads `backends.json` only at startup. | Right after any key change, alongside restarting the backend. |
 
 ### First-time setup on a new machine
 
 1. Install sops and age: `brew install sops age`.
 2. Put your age private key at `~/.config/sops/age/keys.txt`, mode 600. For a new identity, generate it with `age-keygen -o ~/.config/sops/age/keys.txt`. Then print the public half with `age-keygen -y` and add that line to `.sops.yaml`.
 3. If you added a new recipient, re-wrap the existing secrets so that key can read them: `sops updatekeys ~/.config/agentik/agents/secrets/local-backends.sops.yaml`, from the repo so sops reads `.sops.yaml`. Run this only from a machine that can already decrypt the file. Adding a recipient to `.sops.yaml` alone does nothing for files that already exist.
-4. Verify: `localrig keys status` should show `llama_api_key` sourced from sops.
-5. Optional: run `localrig keys init` if no llama key is stored yet.
+4. Verify: `agentik agents rig keys status` should show `llama_api_key` sourced from sops.
+5. Optional: run `agentik agents rig keys init` if no llama key is stored yet.
 
 ### There is no API key in this repo
 
@@ -329,13 +358,13 @@ Console is the control that actually works. And adding a recipient to `.sops.yam
 re-wrap files that already exist; only `sops updatekeys` does that.
 
 The local agent lane needs none of this. To use the API lane, supply a key with
-`claude-api-agent --setup-key`, which writes `anthropic-api-key.sops.yaml` in the
+`agentik agents setup-key`, which writes `anthropic-api-key.sops.yaml` in the
 secrets directory, encrypted under the single rule in `.sops.yaml`. `ANTHROPIC_API_KEY` in the
 environment also works and takes precedence.
 
 ### Rotation and revocation
 
-Rotate a local key with `localrig keys set`, then restart the backend that uses it (see Commands above). No external service needs notifying.
+Rotate a local key with `agentik agents rig keys set`, then restart the backend that uses it (see Commands above). No external service needs notifying.
 
 Removing a person's age recipient from `.sops.yaml` stops future re-encryptions from including them. It does not retract what they already hold: the old ciphertext stays in git history, and their key still unwraps it. Actually retiring a local key means rotating it, which is cheap here because these credentials are local and self-issued.
 
@@ -343,7 +372,7 @@ Removing a person's age recipient from `.sops.yaml` stops future re-encryptions 
 
 The key `llama-server` loads matches the sops value byte for byte. It is passed with `--api-key-file`, so it never appears in the process argv. A wrong key gets HTTP 401. The sops key gets HTTP 200. A call routed to local/llama returns from the right backend, and the key never appears in the router's ledger.
 
-`tests/test-localrig.sh` asserts source precedence, that `status` never prints a value, and that the plaintext is absent from the ciphertext on disk. It also asserts that a missing secrets file still leaves the lane working.
+`tests/test-agentik agents rig.sh` asserts source precedence, that `status` never prints a value, and that the plaintext is absent from the ciphertext on disk. It also asserts that a missing secrets file still leaves the lane working.
 
 ## How the separation works
 
@@ -364,24 +393,19 @@ auto-discovery. Pass context explicitly with `--add-dir`, `--system-prompt-file`
 ## Layout
 
 ```
-bin/claude-api-agent                  # the wrapper (symlinked from ~/.local/bin)
-bin/claude-fanout                     # concurrent shards under one hard budget
-bin/claude-costs                      # API spend vs. seat-absorbed work vs. the free local lane
-bin/claude-agents                     # status: every seat, helper, local agent and API run now (read-only)
-bin/agentroute                        # loopback router: Claude models -> Anthropic (seat kept), local models -> Ollama
-bin/claude-local                      # launcher: seat session whose subagents run on the local model
-bin/queue-mvp                         # the durable-queue orchestration MVP (an interim orchestrator)
-bin/localrig                          # bring local backends up/down (llama-server, Unsloth, Ollama MLX) -> ~/.config/agentroute/backends.json
+bin/agentik-agents                    # the dispatcher: agentik agents <verb> (symlinked from ~/.local/bin)
+bin/                                  # the tools it runs, one per verb group (agentik agents --help lists them)
 share/qwen3.8-chat_template.jinja     # Qwen's chat template (Ollama's GGUF blobs carry none; llama-server needs it)
 design/                               # design/01-local-agent-lane.md + evidence
 Makefile                              # install / uninstall / test / check / doctor targets
-scripts/bounded                       # make check's lock, wall and load breaker (claude-code-session's, byte-identical)
-scripts/hygiene                       # the public-hygiene scan (byte-identical across the agentik plugins)
+scripts/agentik                       # the agentik front door, vendored from agentik-commons
+scripts/bounded                       # make check's lock, wall and load breaker, vendored
+scripts/hygiene                       # the public-hygiene scan, vendored
+scripts/vendored.sha256               # the three copies' sums; make check checks them
 .hygiene-allow                        # the scan's exceptions, each with its reason
-.claude-plugin/marketplace.json       # the marketplace: one plugin, source ./plugin
-plugin/.claude-plugin/plugin.json     # the plugin manifest (name, version, license)
+plugin/.claude-plugin/plugin.json     # the plugin manifest (name agents, version, license)
 plugin/agents/                        # local-explore / -summarize / -review / -implement / -test (model: local/default)
-plugin/commands/                      # /claude-code-agents:delegate-review, delegate-costs, delegate-local, agents-status
+plugin/commands/                      # /agents:delegate-review, delegate-costs, delegate-local, status
 plugin/skills/                        # delegated-review, local-delegation: natural-language triggers for the same flows
 tests/                                # stub-driven suites; no API key, no spend
 .sops.yaml                            # creation rules: age recipient + encrypted_regex
@@ -389,13 +413,19 @@ tests/                                # stub-driven suites; no API key, no spend
 LICENSE                               # MIT
 ```
 
-`make install` links `claude-api-agent`, `claude-fanout`, `claude-costs`,
-`agentroute`, `claude-local`, `localrig`, `claude-agents` and `queue-mvp` into `~/.local/bin` (override with `BINDIR=`) — the
-directory `claude` itself is installed in, so nothing has to be added to a shell rc. It is idempotent and only ever touches
-`BINDIR`; `make uninstall` removes the links (only if they point back here).
-Each tool resolves its own path (the wrapper via `readlink -f`, the Python tools
-via `__file__`), so they always find each other; the secret files they read sit in the secrets directory,
-outside the repo.
+`make install` links `agentik-agents` and the tools it runs into `~/.local/bin` (override
+with `BINDIR=`), and copies the vendored `agentik` front door there. That is the directory
+`claude` itself is installed in, so nothing has to be added to a shell rc. It is idempotent
+and only ever touches `BINDIR`; `make uninstall` removes the links (only if they point back
+here) and leaves `agentik`, which the other agentik tools install too. The tools' old names
+stay on PATH as aliases until 2026-12-31. The dispatcher and each tool resolve their own
+path (`readlink -f`, or `__file__`), so they always find each other; the secret files they
+read sit in the secrets directory, outside the repo.
+
+State lives under `${XDG_STATE_HOME:-~/.local/state}/agentik-agents/` (`api/` for the usage
+log and run dirs, `route/` for the router's ledger, pids and logs) and the router's backends
+under `${XDG_CONFIG_HOME:-~/.config}/agentik/agents/route/`. Until those folders move, each
+tool reads and writes the old folder when it is the only one there.
 
 ## Secret handling
 
@@ -532,7 +562,7 @@ git clone https://github.com/agentik-dev/agentik-agents.git
 cd agentik-agents && make install         # symlinks into ~/.local/bin (already on PATH)
 (umask 077; mkdir -p ~/.config/agentik/agents/secrets)
 install -m 600 anthropic-api-key.sops.yaml ~/.config/agentik/agents/secrets/   # the store you were sent
-claude-api-agent --key-status                 # expect: decrypt check: OK
+agentik agents key-status                 # expect: decrypt check: OK
 ```
 
 `--key-status` reports presence, permissions, and a character count — it never
@@ -596,7 +626,7 @@ that requires one for egress, stripping it breaks every run. So the proxy is
 left in place and *pinned*:
 
 ```sh
-claude-api-agent --pin-proxy     # record the current proxy as known-good
+agentik agents pin-proxy     # record the current proxy as known-good
 ```
 
 This writes `proxy-pin.conf` in the config home,
@@ -618,7 +648,7 @@ This is only for the **API lane**. The local agent lane needs no key at all, and
 ships no key: see [There is no API key in this repo](#there-is-no-api-key-in-this-repo).
 
 ```sh
-claude-api-agent --setup-key     # hidden prompt, entered twice, then encrypted
+agentik agents setup-key     # hidden prompt, entered twice, then encrypted
 ```
 
 The encrypted file lands in the secrets directory, outside the repo; there is nothing to
@@ -627,7 +657,7 @@ commit.
 Verify without spending anything:
 
 ```sh
-claude-api-agent --key-status    # never prints the key
+agentik agents key-status    # never prints the key
 ```
 
 ## Usage
@@ -642,10 +672,10 @@ rule (work that exists only in the final message dies with the run's context).
 untouched-argv behavior:
 
 ```sh
-claude-api-agent -p "Inspect the test changes and report only actionable issues" \
+agentik agents api -p "Inspect the test changes and report only actionable issues" \
                  --output-format json
 
-git diff | claude-api-agent -p "Review this diff; list only actionable issues" \
+git diff | agentik agents api -p "Review this diff; list only actionable issues" \
                  --output-format json --model claude-opus-5
 ```
 
@@ -663,9 +693,9 @@ Profiles are canned flag sets for agent-style delegation. All three are
 **read-only** and enforce that in the harness, not by asking the model nicely:
 
 ```sh
-claude-api-agent --profile review  --no-stdin --add-dir ~/src/myrepo -p "Review the changed files"
-claude-api-agent --profile explore --no-stdin --add-dir ~/src/myrepo -p "Where is auth handled?"
-claude-api-agent --profile analyze --no-stdin --add-dir ~/src/myrepo -p "Why does the retry loop stall?"
+agentik agents api --profile review  --no-stdin --add-dir ~/src/myrepo -p "Review the changed files"
+agentik agents api --profile explore --no-stdin --add-dir ~/src/myrepo -p "Where is auth handled?"
+agentik agents api --profile analyze --no-stdin --add-dir ~/src/myrepo -p "Why does the retry loop stall?"
 ```
 
 | Profile | Model | Effort | Output |
@@ -806,7 +836,7 @@ forwards a token spelled like one of its own options — it refuses instead.
 
 ```sh
 # runs on Opus 5 with a 25-cent ceiling instead of the profile's defaults
-claude-api-agent --profile review --no-stdin --model claude-opus-5 --max-budget-usd 0.25 -p "..."
+agentik agents api --profile review --no-stdin --model claude-opus-5 --max-budget-usd 0.25 -p "..."
 ```
 
 Change the default ceiling for all profiles with `CLAUDE_API_AGENT_BUDGET_USD`.
@@ -834,10 +864,10 @@ runaway loops rather than to shape normal spend.
 ### Usage log
 
 Every run that emits a JSON envelope appends one metadata line to
-`~/.local/state/claude-api-agent/usage.jsonl` (dir `700`, file `600`).
+`~/.local/state/agentik-agents/api/usage.jsonl` (dir `700`, file `600`).
 
 ```sh
-claude-api-agent --usage        # spend per profile, errored runs, denial attempts
+agentik agents usage        # spend per profile, errored runs, denial attempts
 ```
 
 Recorded: timestamp, profile, session id, models, cost, turns, duration,
@@ -864,16 +894,16 @@ logged, deny-rule blocks are not** — the latter never reach the envelope.
 ### Run dirs: API children in flight
 
 Every run also gets a dir beside the usage log, `runs/<id>/` (mode `700`, the id
-`<UTC yyyymmddThhmmss>-<pid>`), which `claude-agents status` reads for lane `api`:
+`<UTC yyyymmddThhmmss>-<pid>`), which `agentik agents status` reads for lane `api`:
 
 - `run.json`, written before the child starts: `id`, `pid` (the wrapper's),
   `profile`, `tags`, `model`, `started`, `parent_session` (`$CLAUDE_CODE_SESSION_ID`,
-  the calling seat), `fanout` (`$CLAUDE_FANOUT_RUN`, which `claude-fanout` sets on
+  the calling seat), `fanout` (`$CLAUDE_FANOUT_RUN`, which `agentik agents fanout` sets on
   each shard to its run id) and `state: running`. At exit it is rewritten with
   `state` `done` or `failed`, `rc` and `ended`.
 - `progress.json`, under `--profile` only: the child runs with
   `--output-format stream-json --verbose`, and its stdout goes through the
-  internal `claude-agents fold`, which rewrites `turns`, `model`, `last_tool`,
+  internal `agentik agents fold`, which rewrites `turns`, `model`, `last_tool`,
   `last_tool_at`, `usage` (the newest message's), `cost_usd` (the price table,
   each message once) and `updated` at most once a second, and hands back only
   the result event: the same envelope as before, so stdout, the exit code and
@@ -885,14 +915,14 @@ Every run also gets a dir beside the usage log, `runs/<id>/` (mode `700`, the id
   writes it. `CLAUDE_API_AGENT_NO_LOG=1` writes no run dir, and a profile run then
   keeps `--output-format json`.
 
-## Fan-out: `claude-fanout`
+## Fan-out: `agentik agents fanout`
 
 `--max-budget-usd` is per-process, so N shards at the default `$10` is an `$N0`
-exposure. `claude-fanout` holds one pool and refuses to launch work it cannot
+exposure. `agentik agents fanout` holds one pool and refuses to launch work it cannot
 pay for:
 
 ```sh
-bin/claude-fanout --budget-usd 2.00 --profile review -j 4 \
+bin/agentik agents fanout --budget-usd 2.00 --profile review -j 4 \
                   --add-dir ~/src/myrepo --tasks shards.json
 ```
 
@@ -915,15 +945,15 @@ bin/claude-fanout --budget-usd 2.00 --profile review -j 4 \
 - Prompts containing flag-shaped text must come from `--tasks` or after `--`;
   a bare flag-shaped positional is a usage error, not a mangled run.
 
-## Three cost lanes: `claude-costs`
+## Three cost lanes: `agentik agents costs`
 
 Delegated work is paid for in two different currencies, and summing them is
-meaningless. `claude-costs` reports both:
+meaningless. `agentik agents costs` reports both:
 
 ```sh
-bin/claude-costs                 # both lanes plus the ratio
-bin/claude-costs --json          # machine-readable
-bin/claude-costs --check-prices  # print the price table for review
+bin/agentik agents costs                 # both lanes plus the ratio
+bin/agentik agents costs --json          # machine-readable
+bin/agentik agents costs --check-prices  # print the price table for review
 ```
 
 - **API lane — actual dollars.** Real spend billed to the Console project, from
@@ -967,15 +997,15 @@ conventional only because the reporting knows how to roll them up:
 
 ```sh
 # a step that decides
-claude-api-agent --tag id=INC-4471 --tag phase=triage \
+agentik agents api --tag id=INC-4471 --tag phase=triage \
                  --profile analyze --no-stdin -p "Why did the job fail?"
 
 # the fan-out that acts on it — every shard is stamped automatically
-claude-fanout --id INC-4471 --phase fix --budget-usd 2.00 \
+agentik agents fanout --id INC-4471 --phase fix --budget-usd 2.00 \
               --profile review --tasks shards.json
 
-claude-costs             # rolls up by id automatically, with a per-phase split
-claude-costs --by phase  # or group by any key you set
+agentik agents costs             # rolls up by id automatically, with a per-phase split
+agentik agents costs --by phase  # or group by any key you set
 ```
 
 The id is whatever the calling system already uses. A test-runner passes its
@@ -991,7 +1021,7 @@ smuggle some in.
 
 ### Token efficiency
 
-`claude-costs` derives the ratios that point at a specific lever, and pairs each
+`agentik agents costs` derives the ratios that point at a specific lever, and pairs each
 with advice naming what to change. Measured on the eight-shard fan-out:
 
 | Measure | Here | Why it matters |
@@ -1021,7 +1051,7 @@ pass an empty value to switch the rule off.
 
 **Session-window utilization is not available.** The 5-hour and weekly limits
 are not written to any local file; `~/.claude.json` records only the tier
-(`userRateLimitTier`), which `claude-costs` reports. For window utilization, run
+(`userRateLimitTier`), which `agentik agents costs` reports. For window utilization, run
 `/usage` inside an interactive `claude` session.
 
 ### Cost and latency notes for fan-out
@@ -1055,8 +1085,8 @@ simultaneous, then 1 + 25 s + 3):
   effort took ~6 minutes. Run anything substantial in the background rather than
   under a foreground timeout that could kill it mid-flight and forfeit the spend.
 - **`--max-budget-usd` is per-process, so a hand-rolled fan-out has no
-  aggregate ceiling.** Eight bare `claude-api-agent` shards at the default `$10`
-  is an `$80` exposure. This is exactly what `claude-fanout` exists to bound —
+  aggregate ceiling.** Eight bare `agentik agents api` shards at the default `$10`
+  is an `$80` exposure. This is exactly what `agentik agents fanout` exists to bound —
   use it (above) rather than a raw `xargs -P`, which has no shared pool.
 - **The usage log is safe under concurrency.** Four simultaneous runs appended
   8 well-formed lines with no interleaving (local filesystem; `O_APPEND` gives
@@ -1121,7 +1151,7 @@ to the context each run accumulates across turns. See the fan-out notes above.
 | `--wrapper-help` | Wrapper-specific help. |
 
 These are recognized **only when passed as the sole argument**, so they can never
-shadow a prompt: `claude-api-agent -p "--setup-key"` forwards normally.
+shadow a prompt: `agentik agents api -p "--setup-key"` forwards normally.
 
 ### Environment overrides
 
@@ -1137,7 +1167,7 @@ shadow a prompt: `claude-api-agent -p "--setup-key"` forwards normally.
 
 1. Create a new key in the [Claude Console](https://console.anthropic.com/settings/keys)
    for the target project.
-2. `claude-api-agent --setup-key` → confirm the replace prompt → paste the new key.
+2. `agentik agents setup-key` → confirm the replace prompt → paste the new key.
 3. Commit the re-encrypted file.
 4. Revoke the old key in the Console.
 
@@ -1147,7 +1177,7 @@ Console is what actually retires the old key.
 ## Removing the key
 
 ```sh
-claude-api-agent --remove-key                     # delete the encrypted secret
+agentik agents remove-key                     # delete the encrypted secret
 rm -f ~/.config/claude-code/api-key               # if the plaintext fallback was used
 ```
 
@@ -1170,7 +1200,8 @@ sops updatekeys "$S"
 
 ## Tests
 
-`make test` runs every suite; `make check` is the gate: the syntax checks, then `make test`,
+`make test` runs every suite; `make check` is the gate: the vendored copies' sums
+(`scripts/vendored.sha256`), the syntax checks, then `make test`,
 then `make hygiene`, under `scripts/bounded` (one per tree, 840 s wall, held off above load
 4); `make doctor` reports install/key/proxy readiness. Individually:
 
@@ -1179,14 +1210,15 @@ tests/test-arg-handling.sh    # profile flags, overrides, containment refusals
 tests/test-run-path.sh        # exit codes, logger environment, deny rules
 tests/test-fanout.py          # budget ceiling, result validation, interrupts
 tests/test-costs.py           # cost lanes, pricing, price-table self-check
-tests/test-agentroute.py      # router: routing, header policy, local adjustments, streaming, pings, ledger, --check
-tests/test-localrig.sh        # localrig + claude-local: BSD portability, liveness, JSON injection, key masking, help
+tests/test-dispatch.sh        # the dispatcher: each verb, usage, version, doctor, against stubs
+tests/test-route.py           # router: routing, header policy, local adjustments, streaming, pings, ledger, --check
+tests/test-rig.sh             # rig + local: BSD portability, liveness, JSON injection, key masking, help
 tests/test-flag-pinning.sh    # allow-list arity vs. the real claude binary
 tests/test-hygiene.py         # the public-hygiene scan: groups, allowlist, the private list
 ```
 
-`make hygiene` runs `scripts/hygiene`, a byte-identical copy of the scan the agentik plugins
-share. It scans every tracked and untracked-not-ignored file, path and symlink target for
+`make hygiene` runs `scripts/hygiene`, the scan the agentik tools share, vendored from
+agentik-commons by its `scripts/sync`. It scans every tracked and untracked-not-ignored file, path and symlink target for
 generic groups kept in the script (a home path, an RFC 1918 address, a sibling plugin's
 name, a key shape, an email address) and prints counts only, never a matched line. Terms
 private to one owner (a name, a host, a domain, a private repo) are never in the repo: the
@@ -1232,7 +1264,7 @@ distilled into a knowledge corpus, and a run report generated from the queue's
 own audit trail. `--dry-run` exercises the whole policy with canned responses
 and zero spend. It lives here rather than in the service's repo because it
 execs this wrapper, and the service's seam rule reserves model-process spawning
-to `internal/exec` — same reasoning as `claude-fanout`. The service is reached at
+to `internal/exec` — same reasoning as `agentik agents fanout`. The service is reached at
 `--base-url`; the start line queue-mvp prints is `QUEUE_DB_PATH=<db> queued serve`
 unless `QUEUE_MVP_SERVE_CMD` (with `{db}` for the store path) names your service; its
 state defaults to `~/.local/state/queue-service/mvp` (`--state-dir`, `--db`).

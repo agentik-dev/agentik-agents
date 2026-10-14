@@ -16,7 +16,7 @@ api-key
 .env
 .env.*
 
-# claude-fanout run directories (envelopes + aggregates, regenerated per run)
+# the fan-out's run directories (agentik agents fanout: envelopes + aggregates, regenerated per run)
 fanout-runs/
 
 # python bytecode from the test loaders

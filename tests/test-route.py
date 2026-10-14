@@ -6,7 +6,7 @@ Runs the real router as a subprocess against two stub backends (an "upstream" an
 streaming pass-through, pings, count_tokens, the ledger, and --check are all exercised
 with no network, no key, and no model.
 
-    tests/test-agentroute.py
+    tests/test-route.py
 """
 from __future__ import annotations
 

@@ -13,7 +13,7 @@
 # and the cold-start tests run a copy of claude-local beside a stub router. Every process the
 # suite starts is stopped in its EXIT trap, and the developer's own router is never signalled.
 #
-#     tests/test-localrig.sh
+#     tests/test-rig.sh
 set -uo pipefail
 REPO="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 LOCALRIG="$REPO/bin/localrig"
