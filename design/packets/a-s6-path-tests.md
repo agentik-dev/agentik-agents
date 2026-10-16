@@ -38,7 +38,7 @@ At most 100 words: the tests added, red against each plant, green on the branch 
 - acts:
   1. this packet. done
   2. the tests (rulings 1, 2), red against P1-P3 in scratch copies, green on the branch. done: rig 74/0, dispatch 36/0; P1 rig rc 1 (72 passed, 2 failed, both the Explore override's; the copy needs `git init`, else the two `.gitignore` checks fail too), P2 and P3 dispatch rc 1 (35 passed, 1 failed, naming the plant); `make test` rc 0 with claude off PATH (pinning skipped); hygiene 0
-  3. NICE_TO_HAVE.md: the S3 row becomes a one-line "answered by a-s6" note in place.
+  3. NICE_TO_HAVE.md: the S3 row becomes a one-line "answered by a-s6" note in place. done: line 3 only; hygiene 0
 - handover:
   - decide, owner: the agentik marketplace's maintainer (consumer: the agents plugin's install path): the row asks for a test of "the marketplace source", but the per-repo marketplace left in agentik-r1; this repo asserts only that a returning one sources `./plugin`, and the shared marketplace's own `source` for `agents` is checked where that file lives.
-- exit: open
+- exit: closed 2026-10-16: acts 1-3 landed on branch `a-s6-path-tests`; every acceptance line read as written; `make check` left to the observer; nothing pushed.
