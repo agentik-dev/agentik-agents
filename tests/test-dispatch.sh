@@ -102,6 +102,43 @@ else
 fi
 # the dispatcher is POSIX sh
 if sh -n "$REPO/bin/agentik-agents"; then pass=$((pass + 1)); else fail=$((fail + 1)); echo "FAIL sh -n"; fi
+# the plugin's edges (a-s6): plugin/ ships alone and reaches the tools through this dispatcher,
+# so its manifest is the only one, a marketplace here (if one returns) ships plugin/, not the
+# repo root, and no file under plugin/ names a path outside it
+if [ -f "$REPO/plugin/.claude-plugin/plugin.json" ] && [ ! -e "$REPO/.claude-plugin/plugin.json" ]; then
+  pass=$((pass + 1))
+else
+  fail=$((fail + 1)); echo "FAIL plugin manifest: want plugin/.claude-plugin/plugin.json and none at the root"
+fi
+# (into a file: bash 3.2 misparses a heredoc inside $( ) that holds a backtick)
+/usr/bin/python3 - "$REPO" > "$D/plugin-paths" 2>&1 <<'PY'
+import json, os, re, sys
+repo = sys.argv[1]
+market = os.path.join(repo, ".claude-plugin", "marketplace.json")
+if os.path.exists(market):
+    for p in json.load(open(market)).get("plugins", []):
+        if p.get("source") != "./plugin":
+            print("marketplace.json sources %s at %r, not './plugin'" % (p.get("name"), p.get("source")))
+root = os.path.realpath(os.path.join(repo, "plugin"))
+ref = re.compile(r"\$\{?CLAUDE_PLUGIN_ROOT\}?(/[^\s`'\"()]*)?")
+for d, _, files in os.walk(root):
+    for f in sorted(files):
+        path = os.path.join(d, f)
+        try:
+            lines = open(path, encoding="utf-8").read().splitlines()
+        except UnicodeDecodeError:
+            continue
+        rel = os.path.relpath(path, repo)
+        for n, line in enumerate(lines, 1):
+            for m in ref.finditer(line):
+                t = os.path.realpath(root + (m.group(1) or ""))
+                if not (t == root or (t.startswith(root + os.sep) and os.path.exists(t))):
+                    print("%s:%d names %s, not a file inside plugin/" % (rel, n, m.group(0)))
+            if re.search(r"(^|[^.])\.\./", line) or re.search(r"\$\{?REPO\b", line):
+                print("%s:%d names a path outside plugin/" % (rel, n))
+PY
+got="$(cat "$D/plugin-paths")"
+if [ -z "$got" ]; then pass=$((pass + 1)); else fail=$((fail + 1)); printf 'FAIL plugin paths:\n%s\n' "$got"; fi
 
 printf 'test-dispatch: %d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" = 0 ]
