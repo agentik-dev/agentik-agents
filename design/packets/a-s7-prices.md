@@ -37,7 +37,11 @@ At most six lines: the head, each item fixed or kept with its reason, the checks
 - budget: 40 turns, checkpoint at 32; at most 90 tool calls.
 - pin: branch `a-s7-prices`, worktree `.claude/worktrees/a-s7-prices`, off 35026ca.
 - acts:
-  0. this packet.
-  1. rulings 1-4: each named check red first, then the fix.
-  2. no `plugin/` change, so no version bump; `make check`; the charter closes.
-- handover: filled at close.
+  0. this packet. done: 53f19eb
+  1. rulings 1-4: each named check red first, then the fix. done: 41abf02; test-costs 76/0 (main 66), test-status 122/0, test-apirun 81/0; the branch's test-costs in a scratch copy of main's `bin/` 57 passed, 19 failed, the four named checks among them; `one_request=True` twice in `bin/claude-agents`; hygiene 0
+  2. no `plugin/` change, so no version bump; `make check`; the charter closes. done: `git diff main -- plugin/` empty; `make check` rc 0 (every suite 0 failed, hygiene 0, vendored copies OK)
+- handover:
+  - decide, builder (consumer: the seat lane's readers, `delegate-costs` included): the lane reprices its tokens from the table, no longer summing Claude Code's `costUSD`; that figure stays beside it as `recorded_usd` and in the text output.
+  - decide, builder (consumer: any caller of `predicted_cost`): the tier needs `one_request=True`; the default prices a total at the base tier, so no aggregate is tiered by its sum.
+  - open, the next packet: Haiku 5.5's tier on the API lane's per-run totals needs each request's prompt length in the usage log (NICE_TO_HAVE.md, the Haiku 5.5 row).
+- exit: closed 2026-10-16: acts 0-2 landed on branch `a-s7-prices`; every acceptance line read as written; nothing pushed.
