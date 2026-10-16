@@ -12,7 +12,8 @@ Three lanes, three different kinds of number, deliberately never summed:
       Interactive `claude` work covered by the Team Premium seat, read from
       the per-model usage Claude Code records in ~/.claude.json. Priced at API
       list rates, this is what that work *would* have cost had it been billed.
-      A lower bound (see read_subscription_lane's docstring).
+      Its cache writes are priced at the one-hour 2x; it may miss sessions and may
+      over-price subagent writes (see read_subscription_lane's docstring).
       No money left the account -- it consumed seat capacity instead.
 
   Local lane (zero dollars, real tokens and wall time)
@@ -47,8 +48,10 @@ import sys
 # The 5.x rows are the claude-api skill's table (cached 2026-10-06, first-party list
 # rates; packet a-s3 ruling 9), checked row by row against the Anthropic "Pricing"
 # page (platform.claude.com/docs/en/about-claude/pricing) as of 2026-10-14.
-# claude-sonnet-5 stays at the $3/$15 this account was billed (see INTRO_PRICING),
-# although the page now lists $2/$10 as its standard price.
+# claude-sonnet-5 is the page's $2/$10: its footnote says Sonnet 5's launch price,
+# introductory through 2026-08-31, is now its standard price and the rise to $3/$15
+# will not occur (Pricing page, as of 2026-10-14; packet a-s7). This account was
+# billed $3/$15 in August (see INTRO_PRICING); price_table_drift says so if it still is.
 # claude-haiku-5-5 is the tier for prompts up to 100,000 tokens; see LONG_PROMPT_TIERS.
 PRICES = {
     "claude-fable-5-1": (10.00, 50.00),
@@ -62,7 +65,7 @@ PRICES = {
     "claude-opus-4-7": (5.00, 25.00),
     "claude-opus-4-6": (5.00, 25.00),
     "claude-opus-4-5": (5.00, 25.00),
-    "claude-sonnet-5": (3.00, 15.00),
+    "claude-sonnet-5": (2.00, 10.00),
     "claude-sonnet-4-6": (3.00, 15.00),
     "claude-sonnet-4-5": (3.00, 15.00),
     "claude-haiku-4-5": (1.00, 5.00),
@@ -81,23 +84,26 @@ CACHE_READ_RATES = {
 
 # Prompt-length tiers: a request whose prompt (input + cache reads + cache writes)
 # is over the threshold pays these (input, output) rates instead. Only Haiku 5.5
-# has one (Pricing page, "Long context pricing", as of 2026-10-14). It is recorded,
-# not applied: the usage log holds per-run totals, not each request's prompt length,
-# so predicted_cost bills the base tier and the price-table self-check withholds the
-# cache figure when a long-prompt run makes it disagree with the bill.
+# has one (Pricing page, "Long context pricing", as of 2026-10-14: $0.50/$2.50 above
+# 100,000, cache reads and writes following that input). Each request is priced on its
+# own, so the tier applies only where the tokens are one request's: rates() given a
+# prompt length, predicted_cost(..., one_request=True), as claude-agents prices each
+# message (packet a-s7). The usage log and lastModelUsage hold totals over many
+# requests, which are billed at the base tier: a lower bound for a long-prompt Haiku
+# 5.5 run, and the price-table self-check withholds the cache figure when it disagrees.
 LONG_PROMPT_TIERS = {
     "claude-haiku-5-5": (100_000, (0.50, 2.50)),
 }
 
 # Introductory / promotional rates, by model. Deliberately empty.
 #
-# Anthropic's pricing page lists a $2/$10 introductory rate for Claude Sonnet 5
-# through 2026-08-31, and encoding it here looked obviously correct. Solving for
-# the rate actually billed on this account says otherwise: eight `review` runs
-# billed $3.1167, which the standard $3/$15 rate predicts to within 0.00% and
-# the introductory rate misses by 33%. The published intro rate does not apply
-# to this account, so it is not encoded -- the self-check below is what settles
-# questions like this, not the pricing page.
+# In August Anthropic's pricing page listed a $2/$10 introductory rate for Claude
+# Sonnet 5 through 2026-08-31, and encoding it here looked obviously correct. Solving
+# for the rate actually billed on this account said otherwise: eight `review` runs
+# billed $3.1167, which $3/$15 predicted to within 0.00% and the introductory rate
+# missed by 33%, so it was not encoded. As of 2026-10-14 the page lists $2/$10 as
+# Sonnet 5's standard price, and PRICES carries it (packet a-s7). The self-check below
+# is still what settles questions like this: a run billed at $3/$15 shows as drift.
 INTRO_PRICING: dict[str, dict] = {}
 
 # Cache multipliers against the model's input rate.
@@ -108,11 +114,15 @@ INTRO_PRICING: dict[str, dict] = {}
 # lifetime ("How Claude Code uses prompt caching", code.claude.com/docs/en/
 # prompt-caching, as of 2026-10-14), so 1.25x is the API lane's rate. Only a
 # subscription session within plan usage gets 1-hour writes on its main
-# conversation; the usage log records a cache-creation token count, not the TTL
-# (C4). canonical() folds the `[1m]` variant into its base model, which is
-# correct: Claude 4.6 and later bill the whole 1M window at standard rates, with
-# no premium above 200K (Pricing page, "Long context pricing", as of 2026-10-14;
-# C5). Only Haiku 5.5 prices by prompt length (LONG_PROMPT_TIERS). These stay
+# conversation, so the seat lane prices its writes at SEAT_CACHE_WRITE_MULT, the
+# 1-hour 2.0x (Pricing page, "Prompt caching", as of 2026-10-14; packet a-s7).
+# Neither the usage log nor lastModelUsage records the TTL, only a cache-creation
+# token count (C4), so the seat's subagent, fork and compaction writes, which get
+# 5 minutes, are priced at 2.0x too: an upper bound on those. canonical() folds
+# the `[1m]` variant into its base model, which is correct: Claude 4.6 and later
+# bill the whole 1M window at standard rates, with no premium above 200K (Pricing
+# page, "Long context pricing", as of 2026-10-14; C5). Only Haiku 5.5 prices by
+# prompt length (LONG_PROMPT_TIERS). These stay
 # documented assumptions rather than guesses: the per-model price-table self-check (price_table_drift,
 # checked per model so errors cannot cancel across models) withholds the cache
 # figure whenever the assumed rate disagrees with what was actually billed by
@@ -120,6 +130,7 @@ INTRO_PRICING: dict[str, dict] = {}
 # refuses the number instead of reporting a wrong one.
 CACHE_READ_MULT = 0.10
 CACHE_WRITE_MULT = 1.25
+SEAT_CACHE_WRITE_MULT = 2.0
 
 def migrated(new: pathlib.Path, old: pathlib.Path) -> pathlib.Path:
     """agentik-r1 6.3 (c17, c18): the new folder when it exists, else the old one when it
@@ -156,14 +167,19 @@ def canonical(name: str) -> str:
     return name
 
 
-def rates(model: str, when: dt.date | None = None) -> tuple[float, float] | None:
-    """List rates for a model, honouring an active introductory window."""
+def rates(model: str, when: dt.date | None = None,
+          prompt: int | None = None) -> tuple[float, float] | None:
+    """List rates for a model, honouring an active introductory window and, given one
+    request's prompt length (input + cache reads + cache writes), its long-prompt tier."""
     model = canonical(model)
     intro = INTRO_PRICING.get(model)
     if intro:
         until = dt.date.fromisoformat(intro["until"])
         if (when or dt.date.today()) <= until:
             return intro["rates"]
+    tier = LONG_PROMPT_TIERS.get(model)
+    if tier and prompt is not None and prompt > tier[0]:
+        return tier[1]
     return PRICES.get(model)
 
 
@@ -177,16 +193,28 @@ def uncached_cost(model: str, tok: dict, when: dt.date | None = None) -> float |
     return (fresh * inp + tok["out"] * out) / 1_000_000
 
 
-def predicted_cost(model: str, tok: dict, when: dt.date | None = None) -> float | None:
-    """What the price table says these tokens cost, cache multipliers applied."""
-    r = rates(model, when)
+def predicted_cost(model: str, tok: dict, when: dt.date | None = None, *,
+                   write_mult: float = CACHE_WRITE_MULT,
+                   one_request: bool = False) -> float | None:
+    """What the price table says these tokens cost, cache multipliers applied.
+
+    `one_request` says the tokens are one request's, so a long-prompt tier applies by
+    their prompt length; a total over several requests is priced at the base tier,
+    since a sum of short requests can pass the threshold while none of them does.
+    `write_mult` prices the cache writes: the 5-minute CACHE_WRITE_MULT unless the
+    caller knows they were 1-hour writes (SEAT_CACHE_WRITE_MULT)."""
+    prompt = tok["in"] + tok["cr"] + tok["cw"] if one_request else None
+    r = rates(model, when, prompt)
     if r is None:
         return None
     inp, out = r
-    cr_rate = CACHE_READ_RATES.get(canonical(model), inp * CACHE_READ_MULT)
+    # A per-model read rate is its base tier's; above a long-prompt threshold the read
+    # follows the tier's input at the multiplier (Haiku 5.5: 0.50 x 0.1 = 0.05).
+    cr_rate = (CACHE_READ_RATES.get(canonical(model), inp * CACHE_READ_MULT)
+               if r == rates(model, when) else inp * CACHE_READ_MULT)
     return (tok["in"] * inp
             + tok["cr"] * cr_rate
-            + tok["cw"] * inp * CACHE_WRITE_MULT
+            + tok["cw"] * inp * write_mult
             + tok["out"] * out) / 1_000_000
 
 
@@ -535,22 +563,28 @@ def read_local_lane(path: pathlib.Path, since: dt.date | None) -> dict:
             "equiv_model": LOCAL_EQUIV_MODEL, "equiv_usd": equiv}
 
 
-def read_subscription_lane(path: pathlib.Path) -> dict:
-    """Seat-covered work, from the per-model usage Claude Code records.
+def read_subscription_lane(path: pathlib.Path, when: dt.date | None = None) -> dict:
+    """Seat-covered work, from the per-model usage Claude Code records, priced at list.
 
-    A lower bound. `lastModelUsage` is kept per project and no Claude Code page says
-    whether it is cumulative or holds only the project's last session; if the latter,
-    every earlier session is missing from the sum. Its cache writes are also priced at
-    the 5-minute 1.25x, while a subscription's main conversation gets 1-hour writes
-    at 2x. Unverified against a known session as of 2026-10-14 (NICE_TO_HAVE.md).
+    Each priced model's tokens are repriced from this table with cache writes at the
+    1-hour 2x (SEAT_CACHE_WRITE_MULT), since a subscription's main conversation within
+    plan usage gets 1-hour writes; its `usd` is that figure and `recorded_usd` is the
+    `costUSD` Claude Code recorded. A model the table does not price keeps its
+    `costUSD`. Per-project totals are not requests, so no long-prompt tier applies.
+
+    Two caveats pull opposite ways. The sum may miss sessions: `lastModelUsage` is
+    kept per project and no Claude Code page says whether it is cumulative or holds
+    only the project's last session (unverified against a known session as of
+    2026-10-14, NICE_TO_HAVE.md). And the TTL is not recorded, so the 5-minute writes
+    of the seat's subagents, forks and compaction are priced at 2x too.
     """
     if not path.exists():
-        return {"available": False, "by_model": {}, "total": 0.0,
+        return {"available": False, "by_model": {}, "total": 0.0, "recorded": 0.0,
                 "projects": 0, "tier": None, "org_tier": None}
     try:
         cfg = json.loads(path.read_text())
     except Exception:
-        return {"available": False, "by_model": {}, "total": 0.0,
+        return {"available": False, "by_model": {}, "total": 0.0, "recorded": 0.0,
                 "projects": 0, "tier": None, "org_tier": None}
 
     by_model: dict[str, dict] = collections.defaultdict(blank)
@@ -567,9 +601,16 @@ def read_subscription_lane(path: pathlib.Path) -> dict:
                 "usd": u.get("costUSD"),
             })
 
+    for m, t in by_model.items():
+        t["recorded_usd"] = t["usd"]
+        p = predicted_cost(m, t, when, write_mult=SEAT_CACHE_WRITE_MULT)
+        if p is not None:
+            t["usd"] = p
+
     oauth = cfg.get("oauthAccount") or {}
     return {"available": True, "by_model": dict(by_model),
             "total": sum(t["usd"] for t in by_model.values()),
+            "recorded": sum(t["recorded_usd"] for t in by_model.values()),
             "projects": projects,
             "tier": oauth.get("userRateLimitTier"),
             "org_tier": oauth.get("organizationRateLimitTier")}
@@ -622,7 +663,10 @@ def main() -> int:
                         f"until {intro['until']}]")
             print(f"  {m:<24} ${i:>6.2f} in / ${o:>6.2f} out{note}")
         print(f"\n  cache read  = {CACHE_READ_MULT}x input")
-        print(f"  cache write = {CACHE_WRITE_MULT}x input (5m TTL; 2.0x at 1h)")
+        print(f"  cache write = {CACHE_WRITE_MULT}x input (5m TTL, the API lane); "
+              f"{SEAT_CACHE_WRITE_MULT}x (1h TTL, the seat lane)")
+        for m, (limit, (i, o)) in sorted(LONG_PROMPT_TIERS.items()):
+            print(f"  {m} above {limit:,} prompt tokens, per request: ${i:g} in / ${o:g} out")
         return 0
 
     overhead = overhead_phases(args.overhead_phases)
@@ -630,7 +674,7 @@ def main() -> int:
     today = dt.date.today()
 
     api = read_api_lane(USAGE_LOG, since)
-    sub = read_subscription_lane(CLAUDE_CONFIG)
+    sub = read_subscription_lane(CLAUDE_CONFIG, today)
     loc = read_local_lane(LOCAL_LEDGER, since)
 
     # Reprice the API lane with caching switched off. The saving must compare
@@ -684,6 +728,7 @@ def main() -> int:
             },
             "subscription_lane": {
                 "equivalent_usd": round(sub["total"], 6),
+                "recorded_usd": round(sub["recorded"], 6),
                 "available": sub["available"],
                 "projects": sub["projects"],
                 "tier": sub["tier"],
@@ -790,7 +835,8 @@ def main() -> int:
         print("  no per-model usage recorded")
     else:
         print(f"  {sub['projects']} project(s)   would have cost "
-              f"${sub['total']:.2f} at list rates")
+              f"${sub['total']:.2f} at list rates (cache writes at the 1-hour 2x)")
+        print(f"  Claude Code recorded ${sub['recorded']:.2f} for the same usage")
         print("  (no money left the account — this consumed seat capacity)")
         print()
         print("\n".join(model_table(sub["by_model"], today)))
