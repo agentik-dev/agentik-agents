@@ -997,13 +997,18 @@ bin/agentik agents costs --check-prices  # print the price table for review
 - **Subscription lane — equivalent dollars.** Interactive `claude` work covered
   by the seat, from the per-model usage Claude Code records in `~/.claude.json`,
   priced at API list rates. No money left the account; it consumed seat
-  capacity. Measured here on 2026-08-13: **$3.13 of API spend alongside $155.78 of
+  capacity. Measured here on 2026-08-13, from Claude Code's recorded cost before
+  the tool repriced the lane: **$3.13 of API spend alongside $155.78 of
   seat-absorbed work** — every $1 of cash accompanies ~$50 the seat absorbs. The
-  seat figure is a lower bound: the tool sums each project's `lastModelUsage`
-  field, and no Claude Code page says whether that field is cumulative or holds
-  only the project's last session; it also prices the seat's cache writes at the
-  five-minute 1.25×, while a subscription's main conversation gets one-hour writes
-  at 2× ("How Claude Code uses prompt caching", as of 2026-10-14).
+  tool now reprices the seat's tokens from its own table with every cache write at
+  the one-hour 2×, since a subscription's main conversation within plan usage gets
+  one-hour writes ("How Claude Code uses prompt caching" and the Anthropic
+  "Pricing" page, as of 2026-10-14), and prints Claude Code's recorded figure
+  beside it. Two caveats pull opposite ways: the tool sums each project's
+  `lastModelUsage` field, and no Claude Code page says whether that field is
+  cumulative or holds only the project's last session, so the sum may miss
+  sessions; and the field records no TTL, so the five-minute writes of the seat's
+  subagents, forks and compaction are priced at 2× too.
 - **Prompt-cache saving, API lane only.** The same tokens repriced with every
   cached token billed as fresh input. Measured on the fan-out (2026-08-13): **$4.49
   uncached vs $3.12 actual — the cache saved 30%.**
@@ -1015,11 +1020,14 @@ than 2% the cache figure is withheld with the discrepancy printed, rather than
 reported from stale numbers. Actual spend is unaffected — it comes from the
 envelope, not the table.
 
-This caught a real error: the pricing page lists a `$2/$10` introductory rate
-for Sonnet 5 through 2026-08-31, and encoding it looked obviously right. Solving
-for the rate actually billed showed standard `$3/$15` predicting to within
-**0.00%** and the introductory rate missing by **33%** — the promotional rate
-does not apply to this account.
+This caught a real error in August: the pricing page then listed a `$2/$10`
+introductory rate for Sonnet 5 through 2026-08-31, and encoding it looked
+obviously right. Solving for the rate actually billed showed `$3/$15` predicting
+to within **0.00%** and the introductory rate missing by **33%**, so it was not
+encoded. As of 2026-10-14 the page lists `$2/$10` as Sonnet 5's standard price and
+says the rise to `$3/$15` will not occur, so the table now carries `$2/$10`; if
+this account is still billed `$3/$15`, the self-check withholds the cache figure
+and says so.
 
 ### Attributing spend with `--tag`
 
@@ -1178,7 +1186,8 @@ Claude Code gives the main conversation, subagents, forks and compaction the
 five-minute lifetime ("How Claude Code uses prompt caching",
 <https://code.claude.com/docs/en/prompt-caching>, as of 2026-10-14), so
 `agentik agents costs` prices the API lane's writes at 1.25×. Only a subscription
-session within plan usage gets one-hour writes, on its main conversation. This is
+session within plan usage gets one-hour writes, on its main conversation, so the
+seat lane's writes are priced at 2×. This is
 why every profile sets
 `--exclude-dynamic-system-prompt-sections` — it keeps cwd, env, and git status
 out of the cached system prefix.

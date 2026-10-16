@@ -353,7 +353,8 @@ class CostScan:
         for model, tok in msgs.values():
             if not any(tok.values()) or not known:
                 continue
-            p = self.costs.predicted_cost(model, tok) if model else None
+            # a message.id is one request, so a long-prompt tier applies by its prompt
+            p = self.costs.predicted_cost(model, tok, one_request=True) if model else None
             if p is None:
                 known = False
                 continue
@@ -824,7 +825,8 @@ class Fold:
         for model, tok in self.msgs.values():
             if not any(tok.values()):
                 continue
-            p = self.costs.predicted_cost(model, tok) if model else None
+            # a message.id is one request, so a long-prompt tier applies by its prompt
+            p = self.costs.predicted_cost(model, tok, one_request=True) if model else None
             if p is None:
                 return None
             total += p

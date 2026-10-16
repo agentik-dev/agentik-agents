@@ -66,12 +66,12 @@ def main() -> int:
         check(loc["agents"] == 2 and loc["sessions"] == 1 and loc["errors"] == 1, "agents/sessions/errors counted",
               f"{loc['agents']} {loc['sessions']} {loc['errors']}")
         check(abs(loc["wall_s"] - 42.0) < 1e-9 and loc["stripped_reminders"] == 1, "wall and stripped reminders summed")
-        # 1M in @ $3 + 100k out @ $15 on Sonnet 5 = $3.00 + $1.50
         check(loc["by_backend"]["(unrecorded)"]["requests"] == 2 and loc["by_backend"]["(unrecorded)"]["errors"] == 1,
               "rows with no backend field are their own bucket, not merged into the real 'default' backend",
               str(loc["by_backend"]))
-        # 1M in @ $3 + 100k out @ $15 + 5 cache reads @ $3*0.10 = 3.00 + 1.50 + ~0
-        check(loc["equiv_model"] == "claude-sonnet-5" and abs(loc["equiv_usd"] - 4.5000015) < 1e-6,
+        # Sonnet 5 at $2/$10 (packet a-s7): 1M in @ $2 + 100k out @ $10 + 5 cache reads
+        # @ $2*0.10 = 2.00 + 1.00 + ~0
+        check(loc["equiv_model"] == "claude-sonnet-5" and abs(loc["equiv_usd"] - 3.000001) < 1e-6,
               "equivalent figure prices input, output AND cache reads (it used to omit cache reads "
               "on the very line that printed them)", str(loc["equiv_usd"]))
 
@@ -110,13 +110,13 @@ def main() -> int:
         check(got == want, f"{raw} -> {want}", f"got {got}")
 
     print("== pricing arithmetic ==")
-    # 1M cache reads on Sonnet 5 ($3 in): cached 1M*3*0.10 = $0.30,
-    # uncached the same tokens bill as fresh input = $3.00.
-    tok = {"in": 0, "out": 0, "cr": 1_000_000, "cw": 0, "usd": 0.30}
-    check(abs(cc.uncached_cost("claude-sonnet-5", tok) - 3.00) < 1e-9,
+    # 1M cache reads on Sonnet 5 ($2 in): cached 1M*2*0.10 = $0.20,
+    # uncached the same tokens bill as fresh input = $2.00.
+    tok = {"in": 0, "out": 0, "cr": 1_000_000, "cw": 0, "usd": 0.20}
+    check(abs(cc.uncached_cost("claude-sonnet-5", tok) - 2.00) < 1e-9,
           "uncached_cost bills cache reads as fresh input",
           str(cc.uncached_cost("claude-sonnet-5", tok)))
-    check(abs(cc.predicted_cost("claude-sonnet-5", tok) - 0.30) < 1e-9,
+    check(abs(cc.predicted_cost("claude-sonnet-5", tok) - 0.20) < 1e-9,
           "predicted_cost applies the cache-read multiplier",
           str(cc.predicted_cost("claude-sonnet-5", tok)))
     check(cc.uncached_cost("some-unknown-model", tok) is None,
@@ -128,7 +128,8 @@ def main() -> int:
     drift = cc.price_table_drift({"claude-sonnet-5": tok})
     check(drift and abs(drift[0][3]) < 0.01,
           "matching table reports ~0% error", str(drift))
-    wrong = {"in": 0, "out": 0, "cr": 1_000_000, "cw": 0, "usd": 0.20}
+    # billed at the old $3 rate, as this account was in August
+    wrong = {"in": 0, "out": 0, "cr": 1_000_000, "cw": 0, "usd": 0.30}
     drift = cc.price_table_drift({"claude-sonnet-5": wrong})
     check(drift and abs(drift[0][3]) > 2.0,
           "mismatched billing is detected as drift", str(drift))
@@ -156,9 +157,9 @@ def main() -> int:
         log = tmp / "usage.jsonl"
         log.write_text("\n".join([
             row(cost_usd=1.00, by_model={"claude-sonnet-5": {
-                "in": 0, "out": 0, "cr": 1_000_000, "cw": 0, "usd": 0.30}}),
+                "in": 0, "out": 0, "cr": 1_000_000, "cw": 0, "usd": 0.20}}),
             row(cost_usd=0.50, quality="thin", by_model={"claude-sonnet-5": {
-                "in": 0, "out": 0, "cr": 500_000, "cw": 0, "usd": 0.15}}),
+                "in": 0, "out": 0, "cr": 500_000, "cw": 0, "usd": 0.10}}),
             row(cost_usd=0.25, is_error=True, profile="explore"),  # legacy row
             row(cost_usd=2.00, ts="2020-01-01T00:00:00Z"),         # before --since
         ]) + "\n")
@@ -177,8 +178,12 @@ def main() -> int:
         api, sub = agg["api_lane"], agg["subscription_lane"]
         check(abs(api["actual_usd"] - 3.75) < 1e-9,
               "API total sums every row", str(api["actual_usd"]))
-        check(abs(sub["equivalent_usd"] - 20.0) < 1e-9,
-              "subscription total sums across projects", str(sub["equivalent_usd"]))
+        check(abs(sub.get("recorded_usd", 0) - 20.0) < 1e-9,
+              "subscription total sums across projects", str(sub.get("recorded_usd")))
+        # repriced at Opus 5's $5/$25, read 0.5, write at the one-hour 2x = 10 (packet a-s7):
+        # /a 100*5 + 200*25 + 300*0.5 + 400*10 = 9650; /b 5 + 50 + 1.5 + 40 = 96.5
+        check(abs(sub["equivalent_usd"] - 0.0097465) < 1e-6,
+              "the repriced subscription figure sums across projects", str(sub["equivalent_usd"]))
         check("claude-opus-5" in sub["by_model"] and len(sub["by_model"]) == 1,
               "[1m] variant folds into its base model", str(list(sub["by_model"])))
         check(sub["tier"] == "test_tier", "subscription tier is reported", str(sub["tier"]))
@@ -193,17 +198,17 @@ def main() -> int:
               str(api["unattributed_runs"]))
         # 3.75 total includes $2.25 of rows that carry no per-model data; the
         # cache figure must be computed only from what is attributable.
-        check(abs(api["uncached_equivalent_usd"] - 4.5) < 1e-9,
+        check(abs(api["uncached_equivalent_usd"] - 3.0) < 1e-9,
               "uncached equivalent uses only attributable tokens",
               str(api["uncached_equivalent_usd"]))
         # C1: the saving compares list_cost against the ACTUAL of the same
-        # priced rows ($0.45 = 0.30 + 0.15 from the two GOOD-cost:* rows), not
+        # priced rows ($0.30 = 0.20 + 0.10 from the two GOOD-cost:* rows), not
         # against api_total which folds in $2.25 of unattributable spend.
-        # 4.5 - 0.45 = 4.05, not 4.5 - 3.75 = 0.75.
-        check(abs(api["cache_saving_usd"] - 4.05) < 1e-9,
+        # 3.0 - 0.30 = 2.70, not 3.0 - 3.75 = -0.75.
+        check(abs(api["cache_saving_usd"] - 2.70) < 1e-9,
               "C1: cache saving compares like with like",
               str(api["cache_saving_usd"]))
-        check(abs(api["cache_saving_basis_usd"] - 0.45) < 1e-9,
+        check(abs(api["cache_saving_basis_usd"] - 0.30) < 1e-9,
               "C1: saving basis is the attributable actual",
               str(api.get("cache_saving_basis_usd")))
 
@@ -222,15 +227,16 @@ def main() -> int:
 
         print("== drift withholds the cache figure ==")
         bad = tmp / "bad.jsonl"
-        bad.write_text(row(cost_usd=0.20, by_model={"claude-sonnet-5": {
-            "in": 0, "out": 0, "cr": 1_000_000, "cw": 0, "usd": 0.20}}) + "\n")
+        # billed at the old $3 rate: the $2 table predicts $0.20 against $0.30
+        bad.write_text(row(cost_usd=0.30, by_model={"claude-sonnet-5": {
+            "in": 0, "out": 0, "cr": 1_000_000, "cw": 0, "usd": 0.30}}) + "\n")
         out = subprocess.run(
             [sys.executable, str(TOOL)], capture_output=True, text=True,
             env={"PATH": "/usr/bin:/bin", "CLAUDE_API_AGENT_LOG": str(bad),
                  "CLAUDE_CONFIG_FILE": str(cfg), "HOME": str(tmp)}).stdout
         check("PRICE TABLE DISAGREES" in out and "prompt cache saved" not in out,
               "a wrong price table withholds the cache figure", out[-400:])
-        check("$0.2000" in out,
+        check("$0.3000" in out,
               "actual spend still reported when the table is wrong", out[:300])
 
     print("== attribution and efficiency ==")
@@ -281,12 +287,12 @@ def main() -> int:
               str(eff["cache_hit_rate"]))
 
         # C3: output share must price cache tokens at their multipliers. The
-        # fixture is all Sonnet-5 ($3/$15). Pricing cache at the full input
+        # fixture is all Sonnet-5 ($2/$10). Pricing cache at the full input
         # rate would balloon the input side and collapse this share toward the
         # value that suppressed the "output dominates" advisory.
         by = agg["api_lane"]["by_model"]["claude-sonnet-5"]
-        in_cost = (by["in"] * 3 + by["cr"] * 3 * 0.10 + by["cw"] * 3 * 1.25) / 1e6
-        out_cost = by["out"] * 15 / 1e6
+        in_cost = (by["in"] * 2 + by["cr"] * 2 * 0.10 + by["cw"] * 2 * 1.25) / 1e6
+        out_cost = by["out"] * 10 / 1e6
         expected_share = out_cost / (out_cost + in_cost)
         check(abs(eff["output_cost_share"] - expected_share) < 1e-9,
               "C3: output share prices cache tokens at their multipliers",
@@ -338,7 +344,7 @@ def main() -> int:
     one_m_read = {"in": 0, "out": 0, "cr": 1_000_000, "cw": 0}
     for m, want in (("claude-opus-5-5", 0.20), ("claude-sonnet-5-5", 0.10), ("claude-fable-5-1", 0.25),
                     ("claude-haiku-5-5", 0.10 * cc.CACHE_READ_MULT),
-                    ("claude-sonnet-5", 3.00 * cc.CACHE_READ_MULT)):
+                    ("claude-sonnet-5", 2.00 * cc.CACHE_READ_MULT)):
         got = cc.predicted_cost(m, one_m_read)
         check(got is not None and abs(got - want) < 1e-12,
               f"{m}: 1M cache reads cost ${want:g} (a per-model rate overrides the multiplier "
@@ -346,8 +352,82 @@ def main() -> int:
     got = cc.predicted_cost("claude-opus-5-5", {"in": 1000, "out": 2000, "cr": 100_000, "cw": 10_000})
     check(got is not None and abs(got - 0.114) < 1e-12,
           "opus 5.5: input, output, cache read and cache write together", str(got))
-    check(cc.rates("claude-sonnet-5") == (3.00, 15.00), "claude-sonnet-5 stays at the billed 3/15",
+    # packet a-s7, ruling 3: the page's model table and footnote (Pricing page, as of
+    # 2026-10-14): Sonnet 5's $2/$10 launch price is now its standard price.
+    check(cc.rates("claude-sonnet-5") == (2.00, 10.00), "claude-sonnet-5 is priced at the page's 2/10",
           str(cc.rates("claude-sonnet-5")))
+
+    print("== the seat lane's cache writes (packet a-s7, ruling 1) ==")
+    with tempfile.TemporaryDirectory() as td:
+        seat = pathlib.Path(td) / "claude.json"
+        seat.write_text(json.dumps({"projects": {
+            "/p": {"lastModelUsage": {"claude-opus-5-5": {
+                "inputTokens": 0, "outputTokens": 0, "cacheReadInputTokens": 0,
+                "cacheCreationInputTokens": 1_000_000, "costUSD": 5.00}}},
+            "/q": {"lastModelUsage": {"some-unknown-model": {
+                "inputTokens": 10, "outputTokens": 10, "costUSD": 1.00}}},
+        }}))
+        sub = cc.read_subscription_lane(seat)
+        opus = sub["by_model"].get("claude-opus-5-5") or {}
+        # 1M cache writes on Opus 5.5 ($4 input) at the one-hour 2x = $8.00, where the
+        # five-minute 1.25x gives $5.00 (Pricing page, "Prompt caching", as of 2026-10-14;
+        # a subscription's main conversation gets one hour, "How Claude Code uses prompt
+        # caching", as of 2026-10-14)
+        check(abs(opus.get("usd", 0) - 8.00) < 1e-9 and abs(opus.get("recorded_usd", 0) - 5.00) < 1e-9,
+              "the seat lane prices cache writes at the one-hour 2x", str(opus))
+        check(abs(sub["total"] - 9.00) < 1e-9 and abs(sub.get("recorded", 0) - 6.00) < 1e-9,
+              "an unpriced model keeps Claude Code's costUSD; the total sums the repriced figures",
+              f"total {sub['total']} recorded {sub.get('recorded')}")
+        seat_json = subprocess.run(
+            [sys.executable, str(TOOL), "--json"], capture_output=True, text=True,
+            env={"PATH": "/usr/bin:/bin", "CLAUDE_API_AGENT_LOG": str(pathlib.Path(td) / "none.jsonl"),
+                 "CLAUDE_CONFIG_FILE": str(seat), "HOME": td}).stdout
+        lane = json.loads(seat_json)["subscription_lane"]
+        check(abs(lane["equivalent_usd"] - 9.00) < 1e-9 and abs(lane.get("recorded_usd", 0) - 6.00) < 1e-9,
+              "--json reports the repriced figure and Claude Code's recorded one", str(lane))
+    one_m_write = {"in": 0, "out": 0, "cr": 0, "cw": 1_000_000}
+    api_write = cc.predicted_cost("claude-opus-5-5", one_m_write)
+    check(api_write is not None and abs(api_write - 5.00) < 1e-9,
+          "the API lane's writes stay at the five-minute 1.25x", str(api_write))
+
+    print("== Haiku 5.5's long-prompt tier (packet a-s7, ruling 2) ==")
+    # prompt = 50,000 + 40,000 + 20,000 = 110,000, over the 100,000 threshold. At the tier
+    # (Pricing page, as of 2026-10-14: 0.50 in, 2.50 out, 0.05 read, 0.625 five-minute write):
+    # 50000*0.50 + 1000*2.50 + 40000*0.05 + 20000*0.625 = 42000 -> $0.042;
+    # at the base tier the same tokens are 5000 + 2500/5 + 400 + 2500 = 8400 -> $0.0084.
+    long_req = {"in": 50_000, "out": 1_000, "cr": 40_000, "cw": 20_000}
+
+    def priced(*a, **kw):
+        try:
+            return cc.predicted_cost(*a, **kw)
+        except TypeError as e:            # main's predicted_cost takes no one_request
+            return repr(e)
+
+    got = priced("claude-haiku-5-5", long_req, one_request=True)
+    check(isinstance(got, float) and abs(got - 0.042) < 1e-12,
+          "haiku 5.5: one request over 100,000 prompt tokens is priced at the long-prompt tier", str(got))
+    got = priced("claude-haiku-5-5", {"in": 100_000, "out": 0, "cr": 0, "cw": 0}, one_request=True)
+    check(isinstance(got, float) and abs(got - 0.01) < 1e-12,
+          "haiku 5.5: a request of exactly 100,000 prompt tokens stays at the base tier", str(got))
+    got = priced("claude-haiku-5-5", long_req)
+    check(isinstance(got, float) and abs(got - 0.0084) < 1e-12,
+          "haiku 5.5: an aggregate of requests is priced at the base tier (a lower bound)", str(got))
+    got = priced("claude-sonnet-5-5", long_req, one_request=True)
+    want = (50_000 * 2 + 1_000 * 10 + 40_000 * 0.10 + 20_000 * 2.5) / 1e6
+    check(isinstance(got, float) and abs(got - want) < 1e-12,
+          "a model with no tier is priced the same as one request", f"{got} vs {want}")
+    ca_loader = importlib.machinery.SourceFileLoader("claude_agents", str(REPO / "bin" / "claude-agents"))
+    ca_spec = importlib.util.spec_from_loader("claude_agents", ca_loader)
+    ca = importlib.util.module_from_spec(ca_spec)
+    ca_loader.exec_module(ca)
+    with tempfile.TemporaryDirectory() as td:
+        scan = ca.CostScan(cc)._sum({"msg_1": ("claude-haiku-5-5", dict(long_req))})
+        fold = ca.Fold(pathlib.Path(td), cc)
+        fold.msgs = {"msg_1": ("claude-haiku-5-5", dict(long_req))}
+        folded = fold.cost()
+    check(scan.get("cost") == 0.042 and folded == 0.042,
+          "the status cost scan and the fold price each message as one request",
+          f"scan {scan.get('cost')} fold {folded}")
 
     print("== --check-prices ==")
     out = subprocess.run([sys.executable, str(TOOL), "--check-prices"],
