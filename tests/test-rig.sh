@@ -272,6 +272,18 @@ out="$("$CLAUDE_LOCAL" --version 2>&1)"; rc=$?
 check "$( [ "$rc" = "0" ] && contains "$out" "router:" && echo 0 || echo 1 )" \
   "claude-local --version reports its own name and the router version" "rc=$rc out=$out"
 
+echo "== claude-local: the Explore override is built from plugin/agents/local-explore.md =="
+# a-s6: a-s4 moved the agents into plugin/. A launcher left reading the old place only warns and
+# leaves Explore on the session model, so the override is built here, by the launcher's own
+# function with REPO at this tree, and its model is checked.
+out="$( eval "$(sed -n '/^explore_agent_json() {$/,/^}$/p' "$CLAUDE_LOCAL")"; explore_agent_json 2>&1 )"; rc=$?
+model="$(printf '%s' "$out" | /usr/bin/python3 -c 'import json, sys
+e = json.load(sys.stdin)["Explore"]
+print(e["model"] if e["prompt"].strip() and e["tools"] else "empty")' 2>/dev/null)"
+check "$( [ "$rc" = "0" ] && [ "$model" = "local/default" ] && echo 0 || echo 1 )" \
+  "explore_agent_json builds the Explore override from plugin/agents/local-explore.md, on model local/default" \
+  "rc=$rc model=${model:-none} ${out##*$'\n'}"
+
 echo "== help, version, and unknown commands =="
 for a in --help -h help; do "$LOCALRIG" "$a" >/dev/null 2>&1; check "$?" "localrig $a exits 0"; done
 "$LOCALRIG" --version >/dev/null 2>&1; check "$?" "localrig --version exits 0"
@@ -318,6 +330,7 @@ echo "== claude-local: a cold start stops the router it started only while it ha
 # launcher, so only the first is stopped.
 COLD="$TMP/cold"; mkdir -p "$COLD/bin" "$COLD/fakebin"
 cp "$CLAUDE_LOCAL" "$COLD/bin/claude-local"
+ln -s "$REPO/plugin" "$COLD/plugin"   # the copy builds its Explore override from $REPO/plugin (a-s6)
 cat > "$COLD/bin/agentroute" <<'PY'
 #!/usr/bin/python3
 import http.server, os, sys, time
@@ -396,6 +409,9 @@ cold STUB_CHECK_RC=0
 check "$( [ "$rc" = "2" ] && echo 0 || echo 1 )" "a good cold start execs claude, and claude's exit status is the launcher's" "rc=$rc $out"
 check "$( grep -q -- '--not-a-real-flag' "$FAKE_CLAUDE_LOG" && echo 0 || echo 1 )" \
   "  claude gets the caller's arguments unchanged" "$(cat "$FAKE_CLAUDE_LOG")"
+check "$( grep -F -- '--agents {"Explore": ' "$FAKE_CLAUDE_LOG" | grep -qF '"model": "local/default"' \
+          && ! contains "$out" "could not build the Explore override" && echo 0 || echo 1 )" \
+  "  and the Explore override, built from the plugin's agent file, puts Explore on local/default" "$out"
 kill -0 "${cold_pid:-0}" 2>/dev/null
 check "$?" "  and the router outlives the exec, as designed, even when claude rejects an argument"
 [ -n "$cold_pid" ] && kill "$cold_pid" 2>/dev/null; gone "${cold_pid:-0}"
