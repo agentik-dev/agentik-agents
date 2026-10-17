@@ -408,15 +408,20 @@ bin/agentik-agents                    # the dispatcher: agentik agents <verb> (s
 bin/                                  # the tools it runs, one per verb group (agentik agents --help lists them)
 share/qwen3.8-chat_template.jinja     # Qwen's chat template (Ollama's GGUF blobs carry none; llama-server needs it)
 design/                               # design/01-local-agent-lane.md + evidence
-Makefile                              # install / uninstall / test / check / doctor targets
+Makefile                              # install / uninstall / test / check / lint / doclint / hygiene / validate / readme / doctor targets
 scripts/agentik                       # the agentik front door, vendored from agentik-commons
 scripts/bounded                       # make check's lock, wall and load breaker, vendored
 scripts/hygiene                       # the public-hygiene scan, vendored
 scripts/vendored.sha256               # the three copies' sums; make check checks them
+scripts/doclint                       # the doc gate, copied from the session plugin; the Makefile pins it as DOCLINT_SHA
+scripts/readme-render                 # make readme: README.md from design/readme/source.md, then the sidecar
+design/readme/                        # source.md (the README's source), contract.txt (the render's rules), rendered.sha256 (the sidecar)
+design/packets/                       # the build packets; spent/ keeps the closed ones as records
 .hygiene-allow                        # the scan's exceptions, each with its reason
 plugin/.claude-plugin/plugin.json     # the plugin manifest (name agents, version, license)
 plugin/agents/                        # local-explore / -summarize / -review / -implement / -test (model: local/default)
 plugin/commands/                      # /agents:delegate-review, delegate-costs, delegate-local, status
+plugin/implement-brief.md             # the implement brief template that /agents:delegate-implement-brief-template shows
 plugin/skills/                        # delegated-review, local-delegation: natural-language triggers for the same flows
 tests/                                # stub-driven suites; no API key, no spend
 .sops.yaml                            # creation rules: age recipient + encrypted_regex
@@ -1257,10 +1262,20 @@ sops updatekeys "$S"
 
 ## Tests
 
-`make test` runs every suite; `make check` is the gate: the vendored copies' sums
-(`scripts/vendored.sha256`), the syntax checks, then `make test`,
-then `make hygiene`, under `scripts/bounded` (one per tree, 840 s wall, held off above load
-4); `make doctor` reports install/key/proxy readiness. Individually:
+`make test` runs every suite; `make check` is the gate: `make test`, then `make lint` (the
+syntax checks), `make doclint` (the doc gate `scripts/doclint`, checked first against its pin
+`DOCLINT_SHA`), `make hygiene` (the vendored copies' sums in `scripts/vendored.sha256`, then
+the scan) and `make validate` (`claude plugin validate plugin/`, walled at 60 s; exit 2 when
+`claude` is not on PATH), then the README's freshness, all under `scripts/bounded` (one per
+tree, 840 s wall, held off above load 4); `make doctor` reports install/key/proxy readiness.
+
+The README is rendered, never edited by hand: edit `design/readme/source.md`, then
+`make readme` renders `README.md` from it in the renderer's technical mode under
+`design/readme/contract.txt` (prose only; headings, code and numbers byte-identical) and
+writes the sidecar `design/readme/rendered.sha256`. `make check` reads the sidecar with
+`shasum` alone: fresh while the three files agree, stale (exit 2) once the source changes
+unrendered. Without the renderer installed, `make readme` exits 2 and writes nothing; a
+failed render leaves `README.md` as it was. Individually:
 
 ```sh
 tests/test-arg-handling.sh    # profile flags, overrides, containment refusals
@@ -1272,6 +1287,7 @@ tests/test-route.py           # router: routing, header policy, local adjustment
 tests/test-rig.sh             # rig + local: BSD portability, liveness, JSON injection, key masking, help
 tests/test-flag-pinning.sh    # allow-list arity vs. the real claude binary
 tests/test-hygiene.py         # the public-hygiene scan: groups, allowlist, the private list
+tests/test-readme.sh          # make readme's script against a fake renderer: exits, the sidecar, depth
 ```
 
 `make hygiene` runs `scripts/hygiene`, the scan the agentik tools share, vendored from

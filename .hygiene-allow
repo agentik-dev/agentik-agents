@@ -11,8 +11,11 @@ NICE_TO_HAVE.md: sibling
 .claude/respeak/config.yaml: sibling
 # This file names the old names its rows except, and the sibling tools.
 .hygiene-allow: renamed,sibling
-# The Makefile's alias install lines: the eight tools keep their names until 2026-12-31.
-Makefile: renamed
+# The Makefile's alias install lines: the eight tools keep their names until 2026-12-31;
+# its readme lines find the renderer plugin that renders the README (a-s8).
+Makefile: renamed,sibling
+# The README renderer drives that plugin's scripts and names its install line (a-s8).
+scripts/readme-render: sibling
 # The tools: the eight are the aliases (their own names, usage, the files they run), the
 # readers keep the old folders as fallbacks (6.3), and the dispatcher maps each verb to one.
 bin/*: renamed
@@ -55,3 +58,5 @@ scripts/doclint: renamed
 tests/*: renamed
 tests/test-route.py: renamed,sibling
 tests/test-status.py: home,renamed,sibling
+# The renderer's test fakes that plugin's scripts by their names (a-s8).
+tests/test-readme.sh: sibling
