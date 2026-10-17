@@ -104,7 +104,7 @@ test: ## Run every test suite (stub-driven ones spend nothing; pinning needs cla
 check: ## The gate: check-unlocked under scripts/bounded (lock, 840 s wall, load 4)
 	scripts/bounded --lock .check.lock --wall 840 --load 4 -- $(MAKE) check-unlocked
 
-check-unlocked: test lint doclint hygiene validate ## The gate unbounded: test, lint, doclint, hygiene, validate, README freshness
+check-unlocked: test lint doclint hygiene plugin-version-check validate ## The gate unbounded: test, lint, doclint, hygiene, validate, README freshness
 	@if [ ! -f design/readme/source.md ]; then echo "readme: skipped, absent design/readme/source.md"; \
 	elif shasum -c --status design/readme/rendered.sha256 2>/dev/null; then echo "readme: fresh"; \
 	else echo "readme: stale, run make readme"; exit 2; fi
@@ -132,6 +132,10 @@ hygiene: ## The vendored copies' sums, then the public-hygiene scan (conventions
 	  || { shasum -a 256 -c scripts/vendored.sha256; exit 2; }
 	@echo "  scripts/vendored.sha256: vendored copies OK"
 	scripts/hygiene
+
+.PHONY: plugin-version-check
+plugin-version-check: ## The plugin-version check (GUIDE §7), under the pin: exit 1 when a file under plugin/ changed after plugin.json's version last moved
+	PYTHONDONTWRITEBYTECODE=1 $(PY) scripts/plugin-version-check
 
 readme: ## Render README.md from design/readme/source.md through respeak, technical mode (scripts/readme-render, walled at 2000 s: its budget)
 	RESPEAK_RENDER="$(RESPEAK_RENDER)" RESPEAK_PYTHON="$(RESPEAK_PYTHON)" scripts/bounded --wall 2000 --load 4 -- scripts/readme-render
