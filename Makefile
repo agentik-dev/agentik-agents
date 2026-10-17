@@ -81,11 +81,11 @@ test: ## Run every test suite (stub-driven ones spend nothing; pinning needs cla
 	for t in tests/test-dispatch.sh tests/test-arg-handling.sh tests/test-run-path.sh tests/test-flag-pinning.sh tests/test-rig.sh tests/test-readme.sh; do \
 	  printf '=== %s ===\n' "$$t"; bash "$$t" || fail=1; \
 	done; \
-	for t in tests/test-fanout.py tests/test-costs.py tests/test-route.py tests/test-status.py tests/test-queue.py tests/test-apirun.py tests/test-hygiene.py; do \
+	for t in tests/test-fanout.py tests/test-costs.py tests/test-route.py tests/test-status.py tests/test-queue.py tests/test-queue-http.py tests/test-apirun.py tests/test-hygiene.py; do \
 	  printf '=== %s ===\n' "$$t"; $(PY) "$$t" || fail=1; \
 	done; \
 	if $(FLOOR) -c '' 2>/dev/null; then \
-	  for t in tests/test-fanout.py tests/test-costs.py tests/test-route.py tests/test-status.py tests/test-queue.py; do \
+	  for t in tests/test-fanout.py tests/test-costs.py tests/test-route.py tests/test-status.py tests/test-queue.py tests/test-queue-http.py; do \
 	    printf '=== %s (the 3.9 floor) ===\n' "$$t"; $(FLOOR) "$$t" || fail=1; \
 	  done; \
 	  printf '=== %s (the 3.9 floor) ===\n' tests/test-rig.sh; \

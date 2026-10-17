@@ -1265,7 +1265,7 @@ sops updatekeys "$S"
 
 `make test` names its interpreter first (`python3: <path> <version> (pin: 3.12.7)`), runs
 every suite, then reruns `test-fanout.py`, `test-costs.py`, `test-route.py`, `test-status.py`,
-`test-queue.py` and `test-rig.sh` under `/usr/bin/python3`, the 3.9 floor (one `skip` line
+`test-queue.py`, `test-queue-http.py` and `test-rig.sh` under `/usr/bin/python3`, the 3.9 floor (one `skip` line
 where it does not run). `make check` is the gate: `make test`, then `make lint` (the syntax checks), `make doclint` (the doc gate `scripts/doclint`, checked first against its pin
 `DOCLINT_SHA`), `make hygiene` (the vendored copies' sums in `scripts/vendored.sha256`, then
 the scan) and `make validate` (`claude plugin validate plugin/`, walled at 60 s; exit 2 when
@@ -1288,6 +1288,7 @@ tests/test-costs.py           # cost lanes, pricing, price-table self-check
 tests/test-dispatch.sh        # the dispatcher: each verb, usage, version, doctor, against stubs
 tests/test-route.py           # router: routing, header policy, local adjustments, streaming, pings, ledger, --check
 tests/test-queue.py           # queue-mvp: its timestamps (any fraction, the 3.9 floor) and backoff wait, against stubs
+tests/test-queue-http.py      # queue-mvp: its HTTP lane (create, 409 adoption, claim, the ladder) on a loopback stub
 tests/test-rig.sh             # rig + local: BSD portability, liveness, JSON injection, key masking, help
 tests/test-flag-pinning.sh    # allow-list arity vs. the real claude binary
 tests/test-hygiene.py         # the public-hygiene scan: groups, allowlist, the private list

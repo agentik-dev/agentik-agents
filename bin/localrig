@@ -354,7 +354,7 @@ status() {
   else echo "  (none)"; fi
   echo "ollama resident:"
   curl -fsS -m 3 "$OLLAMA_URL/api/ps" 2>/dev/null | python3 -c 'import sys,json; m=json.load(sys.stdin)["models"]; print("  " + (", ".join("%s %.1f GB" % (x["name"], x["size_vram"]/1e9) for x in m) or "nothing"))' 2>/dev/null || echo "  (ollama unreachable)"
-  if command -v agentroute >/dev/null; then echo "router:"; agentroute --check 2>&1 | sed 's/^/  /' || true; fi
+  if [[ -x "$REPO/bin/agentroute" ]]; then echo "router:"; "$REPO/bin/agentroute" --check 2>&1 | sed 's/^/  /' || true; fi
 }
 restart_router() {
   local port=${ROUTER_LISTEN##*:} pid

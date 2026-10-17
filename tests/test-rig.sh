@@ -165,6 +165,25 @@ out="$(env AGENTROUTE_STATE_DIR="$X/pinned" XDG_CONFIG_HOME="$X/config" XDG_STAT
        AGENTROUTE_LISTEN=127.0.0.1:1 "$LOCALRIG" status 2>&1)"
 check "$( [ -d "$X/pinned" ] && echo 0 || echo 1 )" "AGENTROUTE_STATE_DIR still wins over both folders"
 
+echo "== status: the router asked is the copy's own bin/agentroute, never PATH's =="
+# a-s12: a copy of localrig beside a stub bin/agentroute that prints a marker, a decoy
+# agentroute first on PATH printing another; the router and Ollama are dead ports.
+OWN="$TMP/own"; mkdir -p "$OWN/bin" "$OWN/decoy"
+cp "$LOCALRIG" "$OWN/bin/localrig"
+printf '#!/bin/sh\necho "own router saw $*"\n' > "$OWN/bin/agentroute"
+printf '#!/bin/sh\necho "decoy router saw $*"\n' > "$OWN/decoy/agentroute"
+chmod +x "$OWN/bin/agentroute" "$OWN/decoy/agentroute"
+out="$(PATH="$OWN/decoy:$PATH" AGENTROUTE_LISTEN=127.0.0.1:1 LOCALRIG_OLLAMA_URL=http://127.0.0.1:1 \
+       "$OWN/bin/localrig" status 2>&1)"
+check "$( contains "$out" "router:" && contains "$out" "own router saw --check" && echo 0 || echo 1 )" \
+  "status runs the copy's own bin/agentroute --check" "$out"
+check "$( contains "$out" "decoy router" && echo 1 || echo 0 )" "  and never PATH's agentroute" "$out"
+nopath=$(printf '%s\n' "$PATH" | tr ':' '\n' | while read -r d; do [ -x "$d/agentroute" ] || printf '%s:' "$d"; done)
+out="$(PATH="${nopath%:}" AGENTROUTE_LISTEN=127.0.0.1:1 LOCALRIG_OLLAMA_URL=http://127.0.0.1:1 \
+       "$OWN/bin/localrig" status 2>&1)"
+check "$( contains "$out" "router:" && contains "$out" "own router saw --check" && echo 0 || echo 1 )" \
+  "  and asks it when no agentroute is on PATH at all" "$out"
+
 echo "== keys: sops-backed, env-overridable, never printed =="
 # The store lives outside the repo ($AGENTIK_AGENTS_SECRETS, else the config home's
 # agentik/agents/secrets), so this suite never reads the real one: it builds a throwaway
