@@ -812,7 +812,7 @@ def parse_ts(s: str) -> datetime | None:
     if not s:
         return None
     t = s.strip().replace("Z", "+00:00")
-    m = re.match(r"^(.*[T ]\d\d:\d\d:\d\d)\.(\d+)(.*)$", t)
+    m = re.match(r"^(.*[Tt ]\d\d:\d\d:\d\d)\.(\d+)(.*)$", t)
     if m:
         t = f"{m.group(1)}.{(m.group(2) + '000000')[:6]}{m.group(3)}"
     try:

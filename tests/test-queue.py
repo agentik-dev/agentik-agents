@@ -38,6 +38,7 @@ def check(cond: bool, desc: str, detail: str = "") -> None:
 
 def load():
     """bin/queue-mvp as a module, in sys.modules first: its dataclasses look it up."""
+    sys.dont_write_bytecode = True      # no bin/__pycache__, no .pyc under Apple's caches
     loader = importlib.machinery.SourceFileLoader("queue_mvp", str(TOOL))
     spec = importlib.util.spec_from_loader("queue_mvp", loader)
     mod = importlib.util.module_from_spec(spec)
@@ -114,6 +115,9 @@ def main(qm, home: pathlib.Path) -> int:
     got = qm.parse_ts("2026-10-16 12:34:56.1234567")
     want = datetime(2026, 10, 16, 12, 34, 56, 123456, tzinfo=UTC)
     check(got == want, "a space for the T and no offset: cut to 6 digits, read as UTC", f"{got!r}")
+    got = qm.parse_ts("2026-10-16t21:00:00.5Z")
+    want = datetime(2026, 10, 16, 21, 0, 0, 500000, tzinfo=UTC)
+    check(got == want, "RFC 3339's lowercase t: .5Z padded, 21:00:00.5 UTC", f"{got!r}")
     check(qm.parse_ts("") is None, "an empty string is None")
     check(qm.parse_ts("not a time") is None, "a non-time is None")
 
