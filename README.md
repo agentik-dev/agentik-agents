@@ -21,7 +21,7 @@ Everything here is one command, `agentik agents <verb>` (or `agentik-agents <ver
 | `status`, `fold` | every seat, helper, local agent and API run now (read-only) |
 | `rig ...` | bring local backends up and down |
 | `route ...` | the loopback router: Claude models to Anthropic, local models to the local server |
-| `doctor` | what is on PATH, the key's status, the local lane's check (reports, never gates) |
+| `doctor` | what is on PATH, `python3` and its version, the key's status, the local lane's check (reports, never gates) |
 
 `agentik agents --help` prints the table with the tool each verb runs.
 
@@ -1263,8 +1263,10 @@ sops updatekeys "$S"
 
 ## Tests
 
-`make test` runs every suite; `make check` is the gate: `make test`, then `make lint` (the
-syntax checks), `make doclint` (the doc gate `scripts/doclint`, checked first against its pin
+`make test` names its interpreter first (`python3: <path> <version> (pin: 3.12.7)`), runs
+every suite, then reruns `test-route.py`, `test-status.py` and `test-rig.sh` under
+`/usr/bin/python3`, the 3.9 floor (one `skip` line where it does not run). `make check` is
+the gate: `make test`, then `make lint` (the syntax checks), `make doclint` (the doc gate `scripts/doclint`, checked first against its pin
 `DOCLINT_SHA`), `make hygiene` (the vendored copies' sums in `scripts/vendored.sha256`, then
 the scan) and `make validate` (`claude plugin validate plugin/`, walled at 60 s; exit 2 when
 `claude` is not on PATH), then the README's freshness, all under `scripts/bounded` (one per
@@ -1327,7 +1329,8 @@ price-table self-check.
 `bash`, `python3` 3.9 or later on `PATH` (the python tools are stdlib only and run on
 `env python3`), `sops` (≥ 3.13), `age`, and `claude` (Claude Code ≥ 2.1 for `--bare`).
 The gate pins its own interpreter: `.python-version` names pyenv's 3.12.7, and `make` runs
-the suites, the lint and every `env python3` under it (without pyenv, `python3` on `PATH`).
+the suites, the lint and every `env python3` under it (without pyenv or its 3.12.7, `python3`
+on `PATH`, and `make test` says `pin: absent`).
 
 ## queue-mvp — the durable-queue orchestration MVP
 
