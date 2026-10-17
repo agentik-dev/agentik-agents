@@ -18,6 +18,7 @@ import tempfile
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
 TOOL = REPO / "bin" / "claude-costs"
+sys.dont_write_bytecode = True      # no bin/__pycache__, no .pyc under Apple's caches
 
 spec = importlib.util.spec_from_loader(
     "claude_costs", importlib.machinery.SourceFileLoader("claude_costs", str(TOOL)))
