@@ -16,7 +16,8 @@ PY := $(shell pyenv which python3 2>/dev/null || command -v python3)
 export PATH := $(dir $(PY)):$(PATH)
 # a-s10: `test` names the interpreter it runs first (F2), with `pin: absent` when $(PY) is
 # not .python-version's; then reruns the stdlib suites under Apple's python3, the 3.9 floor
-# (F4), which the pin alone never exercises.
+# (F4), which the pin alone never exercises: test-route and test-status run their tools under
+# their own interpreter, test-rig the bash tools' inline `python3` under a temp link first on PATH.
 PIN   := $(shell head -n 1 $(REPO)/.python-version 2>/dev/null)
 PYV   := $(shell $(PY) -c 'import platform; print(platform.python_version())' 2>/dev/null)
 FLOOR := /usr/bin/python3
@@ -83,6 +84,11 @@ test: ## Run every test suite (stub-driven ones spend nothing; pinning needs cla
 	  for t in tests/test-route.py tests/test-status.py; do \
 	    printf '=== %s (the 3.9 floor) ===\n' "$$t"; $(FLOOR) "$$t" || fail=1; \
 	  done; \
+	  printf '=== %s (the 3.9 floor) ===\n' tests/test-rig.sh; \
+	  if floor=$$(mktemp -d) && ln -s $(FLOOR) "$$floor/python3"; then \
+	    PATH="$$floor:$$PATH" bash tests/test-rig.sh || fail=1; \
+	  else echo "the 3.9 floor: no temp python3 link"; fail=1; fi; \
+	  [ -z "$$floor" ] || rm -rf -- "$${floor:?}"; \
 	else echo "skip: the 3.9 floor"; fi; \
 	exit $$fail
 
