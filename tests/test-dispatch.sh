@@ -140,5 +140,30 @@ PY
 got="$(cat "$D/plugin-paths")"
 if [ -z "$got" ]; then pass=$((pass + 1)); else fail=$((fail + 1)); printf 'FAIL plugin paths:\n%s\n' "$got"; fi
 
+# the interpreter (a-s9, portfolio entry 26): the five python tools run on `env python3`, the
+# pin under make; the floor is 3.9, so each one's --help exits 0 under Apple's python3 with a
+# temp HOME and nothing else inherited, skipped where that python3 does not run
+PYTOOLS="agentroute claude-agents claude-costs claude-fanout queue-mvp"
+for t in $PYTOOLS; do
+  first="$(head -1 "$REPO/bin/$t")"
+  if [ "$first" = '#!/usr/bin/env python3' ]; then
+    pass=$((pass + 1))
+  else
+    fail=$((fail + 1)); printf 'FAIL %s line 1: [%s], want [#!/usr/bin/env python3]\n' "$t" "$first"
+  fi
+done
+if /usr/bin/python3 -c '' >/dev/null 2>&1; then
+  mkdir "$D/home"
+  for t in $PYTOOLS; do
+    if env -i HOME="$D/home" PATH=/usr/bin:/bin /usr/bin/python3 "$REPO/bin/$t" --help >/dev/null 2>&1; then
+      pass=$((pass + 1))
+    else
+      fail=$((fail + 1)); printf 'FAIL %s --help under /usr/bin/python3 (the 3.9 floor)\n' "$t"
+    fi
+  done
+else
+  echo "skip: the 3.9 floor, /usr/bin/python3 -c '' fails"
+fi
+
 printf 'test-dispatch: %d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" = 0 ]

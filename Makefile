@@ -8,6 +8,12 @@
 
 SHELL := /bin/bash
 REPO  := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
+# The interpreter pin (portfolio entry 26, a-s9): .python-version's 3.12.7, resolved once as
+# agentik-relay's Makefile does, then first on PATH as agentik-session's puts its venv: under
+# make every `env python3` (the tools, scripts/bounded, the suites' children) is the pin,
+# never pyenv's shim. Outside make a caller's python3 is its own; the floor is 3.9.
+PY := $(shell pyenv which python3 2>/dev/null || command -v python3)
+export PATH := $(dir $(PY)):$(PATH)
 # ~/.local/bin is already on PATH here (claude itself lives there); override with BINDIR=
 BINDIR ?= $(HOME)/.local/bin
 TOOLS := claude-api-agent claude-fanout claude-costs agentroute claude-local localrig claude-agents queue-mvp
@@ -59,7 +65,7 @@ test: ## Run every test suite (stub-driven ones spend nothing; pinning needs cla
 	  printf '=== %s ===\n' "$$t"; bash "$$t" || fail=1; \
 	done; \
 	for t in tests/test-fanout.py tests/test-costs.py tests/test-route.py tests/test-status.py tests/test-apirun.py tests/test-hygiene.py; do \
-	  printf '=== %s ===\n' "$$t"; python3 "$$t" || fail=1; \
+	  printf '=== %s ===\n' "$$t"; $(PY) "$$t" || fail=1; \
 	done; \
 	exit $$fail
 
@@ -82,7 +88,7 @@ lint: ## Syntax-check every tool (sh, bash, python)
 	@bash -n bin/claude-api-agent && echo "  bin/claude-api-agent: bash syntax OK"
 	@bash -n bin/claude-local && echo "  bin/claude-local: bash syntax OK"
 	@bash -n bin/localrig && echo "  bin/localrig: bash syntax OK"
-	@python3 -c "import ast,sys; [ast.parse(open(f).read()) for f in sys.argv[1:]]" \
+	@$(PY) -c "import ast,sys; [ast.parse(open(f).read()) for f in sys.argv[1:]]" \
 	  bin/claude-fanout bin/claude-costs bin/agentroute bin/claude-agents bin/queue-mvp \
 	  && echo "  python tools: syntax OK"
 	@bash -n scripts/readme-render && echo "  scripts/readme-render: bash syntax OK"
