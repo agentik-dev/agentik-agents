@@ -409,6 +409,7 @@ bin/                                  # the tools it runs, one per verb group (a
 share/qwen3.8-chat_template.jinja     # Qwen's chat template (Ollama's GGUF blobs carry none; llama-server needs it)
 design/                               # design/01-local-agent-lane.md + evidence
 Makefile                              # install / uninstall / test / check / lint / doclint / hygiene / validate / readme / doctor targets
+.python-version                       # 3.12.7, the interpreter make pins (pyenv); outside make the floor is 3.9
 scripts/agentik                       # the agentik front door, vendored from agentik-commons
 scripts/bounded                       # make check's lock, wall and load breaker, vendored
 scripts/hygiene                       # the public-hygiene scan, vendored
@@ -1323,7 +1324,10 @@ price-table self-check.
 
 ## Requirements
 
-`bash`, `sops` (≥ 3.13), `age`, and `claude` (Claude Code ≥ 2.1 for `--bare`).
+`bash`, `python3` 3.9 or later on `PATH` (the python tools are stdlib only and run on
+`env python3`), `sops` (≥ 3.13), `age`, and `claude` (Claude Code ≥ 2.1 for `--bare`).
+The gate pins its own interpreter: `.python-version` names pyenv's 3.12.7, and `make` runs
+the suites, the lint and every `env python3` under it (without pyenv, `python3` on `PATH`).
 
 ## queue-mvp — the durable-queue orchestration MVP
 

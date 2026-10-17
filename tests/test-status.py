@@ -1,4 +1,4 @@
-#!/usr/bin/python3
+#!/usr/bin/env python3
 """Tests for claude-agents status.
 
 Runs against a synthetic session-plugin state dir, a synthetic Claude Code
@@ -9,6 +9,7 @@ machine's real sessions, starts nothing and spends nothing.
 """
 from __future__ import annotations
 
+import atexit
 import datetime as dt
 import importlib.machinery
 import importlib.util
@@ -16,6 +17,7 @@ import json
 import os
 import pathlib
 import re
+import shutil
 import signal
 import subprocess
 import sys
@@ -24,6 +26,12 @@ import time
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
 TOOL = REPO / "bin" / "claude-agents"
+# The tool runs on `env python3`: a temp dir whose python3 is this suite's interpreter goes
+# first on its PATH (a-s9), so it runs under the pin under make, under the caller's python3
+# outside it, and under Apple's when the suite does.
+PYBIN = tempfile.mkdtemp(prefix="test-status-py.")
+os.symlink(sys.executable, os.path.join(PYBIN, "python3"))
+atexit.register(shutil.rmtree, PYBIN, True)
 
 passed = failed = 0
 
@@ -472,7 +480,7 @@ def api_checks(root: pathlib.Path, w: dict) -> None:
 
 
 def env_for(root: pathlib.Path, **kw) -> dict:
-    e = {"PATH": "/usr/bin:/bin", "HOME": str(root), "XDG_STATE_HOME": str(root / "state")}
+    e = {"PATH": f"{PYBIN}:/usr/bin:/bin", "HOME": str(root), "XDG_STATE_HOME": str(root / "state")}
     e.update({k: str(v) for k, v in kw.items()})
     return e
 

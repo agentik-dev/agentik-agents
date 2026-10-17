@@ -1,6 +1,6 @@
 ---
 name: local-delegation
-description: Run mechanical work on the LOCAL model (free, seat untouched) through the plugin's local-* agents, only in a session started by `agentik agents local`; never for design or judgment.
+description: Run mechanical work on the local model (Qwen, for free, seat untouched) through the plugin's local-* agents, only in a session started by `agentik agents local`; never for design or judgment.
 allowed-tools: Bash(agentik-agents *), Bash(echo:*), Agent, Read
 ---
 

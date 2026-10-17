@@ -25,7 +25,8 @@ import time
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
 ROUTER = REPO / "bin" / "agentroute"
-PY = "/usr/bin/python3" if os.path.exists("/usr/bin/python3") else sys.executable
+# the router runs under this suite's interpreter: the pin under make (a-s9)
+PY = sys.executable
 
 # Every router this suite starts with Popen is listed here and stopped in the finally around
 # main(), so a check that raises mid-suite cannot leave one running, and a SIGTERM (which would

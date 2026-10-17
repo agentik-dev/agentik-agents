@@ -1,6 +1,6 @@
 ---
 name: delegated-review
-description: Delegate a read-only code review to headless API-billed agents under a hard budget cap, in the background; never for applying fixes or a quick inline review.
+description: Delegate a read-only code review to headless agents on the API key under a hard budget cap, in the background or in parallel; never for applying fixes or a quick inline review.
 allowed-tools: Bash(agentik-agents *), Bash(mktemp:*), Bash(cat:*), Bash(jq:*), Write, Read
 ---
 
