@@ -804,15 +804,17 @@ def parse_ts(s: str) -> datetime | None:
 
     The store writes exactly "2006-01-02T15:04:05.000Z" (internal/store/time.go),
     but Go marshals time.Time as RFC3339Nano on the wire, which trims trailing
-    zeros and can carry 9 fractional digits — more than fromisoformat accepts on
-    some inputs. So the fraction is clamped to 6 digits.
+    zeros, so the fraction can carry anywhere from 1 to 9 digits. 3.9's
+    fromisoformat takes 3 or 6 only, and a None here lets wait_until_eligible
+    re-claim a job before its backoff ends. So the fraction is padded or cut to
+    6 digits, as bin/claude-agents' to_epoch does, and the offset is kept.
     """
     if not s:
         return None
     t = s.strip().replace("Z", "+00:00")
-    m = re.match(r"^(.*\.\d{1,6})\d*(\+\d{2}:\d{2}|-\d{2}:\d{2})?$", t)
+    m = re.match(r"^(.*[Tt ]\d\d:\d\d:\d\d)\.(\d+)(.*)$", t)
     if m:
-        t = m.group(1) + (m.group(2) or "")
+        t = f"{m.group(1)}.{(m.group(2) + '000000')[:6]}{m.group(3)}"
     try:
         dt = datetime.fromisoformat(t)
     except ValueError:
