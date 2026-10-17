@@ -40,10 +40,15 @@ design/02-local-rig/rig-honest3-2026-09-05.log: home
 design/02-local-rig/rig-llama-2026-09-05.log: home
 design/02-local-rig/rig-mlx-2026-09-05.log: home
 design/02-local-rig/rig-unsloth-misrouted-2026-09-05.log: home
-# Each packet names the sibling plugins it reads or follows, one row per file.
-design/packets/a-s3-status.md: sibling
-design/packets/a-s4-layout.md: sibling
-design/packets/a-s5-status-api.md: sibling
+# Each packet names the sibling plugins it reads or follows, one row per file; the spent
+# ones are records, moved whole to design/packets/spent/ (a-s8).
+design/packets/spent/a-s3-status.md: sibling
+design/packets/spent/a-s4-layout.md: sibling
+design/packets/spent/a-s5-status-api.md: sibling
+design/packets/a-s8-conventions-two.md: sibling
+# The doc gate, copied byte for byte from the session plugin, names the relay by its old
+# repo name in a comment (pinned by DOCLINT_SHA in the Makefile; never edited here).
+scripts/doclint: renamed
 # Tests: they drive the tools under their alias names, cover the old folders as fallbacks,
 # and the router's fixtures carry Claude Code's session header; the status fixtures put
 # their session cwds in the home of an invented user, `x`.

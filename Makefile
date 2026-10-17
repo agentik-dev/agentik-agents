@@ -12,6 +12,9 @@ REPO  := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 BINDIR ?= $(HOME)/.local/bin
 TOOLS := claude-api-agent claude-fanout claude-costs agentroute claude-local localrig claude-agents queue-mvp
 LINKS := agentik-agents $(TOOLS)
+# scripts/doclint is the session plugin's doc gate, copied byte for byte (conventions §6);
+# sync does not carry it, so `doclint` checks it against this pin first (a-s8).
+DOCLINT_SHA = 26eaf2c84aadb822f8d63a0257b063afcc0ba6d9bbcf1d2d856abe4c6388341f
 
 .PHONY: help
 help: ## Show this help
