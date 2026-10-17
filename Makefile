@@ -77,7 +77,7 @@ uninstall: ## Remove the symlinks from BINDIR (only if they point back here); ag
 .PHONY: test
 test: ## Run every test suite (stub-driven ones spend nothing; pinning needs claude), then the 3.9 floor's reruns
 	@printf '%s\n' 'python3: $(PY) $(PYV) $(PYNOTE)'
-	@fail=0; \
+	@fail=0; floor=; trap '[ -z "$$floor" ] || rm -rf -- "$${floor:?}"' EXIT; \
 	for t in tests/test-dispatch.sh tests/test-arg-handling.sh tests/test-run-path.sh tests/test-flag-pinning.sh tests/test-rig.sh tests/test-readme.sh; do \
 	  printf '=== %s ===\n' "$$t"; bash "$$t" || fail=1; \
 	done; \
@@ -92,7 +92,6 @@ test: ## Run every test suite (stub-driven ones spend nothing; pinning needs cla
 	  if floor=$$(mktemp -d) && ln -s $(FLOOR) "$$floor/python3"; then \
 	    PATH="$$floor:$$PATH" bash tests/test-rig.sh || fail=1; \
 	  else echo "the 3.9 floor: no temp python3 link"; fail=1; fi; \
-	  [ -z "$$floor" ] || rm -rf -- "$${floor:?}"; \
 	else echo "skip: the 3.9 floor"; fi; \
 	exit $$fail
 
