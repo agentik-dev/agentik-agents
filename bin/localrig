@@ -54,7 +54,7 @@ OLLAMA_URL=${LOCALRIG_OLLAMA_URL:-http://127.0.0.1:11434}
 Q8_TAG=${LOCALRIG_Q8_TAG:-qwen3.8:27b-mtp-q8_0}
 resolve_q8_blob() {
     [[ -n "${LOCALRIG_Q8_BLOB:-}" ]] && { printf '%s' "$LOCALRIG_Q8_BLOB"; return; }
-    /usr/bin/python3 - "$HOME/.ollama" "$Q8_TAG" <<'PY' 2>/dev/null || true
+    python3 - "$HOME/.ollama" "$Q8_TAG" <<'PY' 2>/dev/null || true
 import json, pathlib, sys
 root, tag = pathlib.Path(sys.argv[1]), sys.argv[2]
 name, _, ver = tag.partition(":")
@@ -96,7 +96,7 @@ sops_get() { # yaml-key -> value on stdout, empty if unavailable
 sops_set() { # yaml-key value   (value reaches sops on stdin, never argv, so it is not in `ps`)
   command -v sops >/dev/null 2>&1 || die "sops is not installed; \`brew install sops\` (and age)"
   [[ -r "$SECRETS" ]] || die "no secrets file at $SECRETS"
-  /usr/bin/python3 -c 'import json,sys; sys.stdout.write(json.dumps(sys.argv[1]))' "$2" \
+  python3 -c 'import json,sys; sys.stdout.write(json.dumps(sys.argv[1]))' "$2" \
     | sops set --value-stdin "$SECRETS" "[\"$1\"]" \
     || die "sops could not write $1 (is this machine an age recipient in .sops.yaml?)"
 }
@@ -119,7 +119,7 @@ usage() { awk 'NR>2 && /^#/ { sub(/^# ?/, ""); print; next } NR>2 { exit }' "$SE
 # Never interpolate into JSON: values (a model id from a backend's own /v1/models, an API key)
 # are untrusted and a quote or backslash could inject or corrupt a key. Python takes argv.
 set_backend() { # name url model auth fold_system   (empty url = delete the entry)
-  /usr/bin/python3 - "$BACKENDS" "$@" <<'PY'
+  python3 - "$BACKENDS" "$@" <<'PY'
 import json, os, pathlib, sys, tempfile
 p = pathlib.Path(sys.argv[1]); name = sys.argv[2]
 try:
@@ -146,7 +146,7 @@ print(f"  backends.json: {name} {'set' if (len(sys.argv) > 3 and sys.argv[3]) el
 PY
 }
 set_default() { # name
-  /usr/bin/python3 - "$BACKENDS" "$1" <<'PY'
+  python3 - "$BACKENDS" "$1" <<'PY'
 import json, os, pathlib, sys, tempfile
 p = pathlib.Path(sys.argv[1]); name = sys.argv[2]
 try:
@@ -193,7 +193,7 @@ up_llama() {
   if [[ -z "$LLAMA_KEY" ]]; then
     # No setup required: a per-run random key is stronger than a fixed literal, because
     # localrig hands the same value to the server and to backends.json in one call.
-    LLAMA_KEY="lk-$(openssl rand -hex 24 2>/dev/null || /usr/bin/python3 -c 'import secrets;print(secrets.token_hex(24))')"
+    LLAMA_KEY="lk-$(openssl rand -hex 24 2>/dev/null || python3 -c 'import secrets;print(secrets.token_hex(24))')"
     note "no llama key in the environment or sops; using a per-run random one"
     note "  to persist it across restarts:  $RIG keys init"
   fi
@@ -224,7 +224,7 @@ up_flash() {
     # Whose server holds the port? /props names the loaded file. Another model there means
     # `down llama` (or a hand-started server) first — we never kill what we did not start.
     local holder; holder=$(curl -fsS -m 3 "http://127.0.0.1:$LLAMA_PORT/props" 2>/dev/null \
-      | /usr/bin/python3 -c 'import sys,json; print(json.load(sys.stdin).get("model_path",""))' 2>/dev/null || true)
+      | python3 -c 'import sys,json; print(json.load(sys.stdin).get("model_path",""))' 2>/dev/null || true)
     [[ "$holder" == "$FLASH_GGUF" ]] || die ":$LLAMA_PORT is held by ${holder:-an unknown server}; stop it first ($RIG down llama, or kill the hand-started one)"
     note "flash already answering on :$LLAMA_PORT"
     # reuse the key the running server was started with, else the caller's
@@ -232,7 +232,7 @@ up_flash() {
     [[ -n "$KEY" ]] || die "flash is up but its key is unknown (no $keyfile, no LOCALRIG_FLASH_KEY, nothing in sops); restart it: $RIG down flash && $RIG up flash"
   else
     if [[ -z "$KEY" ]]; then
-      KEY="lk-$(openssl rand -hex 24 2>/dev/null || /usr/bin/python3 -c 'import secrets;print(secrets.token_hex(24))')"
+      KEY="lk-$(openssl rand -hex 24 2>/dev/null || python3 -c 'import secrets;print(secrets.token_hex(24))')"
       note "no flash key in the environment or sops; using a per-run random one (persist: $RIG keys set flash)"
     fi
     ( umask 077; printf '%s\n' "$KEY" > "$keyfile" )
@@ -274,7 +274,7 @@ up_unsloth() {
     # HF cache, and taking data[0].id blindly mis-registered this backend once already
     model=$(printf 'header = "Authorization: Bearer %s"\n' "$key" \
             | curl -fsS -m 5 --config - "http://127.0.0.1:$UNSLOTH_PORT/v1/models" 2>/dev/null \
-            | /usr/bin/python3 -c 'import sys,json; w=sys.argv[1]; d=json.load(sys.stdin)
+            | python3 -c 'import sys,json; w=sys.argv[1]; d=json.load(sys.stdin)
 ids=[m.get("id","") for m in (d.get("data") or [])]
 print(next((i for i in ids if i == w), next((i for i in ids if w.split("/")[-1].lower() in i.lower()), "")))' "$want" 2>/dev/null || true)
     [[ -n "$model" ]] && break
@@ -322,7 +322,7 @@ keys_cmd() {
     init)
       local cur; cur=$(sops_get llama_api_key || true)
       if [[ -n "$cur" ]]; then note "llama_api_key is already set; use \`$RIG keys set llama\` to rotate"; return 0; fi
-      local gen; gen="lk-$(openssl rand -hex 24 2>/dev/null || /usr/bin/python3 -c 'import secrets;print(secrets.token_hex(24))')"
+      local gen; gen="lk-$(openssl rand -hex 24 2>/dev/null || python3 -c 'import secrets;print(secrets.token_hex(24))')"
       sops_set llama_api_key "$gen"; note "generated and stored llama_api_key"
       note "restart the backend to pick it up:  $RIG down llama && $RIG up llama" ;;
     set)
@@ -353,7 +353,7 @@ status() {
     [[ "${n:-0}" -gt 1 ]] && echo "  ⚠ $n agentroute processes: only the one holding ${ROUTER_LISTEN##*:} serves; stop the rest"
   else echo "  (none)"; fi
   echo "ollama resident:"
-  curl -fsS -m 3 "$OLLAMA_URL/api/ps" 2>/dev/null | /usr/bin/python3 -c 'import sys,json; m=json.load(sys.stdin)["models"]; print("  " + (", ".join("%s %.1f GB" % (x["name"], x["size_vram"]/1e9) for x in m) or "nothing"))' 2>/dev/null || echo "  (ollama unreachable)"
+  curl -fsS -m 3 "$OLLAMA_URL/api/ps" 2>/dev/null | python3 -c 'import sys,json; m=json.load(sys.stdin)["models"]; print("  " + (", ".join("%s %.1f GB" % (x["name"], x["size_vram"]/1e9) for x in m) or "nothing"))' 2>/dev/null || echo "  (ollama unreachable)"
   if command -v agentroute >/dev/null; then echo "router:"; agentroute --check 2>&1 | sed 's/^/  /' || true; fi
 }
 restart_router() {

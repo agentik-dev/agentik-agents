@@ -64,7 +64,7 @@ EXPLORE_MODE="${CLAUDE_LOCAL_EXPLORE:-local}"
 # at launch rather than copied here. An inlined copy drifted: the copy was live through the
 # symlink while the agent file needed `claude plugin update`, so the two diverged silently.
 explore_agent_json() {
-    /usr/bin/python3 - "$REPO/plugin/agents/local-explore.md" <<'PY'
+    python3 - "$REPO/plugin/agents/local-explore.md" <<'PY'
 import json, pathlib, sys
 raw = pathlib.Path(sys.argv[1]).read_text()
 _, fm, body = raw.split("---", 2)

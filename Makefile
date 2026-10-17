@@ -14,6 +14,22 @@ REPO  := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 # never pyenv's shim. Outside make a caller's python3 is its own; the floor is 3.9.
 PY := $(shell pyenv which python3 2>/dev/null || command -v python3)
 export PATH := $(dir $(PY)):$(PATH)
+# a-s10: `test` names the interpreter it runs first (F2), with `pin: absent` when $(PY) is
+# not .python-version's; then reruns the stdlib suites under Apple's python3, the 3.9 floor
+# (F4), which the pin alone never exercises: test-route, test-status, test-fanout and test-costs
+# run their tools under their own interpreter, test-rig the bash tools' inline `python3` under a
+# temp link first on PATH. PIN is read as pyenv reads the file: the first word of the first line
+# that is not blank or a comment, CRs dropped; the compare is string equality, so any 3.12.7 is it.
+PIN   := $(shell awk '{ gsub(/\r/, "") } $$1 != "" && $$1 !~ /^\#/ { print $$1; exit }' $(REPO)/.python-version 2>/dev/null)
+PYV   := $(shell $(PY) -c 'import platform; print(platform.python_version())' 2>/dev/null)
+FLOOR := /usr/bin/python3
+ifeq ($(PIN),)
+PYNOTE := (pin: absent; $(if $(wildcard $(REPO)/.python-version),.python-version names no version,no .python-version))
+else ifeq ($(PYV),$(PIN))
+PYNOTE := (pin: $(PIN))
+else
+PYNOTE := (pin: absent; .python-version says $(PIN))
+endif
 # ~/.local/bin is already on PATH here (claude itself lives there); override with BINDIR=
 BINDIR ?= $(HOME)/.local/bin
 TOOLS := claude-api-agent claude-fanout claude-costs agentroute claude-local localrig claude-agents queue-mvp
@@ -59,7 +75,8 @@ uninstall: ## Remove the symlinks from BINDIR (only if they point back here); ag
 	done
 
 .PHONY: test
-test: ## Run every test suite (stub-driven ones spend nothing; pinning needs claude)
+test: ## Run every test suite (stub-driven ones spend nothing; pinning needs claude), then the 3.9 floor's reruns
+	@printf '%s\n' 'python3: $(PY) $(PYV) $(PYNOTE)'
 	@fail=0; \
 	for t in tests/test-dispatch.sh tests/test-arg-handling.sh tests/test-run-path.sh tests/test-flag-pinning.sh tests/test-rig.sh tests/test-readme.sh; do \
 	  printf '=== %s ===\n' "$$t"; bash "$$t" || fail=1; \
@@ -67,6 +84,16 @@ test: ## Run every test suite (stub-driven ones spend nothing; pinning needs cla
 	for t in tests/test-fanout.py tests/test-costs.py tests/test-route.py tests/test-status.py tests/test-apirun.py tests/test-hygiene.py; do \
 	  printf '=== %s ===\n' "$$t"; $(PY) "$$t" || fail=1; \
 	done; \
+	if $(FLOOR) -c '' 2>/dev/null; then \
+	  for t in tests/test-fanout.py tests/test-costs.py tests/test-route.py tests/test-status.py; do \
+	    printf '=== %s (the 3.9 floor) ===\n' "$$t"; $(FLOOR) "$$t" || fail=1; \
+	  done; \
+	  printf '=== %s (the 3.9 floor) ===\n' tests/test-rig.sh; \
+	  if floor=$$(mktemp -d) && ln -s $(FLOOR) "$$floor/python3"; then \
+	    PATH="$$floor:$$PATH" bash tests/test-rig.sh || fail=1; \
+	  else echo "the 3.9 floor: no temp python3 link"; fail=1; fi; \
+	  [ -z "$$floor" ] || rm -rf -- "$${floor:?}"; \
+	else echo "skip: the 3.9 floor"; fi; \
 	exit $$fail
 
 .PHONY: check check-unlocked lint doclint hygiene validate readme
