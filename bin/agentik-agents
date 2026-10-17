@@ -54,12 +54,35 @@ run() {
 	exec "$here/$tool" "$@"
 }
 
+# The interpreter row (portfolio entry 26): PATH's python3, its version against the floor
+# (3.9), and the gate's pin, .python-version beside bin/, when the two differ. -I keeps a
+# platform.py in the caller's directory or on PYTHONPATH out; the compare is sh.
+python_row() {
+	p=$(command -v python3 2>/dev/null) || { echo "NOT ON PATH"; return 0; }
+	v=$(python3 -I -c 'import platform; print(platform.python_version())' 2>/dev/null) || v=
+	maj=${v%%.*} min=${v#*.}
+	min=${min%%[!0-9]*}
+	case $maj in '' | *[!0-9]*) v= ;; esac
+	case $v in [0-9]*.[0-9]*) ;; *) v= ;; esac
+	[ -n "$v" ] || { echo "$p does not run"; return 0; }
+	if [ "$maj" -lt 3 ] || { [ "$maj" -eq 3 ] && [ "$min" -lt 9 ]; }; then
+		note="below 3.9"
+	else
+		note="3.9 or later"
+	fi
+	pin=
+	[ ! -r "${here%/*}/.python-version" ] || IFS= read -r pin <"${here%/*}/.python-version"
+	[ -z "$pin" ] || [ "$pin" = "$v" ] || note="$note; the gate pins $pin"
+	echo "$p $v ($note)"
+}
+
 doctor() {
 	for t in claude-api-agent claude-fanout claude-costs agentroute claude-local localrig \
 		claude-agents queue-mvp agentik-agents agentik; do
 		p=$(command -v "$t" 2>/dev/null) || p=
 		printf '  %-18s %s\n' "$t" "${p:-NOT ON PATH}"
 	done
+	printf '  %-18s %s\n' python3 "$(python_row)"
 	echo ""
 	echo "  API lane:"
 	"$here/claude-api-agent" --key-status 2>&1 | sed 's/^/    /'

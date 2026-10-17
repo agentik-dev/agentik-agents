@@ -100,6 +100,34 @@ if [ "$code" = 0 ] && printf '%s\n' "$got" | grep -q '^    1:--key-status$' \
 else
   fail=$((fail + 1)); printf 'FAIL doctor: exit %s\n%s\n' "$code" "$got"
 fi
+# doctor's python3 row (a-s10, portfolio entry 26): PATH's python3 and its version against the
+# 3.9 floor, from stubs first on PATH, and the gate's pin when a .python-version beside a copy's
+# bin/ names another version; doctor still exits 0 (entry 25)
+for v in 3.8.12 3.12.7; do
+  mkdir "$D/py-$v" && printf '#!/bin/sh\necho %s\n' "$v" > "$D/py-$v/python3" && chmod +x "$D/py-$v/python3"
+done
+mkdir "$D/py-bad" && printf '#!/bin/sh\nexit 1\n' > "$D/py-bad/python3" && chmod +x "$D/py-bad/python3"
+mkdir "$D/nopy" && for t in readlink dirname sed; do ln -s "$(command -v "$t")" "$D/nopy/$t"; done
+for c in nopin pin; do
+  mkdir -p "$D/$c/bin" && cp "$REPO/bin/agentik-agents" "$D/claude-api-agent" "$D/agentroute" "$D/$c/bin/"
+done
+printf '3.12.7\n' > "$D/pin/.python-version"
+# expect_row NAME WANT COPY PATH: the copy's doctor under PATH exits 0 and prints the row WANT
+expect_row() {
+  local name=$1 want=$2 got code
+  got="$(PATH="$4" "$D/$3/bin/agentik-agents" doctor 2>/dev/null)"; code=$?
+  if [ "$code" = 0 ] && printf '%s\n' "$got" | grep -q -x -F -- "$(printf '  %-18s %s' python3 "$want")"; then
+    pass=$((pass + 1))
+  else
+    fail=$((fail + 1)); printf 'FAIL doctor python3, %s: exit %s, want [%s]\n%s\n' "$name" "$code" "$want" "$got"
+  fi
+}
+expect_row "3.8.12" "$D/py-3.8.12/python3 3.8.12 (below 3.9)" nopin "$D/py-3.8.12:/usr/bin:/bin"
+expect_row "3.12.7" "$D/py-3.12.7/python3 3.12.7 (3.9 or later)" nopin "$D/py-3.12.7:/usr/bin:/bin"
+expect_row "3.8.12 under the pin" "$D/py-3.8.12/python3 3.8.12 (below 3.9; the gate pins 3.12.7)" pin "$D/py-3.8.12:/usr/bin:/bin"
+expect_row "3.12.7 under the pin" "$D/py-3.12.7/python3 3.12.7 (3.9 or later)" pin "$D/py-3.12.7:/usr/bin:/bin"
+expect_row "does not run" "$D/py-bad/python3 does not run" nopin "$D/py-bad:/usr/bin:/bin"
+expect_row "not on PATH" "NOT ON PATH" nopin "$D/nopy"
 # the dispatcher is POSIX sh
 if sh -n "$REPO/bin/agentik-agents"; then pass=$((pass + 1)); else fail=$((fail + 1)); echo "FAIL sh -n"; fi
 # the plugin's edges (a-s6): plugin/ ships alone and reaches the tools through this dispatcher,
