@@ -11,8 +11,11 @@ NICE_TO_HAVE.md: sibling
 .claude/respeak/config.yaml: sibling
 # This file names the old names its rows except, and the sibling tools.
 .hygiene-allow: renamed,sibling
-# The Makefile's alias install lines: the eight tools keep their names until 2026-12-31.
-Makefile: renamed
+# The Makefile's alias install lines: the eight tools keep their names until 2026-12-31;
+# its readme lines find the renderer plugin that renders the README (a-s8).
+Makefile: renamed,sibling
+# The README renderer drives that plugin's scripts and names its install line (a-s8).
+scripts/readme-render: sibling
 # The tools: the eight are the aliases (their own names, usage, the files they run), the
 # readers keep the old folders as fallbacks (6.3), and the dispatcher maps each verb to one.
 bin/*: renamed
@@ -40,13 +43,20 @@ design/02-local-rig/rig-honest3-2026-09-05.log: home
 design/02-local-rig/rig-llama-2026-09-05.log: home
 design/02-local-rig/rig-mlx-2026-09-05.log: home
 design/02-local-rig/rig-unsloth-misrouted-2026-09-05.log: home
-# Each packet names the sibling plugins it reads or follows, one row per file.
-design/packets/a-s3-status.md: sibling
-design/packets/a-s4-layout.md: sibling
-design/packets/a-s5-status-api.md: sibling
+# Each packet names the sibling plugins it reads or follows, one row per file; the spent
+# ones are records, moved whole to design/packets/spent/ (a-s8).
+design/packets/spent/a-s3-status.md: sibling
+design/packets/spent/a-s4-layout.md: sibling
+design/packets/spent/a-s5-status-api.md: sibling
+design/packets/a-s8-conventions-two.md: sibling
+# The doc gate, copied byte for byte from the session plugin, names the relay by its old
+# repo name in a comment (pinned by DOCLINT_SHA in the Makefile; never edited here).
+scripts/doclint: renamed
 # Tests: they drive the tools under their alias names, cover the old folders as fallbacks,
 # and the router's fixtures carry Claude Code's session header; the status fixtures put
 # their session cwds in the home of an invented user, `x`.
 tests/*: renamed
 tests/test-route.py: renamed,sibling
 tests/test-status.py: home,renamed,sibling
+# The renderer's test fakes that plugin's scripts by their names (a-s8).
+tests/test-readme.sh: sibling
