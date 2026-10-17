@@ -58,16 +58,18 @@ test: ## Run every test suite (stub-driven ones spend nothing; pinning needs cla
 	done; \
 	exit $$fail
 
-.PHONY: check check-unlocked
+.PHONY: check check-unlocked lint doclint hygiene validate
 # conventions §5: one gate per tree (.check.lock), walled at 840 s (inside the relay's 900),
 # held off above load 4 x cores. A last stderr line `bounded: stop: lock|load|wall` is unrun,
 # never red. scripts/{agentik,hygiene,bounded} are vendored from agentik-commons by its
-# scripts/sync, which writes scripts/vendored.sha256; never edit them here.
+# scripts/sync, which writes scripts/vendored.sha256; scripts/doclint is the session
+# plugin's, pinned by DOCLINT_SHA above; never edit any of the four here.
 check: ## The gate: check-unlocked under scripts/bounded (lock, 840 s wall, load 4)
 	scripts/bounded --lock .check.lock --wall 840 --load 4 -- $(MAKE) check-unlocked
 
-check-unlocked: ## The gate unbounded: the vendored copies, syntax-check every tool, every test suite, then hygiene
-	@shasum -a 256 -c --status scripts/vendored.sha256 && echo "  scripts/vendored.sha256: vendored copies OK"
+check-unlocked: test lint doclint hygiene validate ## The gate unbounded: test, lint, doclint, hygiene, validate
+
+lint: ## Syntax-check every tool (sh, bash, python)
 	@sh -n bin/agentik-agents && echo "  bin/agentik-agents: sh syntax OK"
 	@bash -n bin/claude-api-agent && echo "  bin/claude-api-agent: bash syntax OK"
 	@bash -n bin/claude-local && echo "  bin/claude-local: bash syntax OK"
@@ -75,15 +77,24 @@ check-unlocked: ## The gate unbounded: the vendored copies, syntax-check every t
 	@python3 -c "import ast,sys; [ast.parse(open(f).read()) for f in sys.argv[1:]]" \
 	  bin/claude-fanout bin/claude-costs bin/agentroute bin/claude-agents bin/queue-mvp \
 	  && echo "  python tools: syntax OK"
-	@$(MAKE) --no-print-directory test
-	@$(MAKE) --no-print-directory hygiene
 
-.PHONY: hygiene
+doclint: ## The doc gate (conventions §5): scripts/doclint against DOCLINT_SHA, then the script
+	@printf '%s  scripts/doclint\n' '$(DOCLINT_SHA)' | shasum -a 256 -c --status - \
+	  || { echo "doclint: scripts/doclint is not DOCLINT_SHA; copy agentik-session's again" >&2; exit 2; }
+	scripts/doclint
+
 # conventions §6: scripts/hygiene is vendored from agentik-commons; never edit it here.
 # It scans for the generic groups in the file and the owner's terms in the private list kept
 # outside the repo ($$AGENTIK_HYGIENE_PRIVATE, else ~/.config/agentik/hygiene-private.tsv).
-hygiene: ## The public-hygiene scan (conventions §6): counts only, exit 1 on a hit outside .hygiene-allow
+hygiene: ## The vendored copies' sums, then the public-hygiene scan (conventions §5, §6): exit 1 on a hit outside .hygiene-allow
+	@shasum -a 256 -c --status scripts/vendored.sha256 \
+	  || { shasum -a 256 -c scripts/vendored.sha256; exit 2; }
+	@echo "  scripts/vendored.sha256: vendored copies OK"
 	scripts/hygiene
+
+validate: ## claude plugin validate on plugin/, walled at 60 s (spends nothing); exit 2 when no claude
+	@command -v claude >/dev/null 2>&1 || { echo "validate: unrun, no claude on PATH"; exit 2; }
+	scripts/bounded --wall 60 -- claude plugin validate plugin/
 
 .PHONY: plugin-dev
 plugin-dev: ## Print the command to load the plugin for ONE session (no persistent change)
