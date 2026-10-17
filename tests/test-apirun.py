@@ -338,7 +338,8 @@ def running_checks(w: World) -> None:
         if new:
             d = new[0]
             pj = jload(d / "progress.json")
-            if pj and pj.get("turns") == 1:
+            # a-s13: the message's write (turns 1) can land before its tool's; wait for both
+            if pj and pj.get("turns") == 1 and pj.get("last_tool"):
                 rj = jload(d / "run.json")
                 live = proc.poll() is None
                 ino_mid = (d / "run.json").stat().st_ino
