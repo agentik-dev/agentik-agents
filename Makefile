@@ -16,12 +16,16 @@ PY := $(shell pyenv which python3 2>/dev/null || command -v python3)
 export PATH := $(dir $(PY)):$(PATH)
 # a-s10: `test` names the interpreter it runs first (F2), with `pin: absent` when $(PY) is
 # not .python-version's; then reruns the stdlib suites under Apple's python3, the 3.9 floor
-# (F4), which the pin alone never exercises: test-route and test-status run their tools under
-# their own interpreter, test-rig the bash tools' inline `python3` under a temp link first on PATH.
-PIN   := $(shell head -n 1 $(REPO)/.python-version 2>/dev/null)
+# (F4), which the pin alone never exercises: test-route, test-status, test-fanout and test-costs
+# run their tools under their own interpreter, test-rig the bash tools' inline `python3` under a
+# temp link first on PATH. PIN is read as pyenv reads the file: the first word of the first line
+# that is not blank or a comment, CRs dropped; the compare is string equality, so any 3.12.7 is it.
+PIN   := $(shell awk '{ gsub(/\r/, "") } $$1 != "" && $$1 !~ /^\#/ { print $$1; exit }' $(REPO)/.python-version 2>/dev/null)
 PYV   := $(shell $(PY) -c 'import platform; print(platform.python_version())' 2>/dev/null)
 FLOOR := /usr/bin/python3
-ifeq ($(PYV),$(PIN))
+ifeq ($(PIN),)
+PYNOTE := (pin: absent; $(if $(wildcard $(REPO)/.python-version),.python-version names no version,no .python-version))
+else ifeq ($(PYV),$(PIN))
 PYNOTE := (pin: $(PIN))
 else
 PYNOTE := (pin: absent; .python-version says $(PIN))
@@ -81,7 +85,7 @@ test: ## Run every test suite (stub-driven ones spend nothing; pinning needs cla
 	  printf '=== %s ===\n' "$$t"; $(PY) "$$t" || fail=1; \
 	done; \
 	if $(FLOOR) -c '' 2>/dev/null; then \
-	  for t in tests/test-route.py tests/test-status.py; do \
+	  for t in tests/test-fanout.py tests/test-costs.py tests/test-route.py tests/test-status.py; do \
 	    printf '=== %s (the 3.9 floor) ===\n' "$$t"; $(FLOOR) "$$t" || fail=1; \
 	  done; \
 	  printf '=== %s (the 3.9 floor) ===\n' tests/test-rig.sh; \

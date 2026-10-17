@@ -108,10 +108,12 @@ for v in 3.8.12 3.12.7; do
 done
 mkdir "$D/py-bad" && printf '#!/bin/sh\nexit 1\n' > "$D/py-bad/python3" && chmod +x "$D/py-bad/python3"
 mkdir "$D/nopy" && for t in readlink dirname sed; do ln -s "$(command -v "$t")" "$D/nopy/$t"; done
-for c in nopin pin; do
+for c in nopin pin pin-comment; do
   mkdir -p "$D/$c/bin" && cp "$REPO/bin/agentik-agents" "$D/claude-api-agent" "$D/agentroute" "$D/$c/bin/"
 done
 printf '3.12.7\n' > "$D/pin/.python-version"
+# read as pyenv reads it (fix round 1): the first word of the first line not blank or a comment
+printf "# the gate's pin\n3.12.7 # pyenv reads the first word\n" > "$D/pin-comment/.python-version"
 # expect_row NAME WANT COPY PATH: the copy's doctor under PATH exits 0 and prints the row WANT
 expect_row() {
   local name=$1 want=$2 got code
@@ -126,6 +128,7 @@ expect_row "3.8.12" "$D/py-3.8.12/python3 3.8.12 (below 3.9)" nopin "$D/py-3.8.1
 expect_row "3.12.7" "$D/py-3.12.7/python3 3.12.7 (3.9 or later)" nopin "$D/py-3.12.7:/usr/bin:/bin"
 expect_row "3.8.12 under the pin" "$D/py-3.8.12/python3 3.8.12 (below 3.9; the gate pins 3.12.7)" pin "$D/py-3.8.12:/usr/bin:/bin"
 expect_row "3.12.7 under the pin" "$D/py-3.12.7/python3 3.12.7 (3.9 or later)" pin "$D/py-3.12.7:/usr/bin:/bin"
+expect_row "the pin's comment form" "$D/py-3.8.12/python3 3.8.12 (below 3.9; the gate pins 3.12.7)" pin-comment "$D/py-3.8.12:/usr/bin:/bin"
 expect_row "does not run" "$D/py-bad/python3 does not run" nopin "$D/py-bad:/usr/bin:/bin"
 expect_row "not on PATH" "NOT ON PATH" nopin "$D/nopy"
 # the dispatcher is POSIX sh

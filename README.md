@@ -1264,9 +1264,9 @@ sops updatekeys "$S"
 ## Tests
 
 `make test` names its interpreter first (`python3: <path> <version> (pin: 3.12.7)`), runs
-every suite, then reruns `test-route.py`, `test-status.py` and `test-rig.sh` under
-`/usr/bin/python3`, the 3.9 floor (one `skip` line where it does not run). `make check` is
-the gate: `make test`, then `make lint` (the syntax checks), `make doclint` (the doc gate `scripts/doclint`, checked first against its pin
+every suite, then reruns `test-fanout.py`, `test-costs.py`, `test-route.py`, `test-status.py`
+and `test-rig.sh` under `/usr/bin/python3`, the 3.9 floor (one `skip` line where it does not
+run). `make check` is the gate: `make test`, then `make lint` (the syntax checks), `make doclint` (the doc gate `scripts/doclint`, checked first against its pin
 `DOCLINT_SHA`), `make hygiene` (the vendored copies' sums in `scripts/vendored.sha256`, then
 the scan) and `make validate` (`claude plugin validate plugin/`, walled at 60 s; exit 2 when
 `claude` is not on PATH), then the README's freshness, all under `scripts/bounded` (one per
