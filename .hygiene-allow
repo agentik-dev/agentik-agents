@@ -49,6 +49,8 @@ design/packets/spent/a-s3-status.md: sibling
 design/packets/spent/a-s4-layout.md: sibling
 design/packets/spent/a-s5-status-api.md: sibling
 design/packets/a-s8-conventions-two.md: sibling
+# a-s14's section 4 names the two sibling tools the scan's sibling group finds.
+design/packets/a-s14-scribe.md: sibling
 # The doc gate, copied byte for byte from the session plugin, names the relay by its old
 # repo name in a comment (pinned by DOCLINT_SHA in the Makefile; never edited here).
 scripts/doclint: renamed
