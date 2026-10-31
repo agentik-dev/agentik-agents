@@ -23,7 +23,7 @@ The field, read in the Claude Code in use here (2.1.316, the shipped bundle): th
 3. README and source, byte-identical: line 195's third cell opens "Sonnet;"; line 424's comment ends "agents:scribe (model: sonnet)"; line 194's "Plugin agents (`plugin/agents/`), each with" becomes "The `local-*` plugin agents (`plugin/agents/`), each with". No other line changes; the render stays a coordinator's `make readme`.
 4. Line 194 is the NICE S4 of a-s14's refuter, riding this packet since it touches the area; its NICE line goes.
 5. GUIDE §9's last bullet is commons' own commit on branch `a-s15-guide` in worktree `.claude/worktrees/a-s15-guide` off its main: "may be written by" becomes "go through". The hq's CLAUDE.md sentence rides another packet.
-6. The version is 1.3.2: no new agent, no config key, no contract; a changed model line is a patch (GUIDE §7). The marketplace line in commons moves at the install, by the hq sitting.
+6. The version is 1.3.2: no new agent, no config key, no contract; a changed model line is a patch, the builder's reading of semver (GUIDE §7 only requires a bump). The marketplace line in commons moves at the install, by the hq sitting.
 
 ## 3. Interfaces (signatures, not prose)
 
