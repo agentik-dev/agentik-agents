@@ -2,7 +2,9 @@
 name: scribe
 description: Writes one repo's records from a builder's or refuter's hand-back, in that repo's own shape: the merge message to a file, the intake or hand-back note under history/sessions/, and the record commit (the charter's Handover lines, the build-order line, the NICE lines) by explicit path. Use after a hand-back when the coordinator would otherwise write the records inline; the coordinator reads six lines. It changes no code, packet or test and never pushes or merges.
 tools: Read, Grep, Glob, Bash, Write, Edit
-model: opus
+model: sonnet
+experimental:
+  cacheTtl: 1h
 effort: medium
 maxTurns: 30
 color: blue
