@@ -265,9 +265,6 @@ check "$( contains "$out" "$XDG_CONFIG_HOME/agentik/agents/secrets/local-backend
 out="$(AGENTIK_AGENTS_SECRETS="$TMP/elsewhere" "$LOCALRIG" keys status 2>&1)"
 check "$( contains "$out" "$TMP/elsewhere/local-backends.sops.yaml" && echo 0 || echo 1 )" \
   "  and AGENTIK_AGENTS_SECRETS moves it" "$out"
-out="$(AGENTIK_AGENTS_SECRETS="$TMP/elsewhere" "$REPO/bin/claude-api-agent" --key-status 2>&1)"
-check "$( contains "$out" "$TMP/elsewhere/anthropic-api-key.sops.yaml" && echo 0 || echo 1 )" \
-  "  claude-api-agent reads its key from the same directory" "$out"
 tracked="$(cd "$REPO" && git ls-files -- secrets 2>/dev/null)"
 check "$( [ -z "$tracked" ] && echo 0 || echo 1 )" "git tracks nothing under secrets/" "$tracked"
 # a store or a decrypted copy left in the tree by an old checkout must be impossible to commit

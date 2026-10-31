@@ -62,3 +62,7 @@ tests/test-route.py: renamed,sibling
 tests/test-status.py: home,renamed,sibling
 # The renderer's test fakes that plugin's scripts by their names (a-s8).
 tests/test-readme.sh: sibling
+# The API lane's note names the tools it records, at the commit they last stood (a-s17).
+design/04-api-lane.md: renamed
+# a-s17's section 1 quotes a review naming a sibling's verb; ruling 8 names the ledger file.
+design/packets/a-s17-cut.md: sibling
