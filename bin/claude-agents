@@ -6,8 +6,7 @@
 One row per seat (a Claude Code session the session plugin keeps a dir for),
 then one row per helper (a subagent transcript under that seat), and the lane
 each one runs in: `seat`, `helper`, or `local` when agentroute's ledger says the
-local model answered it. Lane `api` is a claude-api-agent run: nested under the
-seat that launched it when that seat is listed, else a row of its own.
+local model answered it.
 
 Sources, all read-only (status writes nothing anywhere):
 
@@ -20,18 +19,12 @@ Sources, all read-only (status writes nothing anywhere):
                               the cost scan streams it once) beside agent-<id>.meta.json
   agentroute's ledger         $AGENTROUTE_LOG, else ${AGENTROUTE_STATE_DIR:-…/agentik-agents/route}/requests.jsonl
                               (its last 2 MB)
-  claude-api-agent's runs     runs/<id>/run.json and progress.json beside its usage log
-                              ($CLAUDE_API_AGENT_LOG's dir, else ${XDG_STATE_HOME:-…}/agentik-agents/api)
-                              Each default folder falls back to its old name (agentroute/,
-                              claude-api-agent/) while that is the one that exists.
+                              The default folder falls back to its old name (agentroute/)
+                              while that is the one that exists.
 
 Only ids, model and tool names, numbers, timestamps and the `what` labels (a cwd
 basename, a helper's description) leave this tool: never prompt, result or
 tool-input text.
-
-`claude-agents fold --run-dir DIR` is internal: claude-api-agent pipes a profile
-run's stream-json through it. It keeps DIR/progress.json (names, numbers and
-times only) and prints the one result event. It is the only verb that writes.
 
 Exit codes: 0 whenever the read works (an empty table included); 1 when the
 sessions dir cannot be read; 2 on a usage error. `--watch N` redraws every N
@@ -42,21 +35,14 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
-import importlib.machinery
-import importlib.util
 import json
 import math
 import os
 import pathlib
 import re
-import select
 import signal
 import sys
 import time
-
-sys.dont_write_bytecode = True     # loading claude-costs must not leave a __pycache__ behind
-
-HERE = pathlib.Path(__file__).resolve().parent
 
 HEAD_BYTES = 4 * 1024
 TAIL_BYTES = 64 * 1024
@@ -68,8 +54,6 @@ SEAT_NOEND_BUSY_S = 120          # no turn-ended.json: busy only while the activ
 HELPER_BUSY_S = 120
 WHAT_MAX = 40
 WATCH_MAX = 86400
-RUN_ID_RE = re.compile(r"^\d{8}T\d{6}-\d+$")      # claude-api-agent's run id: <UTC stamp>-<pid>
-SAFE_NAME_RE = re.compile(r"[A-Za-z0-9._:/@_-]{1,80}")  # a model or tool name an api row may show
 EPOCH_MIN, EPOCH_MAX = 946684800.0, 4102444800.0      # 2000-01-01 .. 2100-01-01: else not a time
 COUNT_MAX = 10 ** 13                                  # a turn or token count past this is not one
 FIELDS = ("id", "session_id", "agent_id", "parent", "lane", "model", "started", "elapsed_s",
@@ -81,17 +65,102 @@ COLS = (("id", 10), ("lane", 6), ("model", 20), ("elapsed", 7), ("turns", 5), ("
 CTRL_RE = re.compile("[\x00-\x1f\x7f-\x9f\u2028\u2029\u202a-\u202e\u2066-\u2069]")
 
 
-def load_costs():
-    """claude-costs' price table, loaded as its tests load it; None if it cannot be."""
-    try:
-        path = HERE / "claude-costs"
-        loader = importlib.machinery.SourceFileLoader("claude_costs", str(path))
-        spec = importlib.util.spec_from_loader("claude_costs", loader)
-        mod = importlib.util.module_from_spec(spec)
-        loader.exec_module(mod)
-        return mod
-    except Exception:                                   # noqa: BLE001
+# -- prices ---------------------------------------------------------------------
+
+# USD per million tokens, (input, output), by canonical model name.
+# Source: Anthropic first-party API list pricing.
+# The 5.x rows are the claude-api skill's table (cached 2026-10-06, first-party list
+# rates; packet a-s3 ruling 9), checked row by row against the Anthropic "Pricing"
+# page (platform.claude.com/docs/en/about-claude/pricing) as of 2026-10-14.
+# claude-sonnet-5 is the page's $2/$10: its footnote says Sonnet 5's launch price,
+# introductory through 2026-08-31, is now its standard price (Pricing page, as of
+# 2026-10-14; packet a-s7).
+# claude-haiku-5-5 is the tier for prompts up to 100,000 tokens; see LONG_PROMPT_TIERS.
+# The table moved here from the cost tool, whole (packet a-s17, ruling 4).
+PRICES = {
+    "claude-fable-5-1": (10.00, 50.00),
+    "claude-opus-5-5": (4.00, 20.00),
+    "claude-sonnet-5-5": (2.00, 10.00),
+    "claude-haiku-5-5": (0.10, 0.50),
+    "claude-fable-5": (10.00, 50.00),
+    "claude-mythos-5": (10.00, 50.00),
+    "claude-opus-5": (5.00, 25.00),
+    "claude-opus-4-8": (5.00, 25.00),
+    "claude-opus-4-7": (5.00, 25.00),
+    "claude-opus-4-6": (5.00, 25.00),
+    "claude-opus-4-5": (5.00, 25.00),
+    "claude-sonnet-5": (2.00, 10.00),
+    "claude-sonnet-4-6": (3.00, 15.00),
+    "claude-sonnet-4-5": (3.00, 15.00),
+    "claude-haiku-4-5": (1.00, 5.00),
+}
+
+# Cache-read rates in USD per million tokens, where the list names one. In
+# predicted_cost such a rate overrides CACHE_READ_MULT below; every other model
+# reads cache at the multiplier. (0.05x input on Opus 5.5 and Sonnet 5.5, 0.025x on
+# Fable 5.1; Pricing page, as of 2026-10-14.)
+CACHE_READ_RATES = {
+    "claude-opus-5-5": 0.20,
+    "claude-sonnet-5-5": 0.10,
+    "claude-fable-5-1": 0.25,
+}
+
+# Prompt-length tiers: a request whose prompt (input + cache reads + cache writes)
+# is over the threshold pays these (input, output) rates instead. Only Haiku 5.5
+# has one (Pricing page, "Long context pricing", as of 2026-10-14: $0.50/$2.50 above
+# 100,000, cache reads and writes following that input). Each message is one request,
+# priced on its own (packet a-s7).
+LONG_PROMPT_TIERS = {
+    "claude-haiku-5-5": (100_000, (0.50, 2.50)),
+}
+
+# Cache multipliers against the model's input rate. The write is the 5-minute TTL's
+# 1.25x; a 1-hour write is 2.0x, and a transcript does not record which it was, so a
+# seat's own writes read low here (NICE_TO_HAVE.md). canonical() folds the `[1m]` variant
+# into its base model: Claude 4.6 and later bill the whole 1M window at standard rates
+# (Pricing page, "Long context pricing", as of 2026-10-14).
+CACHE_READ_MULT = 0.10
+CACHE_WRITE_MULT = 1.25
+
+
+def canonical(name: str) -> str:
+    """Strip variant and date suffixes: 'claude-opus-5[1m]' -> 'claude-opus-5'."""
+    name = name.split("[")[0]
+    parts = name.split("-")
+    if parts and parts[-1].isdigit() and len(parts[-1]) == 8:  # trailing YYYYMMDD
+        name = "-".join(parts[:-1])
+    return name
+
+
+def rates(model: str, prompt: int | None = None) -> tuple[float, float] | None:
+    """List rates for a model and, given one request's prompt length (input + cache reads
+    + cache writes), its long-prompt tier."""
+    model = canonical(model)
+    tier = LONG_PROMPT_TIERS.get(model)
+    if tier and prompt is not None and prompt > tier[0]:
+        return tier[1]
+    return PRICES.get(model)
+
+
+def predicted_cost(model: str, tok: dict, *, one_request: bool = False) -> float | None:
+    """What the price table says these tokens cost, cache multipliers applied.
+
+    `one_request` says the tokens are one request's, so a long-prompt tier applies by
+    their prompt length; a total over several requests is priced at the base tier,
+    since a sum of short requests can pass the threshold while none of them does."""
+    prompt = tok["in"] + tok["cr"] + tok["cw"] if one_request else None
+    r = rates(model, prompt)
+    if r is None:
         return None
+    inp, out = r
+    # A per-model read rate is its base tier's; above a long-prompt threshold the read
+    # follows the tier's input at the multiplier (Haiku 5.5: 0.50 x 0.1 = 0.05).
+    cr_rate = (CACHE_READ_RATES.get(canonical(model), inp * CACHE_READ_MULT)
+               if r == rates(model) else inp * CACHE_READ_MULT)
+    return (tok["in"] * inp
+            + tok["cr"] * cr_rate
+            + tok["cw"] * inp * CACHE_WRITE_MULT
+            + tok["out"] * out) / 1_000_000
 
 
 # -- paths --------------------------------------------------------------------
@@ -123,13 +192,6 @@ def ledger_path() -> pathlib.Path:
     sd = os.environ.get("AGENTROUTE_STATE_DIR") or str(
         migrated(state_home() / "agentik-agents" / "route", state_home() / "agentroute"))
     return pathlib.Path(sd) / "requests.jsonl"
-
-
-def runs_dir() -> pathlib.Path:
-    """claude-api-agent's run dirs, found as it makes them: beside its usage log."""
-    if os.environ.get("CLAUDE_API_AGENT_LOG"):
-        return pathlib.Path(os.environ["CLAUDE_API_AGENT_LOG"]).parent / "runs"
-    return migrated(state_home() / "agentik-agents" / "api", state_home() / "claude-api-agent") / "runs"
 
 
 # -- small readers ------------------------------------------------------------
@@ -255,15 +317,6 @@ def name_of(v):
     return v if isinstance(v, str) and v else None
 
 
-def safe_name(v):
-    """A model or tool name in the safe charset and at most 80 characters, else '?'; a missing
-    or non-string one is None."""
-    v = name_of(v)
-    if v is None:
-        return None
-    return v if SAFE_NAME_RE.fullmatch(v) else "?"
-
-
 # -- the ledger ---------------------------------------------------------------
 
 def read_ledger(path) -> tuple:
@@ -299,8 +352,7 @@ class CostScan:
     """Streams a helper's transcript once and keeps each distinct message.id's usage
     (the last line that carries it wins). Under --watch it resumes from its offset."""
 
-    def __init__(self, costs):
-        self.costs = costs
+    def __init__(self):
         self.files = {}
 
     def scan(self, path) -> dict:
@@ -349,12 +401,12 @@ class CostScan:
         msgs[msg["id"]] = (model, tok)
 
     def _sum(self, msgs: dict) -> dict:
-        total, known = 0.0, self.costs is not None
+        total, known = 0.0, True
         for model, tok in msgs.values():
             if not any(tok.values()) or not known:
                 continue
             # a message.id is one request, so a long-prompt tier applies by its prompt
-            p = self.costs.predicted_cost(model, tok, one_request=True) if model else None
+            p = predicted_cost(model, tok, one_request=True) if model else None
             if p is None:
                 known = False
                 continue
@@ -544,110 +596,12 @@ def helpers_of(sid: str, files: list, now: float, since_s: float, every: bool, m
     return rows
 
 
-def pid_alive(pid) -> bool:
-    pid = as_count(pid)
-    if not pid:
-        return False
-    try:
-        os.kill(pid, 0)
-    except PermissionError:
-        return True
-    except (OSError, OverflowError, ValueError):
-        return False
-    return True
-
-
-def list_runs(now: float, since_s: float, every: bool) -> list:
-    """[(run id, run.json, progress.json, state)] for claude-api-agent's runs, newest started
-    first: every run whose pid is live while run.json reads running, and every run that ended
-    within the window. A running run whose pid is gone reads failed (its last sign of life
-    stands in for its end); its run.json is never written."""
-    found = []
-    try:
-        with os.scandir(runs_dir()) as it:
-            entries = list(it)
-    except (OSError, ValueError):
-        return []
-    for e in entries:
-        try:
-            if not RUN_ID_RE.match(e.name) or not e.is_dir(follow_symlinks=False):
-                continue
-        except OSError:
-            continue
-        rj = read_json(os.path.join(e.path, "run.json"))
-        if not rj:
-            continue
-        pj = read_json(os.path.join(e.path, "progress.json"))
-        state, ended = rj.get("state"), None
-        if state == "running" and pid_alive(rj.get("pid")):
-            state = "busy"
-        elif state in ("running", "done", "failed"):
-            if state == "running":
-                state = "failed"
-            else:
-                ended = to_epoch(rj.get("ended"))
-            if ended is None:
-                for f in ("run.json", "progress.json"):
-                    try:
-                        m = os.stat(os.path.join(e.path, f)).st_mtime
-                    except OSError:
-                        continue
-                    ended = m if ended is None else max(ended, m)
-            if not every and (ended is None or now - ended > since_s):
-                continue
-        else:
-            continue
-        found.append((to_epoch(rj.get("started")) or 0.0, e.name, rj, pj, state))
-    found.sort(key=lambda x: (-x[0], x[1]))
-    if every:
-        found = found[:ALL_CAP]
-    return [(rid, rj, pj, state) for _t, rid, rj, pj, state in found]
-
-
-def api_row(rid: str, rj: dict, pj: dict, state: str, now: float) -> dict:
-    """Lane api: a claude-api-agent run. Turns, model, last tool and cost from progress.json
-    (the model falls back to run.json's); context is the newest message's input plus cache
-    tokens, over no window."""
-    started = to_epoch(rj.get("started"))
-    usage = pj.get("usage") if isinstance(pj.get("usage"), dict) else None
-    context = None
-    if usage is not None:
-        parts = [as_count(usage.get(k)) for k in ("in", "cr", "cw")]
-        if any(v is not None for v in parts):
-            context = sum(v or 0 for v in parts)
-    tags = rj.get("tags") if isinstance(rj.get("tags"), dict) else {}
-    what = " ".join([x for x in [name_of(rj.get("profile"))] if x]
-                    + [f"{k}={v}" for k, v in tags.items() if name_of(k) and name_of(v)])
-    return row(id=rid, parent=name_of(rj.get("parent_session")), lane="api",
-               model=safe_name(pj.get("model")) or safe_name(rj.get("model")), started=iso(started),
-               elapsed_s=int(now - started) if started is not None else None,
-               turns=as_count(pj.get("turns")), context=context, window=None,
-               cost_usd=as_usd(pj.get("cost_usd")), last_tool=safe_name(pj.get("last_tool")),
-               last_tool_at=iso(to_epoch(pj.get("last_tool_at"))), state=state,
-               what=what[:WHAT_MAX] or None)
-
-
-def api_rows(runs: list, now: float) -> list:
-    rows = []
-    for rid, rj, pj, state in runs:
-        try:
-            rows.append(api_row(rid, rj, pj, state, now))
-        except Exception:                               # noqa: BLE001 -- one bad run is one '-' row
-            rows.append(row(id=rid, lane="api", state=state))
-    return rows
-
-
 def collect(args, scanner: CostScan) -> dict:
     """The table. Raises OSError when the sessions dir cannot be read."""
     now = time.time()
     since_s = args.since * 60
     ledger = read_ledger(ledger_path())
     seats = list_seats(sessions_dir(), now, since_s, args.all)
-    try:
-        runs = list_runs(now, since_s, args.all)
-    except Exception:                                   # noqa: BLE001
-        runs = []
-    listed = {sid for _mt, sid, *_rest in seats}
     agents = []
     for _mt, sid, sdir, meter, tpath, files in seats:
         try:
@@ -659,8 +613,6 @@ def collect(args, scanner: CostScan) -> dict:
             agents.extend(helpers_of(sid, files, now, since_s, args.all, meter, ledger, scanner))
         except Exception:                               # noqa: BLE001
             pass
-        agents.extend(api_rows([x for x in runs if name_of(x[1].get("parent_session")) == sid], now))
-    agents.extend(api_rows([x for x in runs if name_of(x[1].get("parent_session")) not in listed], now))
     agents = [sanitise(r) for r in agents]
     return {"generated": iso(now), "since_min": None if args.all else args.since, "agents": agents,
             "_now": now}
@@ -717,11 +669,9 @@ def fmt_cost(r):
     return f"${v:.2f}"
 
 
-def cells(r, now: float, nested: bool = False) -> list:
+def cells(r, now: float) -> list:
     rid = (r["id"] or "-")[:8]
-    if r["lane"] == "api" and r["id"]:
-        rid = r["id"][-8:]          # a run id's tail (its pid); its head is the day, the same for all
-    if r["agent_id"] or nested:
+    if r["agent_id"]:
         rid = "  " + rid
     model = r["model"] or "-"
     if model.startswith("claude-"):
@@ -746,9 +696,8 @@ def line(vals) -> str:
 
 def render_text(table: dict, args) -> str:
     out = [line([name for name, _w in COLS])]
-    seats = {r["id"] for r in table["agents"] if r["lane"] != "api" and not r["agent_id"]}
     for r in table["agents"]:
-        out.append(line(cells(r, table["_now"], r["lane"] == "api" and r["parent"] in seats)))
+        out.append(line(cells(r, table["_now"])))
     if not table["agents"]:
         out.append("no agents" if args.all else f"no agents in the last {args.since} min")
     return "\n".join(out)
@@ -758,166 +707,6 @@ def render_json(table: dict, indent) -> str:
     return json.dumps({k: v for k, v in table.items() if not k.startswith("_")}, indent=indent,
                       allow_nan=False)
 
-
-# -- fold: claude-api-agent's stream-json into progress.json (packet a-s5, internal) --
-
-FOLD_EVERY_S = 1.0
-PROGRESS = "progress.json"
-
-
-class Fold:
-    """Folds a profile run's stream-json events into progress.json, and keeps the result event.
-
-    Only names, numbers and times are kept: a message's id, model and usage, a tool_use block's
-    name. Thinking, text, tool input, tool results and the result's text are never read into
-    progress.json; the result event goes back out whole, as `--output-format json` printed it."""
-
-    def __init__(self, run_dir: pathlib.Path, costs):
-        self.run_dir = run_dir
-        self.costs = costs
-        self.msgs = {}               # message id -> (model, {in, out, cr, cw}), its last-seen usage
-        self.model = None
-        self.usage = None            # the newest message's
-        self.last_tool = self.last_tool_at = None
-        self.result = None           # the result event's line, as received
-        self.dirty = False
-        self.written = 0.0
-
-    def event(self, raw: bytes, ended: bool = True) -> None:
-        """One line of the stream; `ended` when it came with its newline."""
-        if not raw.strip():
-            return
-        obj = json.loads(raw)
-        if not isinstance(obj, dict):
-            return
-        kind = obj.get("type")
-        if kind == "result" or (kind is None and "total_cost_usd" in obj):
-            self.result = raw + (b"\n" if ended else b"")     # the line's own bytes, its ending kept
-            return
-        if kind == "system" and obj.get("subtype") == "init":
-            if self.model is None and name_of(obj.get("model")):
-                self.model, self.dirty = safe_name(obj["model"]), True
-            return
-        msg = obj.get("message")
-        if kind != "assistant" or not isinstance(msg, dict):
-            return
-        mid, model = name_of(msg.get("id")), name_of(msg.get("model"))
-        if mid is None or model == "<synthetic>":
-            return
-        u = msg.get("usage") if isinstance(msg.get("usage"), dict) else {}
-        tok = {"in": as_count(u.get("input_tokens")) or 0, "out": as_count(u.get("output_tokens")) or 0,
-               "cr": as_count(u.get("cache_read_input_tokens")) or 0,
-               "cw": as_count(u.get("cache_creation_input_tokens")) or 0}
-        self.msgs[mid] = (model, tok)      # the raw name prices it; only safe_name() is written
-        self.usage = tok
-        if model:
-            self.model = safe_name(model)
-        blocks = msg.get("content") if isinstance(msg.get("content"), list) else []
-        names = [b.get("name") for b in blocks if isinstance(b, dict) and b.get("type") == "tool_use"]
-        if names and name_of(names[-1]):
-            self.last_tool, self.last_tool_at = safe_name(names[-1]), iso(time.time())
-        self.dirty = True
-
-    def cost(self):
-        if self.costs is None:
-            return None
-        total = 0.0
-        for model, tok in self.msgs.values():
-            if not any(tok.values()):
-                continue
-            # a message.id is one request, so a long-prompt tier applies by its prompt
-            p = self.costs.predicted_cost(model, tok, one_request=True) if model else None
-            if p is None:
-                return None
-            total += p
-        return round(total, 6)
-
-    def write(self) -> None:
-        doc = {"turns": len(self.msgs), "model": self.model, "last_tool": self.last_tool,
-               "last_tool_at": self.last_tool_at, "usage": self.usage, "cost_usd": self.cost(),
-               "updated": iso(time.time())}
-        tmp = self.run_dir / f".{PROGRESS}.tmp"
-        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-        with os.fdopen(fd, "w") as f:
-            f.write(json.dumps(doc, separators=(",", ":"), allow_nan=False) + "\n")
-        os.replace(tmp, self.run_dir / PROGRESS)
-        self.dirty = False
-        self.written = time.monotonic()
-
-    def due(self):
-        """Seconds until a pending update may be written; None when nothing is pending."""
-        if not self.dirty:
-            return None
-        return max(0.0, FOLD_EVERY_S - (time.monotonic() - self.written))
-
-    def flush(self, last: bool) -> None:
-        if not (self.dirty or (last and not (self.run_dir / PROGRESS).exists())):
-            return
-        if last or self.due() == 0.0:
-            try:
-                self.write()
-            except (OSError, ValueError):
-                self.dirty = False
-
-
-def fold_main(args) -> int:
-    """Reads stdin to its end whatever happens, so the child never meets a closed pipe; exits 0.
-
-    os.read and select, not `for line in sys.stdin`: an event is folded as it arrives, and an
-    update held back by the once-a-second rule is written within a second even when the stream
-    pauses (a long tool call, a long generation)."""
-    signal.signal(signal.SIGINT, signal.SIG_IGN)     # the child's ^C ends the stream, and so the fold
-    f = Fold(pathlib.Path(args.run_dir), load_costs())
-    fd = sys.stdin.fileno()
-    part = []
-    while True:
-        try:
-            ready, _w, _x = select.select([fd], [], [], f.due())
-        except InterruptedError:
-            continue
-        except (OSError, ValueError):
-            ready = [fd]
-        if not ready:
-            f.flush(False)
-            continue
-        try:
-            chunk = os.read(fd, 1 << 16)
-        except InterruptedError:
-            continue
-        except OSError:
-            break
-        if not chunk:
-            break
-        at = 0
-        while True:
-            nl = chunk.find(b"\n", at)
-            if nl < 0:
-                part.append(chunk[at:])
-                break
-            part.append(chunk[at:nl])
-            at = nl + 1
-            raw, part = b"".join(part), []
-            try:
-                f.event(raw)
-            except Exception:                           # noqa: BLE001 -- one bad event is skipped
-                pass
-        f.flush(False)
-    if part:
-        try:
-            f.event(b"".join(part), ended=False)
-        except Exception:                               # noqa: BLE001
-            pass
-    f.flush(True)
-    if f.result is not None:
-        try:
-            sys.stdout.buffer.write(f.result)
-            sys.stdout.buffer.flush()
-        except OSError:
-            pass
-    return 0
-
-
-# -- main ------------------------------------------------------------------------
 
 def positive_int(s: str, top: int = 10 ** 9) -> int:
     try:
@@ -938,7 +727,7 @@ def parse(argv) -> argparse.Namespace:
                                  description="What every agent on this Mac is doing right now.")
     sub = ap.add_subparsers(dest="verb", metavar="VERB")
     sub.required = True
-    st = sub.add_parser("status", help="one row per seat, helper, local agent and API run")
+    st = sub.add_parser("status", help="one row per seat, helper and local agent")
     st.add_argument("--json", action="store_true", help="print the table as one JSON object")
     st.add_argument("--watch", type=watch_secs, metavar="N",
                     help=f"redraw every N seconds (1 to {WATCH_MAX}) until ^C")
@@ -946,8 +735,6 @@ def parse(argv) -> argparse.Namespace:
                     help=f"every session dir, newest first, at most {ALL_CAP}, and all their helpers")
     st.add_argument("--since", type=positive_int, default=30, metavar="MIN",
                     help="the window, in minutes (default 30)")
-    fo = sub.add_parser("fold", help="internal: claude-api-agent's stream-json into a run's progress.json")
-    fo.add_argument("--run-dir", required=True, metavar="DIR", help="the run dir progress.json goes in")
     return ap.parse_args(argv)
 
 
@@ -970,10 +757,8 @@ def draw(args, scanner: CostScan, clear: bool) -> int:
 
 def main(argv=None) -> int:
     args = parse(sys.argv[1:] if argv is None else argv)
-    if args.verb == "fold":
-        return fold_main(args)
     signal.signal(signal.SIGPIPE, signal.SIG_DFL)
-    scanner = CostScan(load_costs())
+    scanner = CostScan()
     if not args.watch:
         return draw(args, scanner, False)
     clear = sys.stdout.isatty() and not args.json

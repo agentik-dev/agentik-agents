@@ -206,7 +206,6 @@ def build(root: pathlib.Path) -> dict:
     w.update(build_aux(root))
     w.update(build_bad(root))
     w.update(build_cap(root))
-    w.update(build_api(root))
     # -- a ledger whose only row for H3 lies before its last 2 MB
     big = root / "big" / "requests.jsonl"
     big.parent.mkdir()
@@ -348,135 +347,6 @@ def build_cap(root: pathlib.Path) -> dict:
         wjson(sessions / f"c{i:07d}-0000-4000-8000-0000000000cc" / "turn-ended.json",
               {"at": NOW - 10 - i}, 10 + i)
     return {"cap": sessions}
-
-
-# the api world (packet a-s5): claude-api-agent's run dirs, lane api
-R_LIVE = "20261013T100001-1001"    # running, its pid live, its parent the BUSY seat
-R_DONE = "20261013T100002-1002"    # done 5 min ago, no parent, no progress.json
-R_FAIL = "20261013T100003-1003"    # failed 2 min ago, a parent that is not listed
-R_STALE = "20261013T100004-1004"   # running, its pid gone: failed, never rewritten
-R_OLD = "20261013T100005-1005"     # done 2 h ago: only under --all
-R_JUNK = "20261013T100006-1006"    # run.json is not JSON
-R_ODD = "20261013T100007-1007"     # every field the wrong type
-R_NAMES = "20261013T100008-1008"   # a model and a tool name outside the safe charset
-API_SECRET = "SECRET-API-RESULT-55aa"
-
-
-def build_api(root: pathlib.Path) -> dict:
-    base = root / "apix" / "claude-api-agent"
-    runs = base / "runs"
-    dead = subprocess.Popen(["/usr/bin/true"])
-    dead.wait()
-    plant = {
-        R_LIVE: ({"pid": os.getpid(), "profile": "explore", "tags": {"id": "t1", "phase": "fix"},
-                  "model": "claude-sonnet-5", "started": iso(300), "parent_session": BUSY, "fanout": None,
-                  "state": "running", "result": API_SECRET},
-                 {"turns": 4, "model": "claude-sonnet-5", "last_tool": "Read", "last_tool_at": iso(20),
-                  "usage": {"in": 100, "out": 5, "cr": 2000, "cw": 300}, "cost_usd": 0.05,
-                  "updated": iso(20), "result": API_SECRET}, 20),
-        R_DONE: ({"pid": 1002, "profile": "review", "tags": None, "model": "claude-opus-5",
-                  "started": iso(600), "parent_session": None, "fanout": None, "state": "done", "rc": 0,
-                  "ended": iso(300)}, None, 300),
-        R_FAIL: ({"pid": 1003, "profile": "analyze", "tags": None, "model": "claude-opus-5",
-                  "started": iso(400), "parent_session": "ffffffff-0000-4000-8000-unlisted0000",
-                  "fanout": "20261013T090000-77", "state": "failed", "rc": 2, "ended": iso(120)},
-                 {"turns": 2, "model": "claude-opus-5", "last_tool": "Grep", "last_tool_at": iso(130),
-                  "usage": {"in": 10, "out": 1, "cr": 0, "cw": 0}, "cost_usd": 0.01, "updated": iso(130)}, 120),
-        R_STALE: ({"pid": dead.pid, "profile": "explore", "tags": None, "model": "claude-sonnet-5",
-                   "started": iso(200), "parent_session": None, "fanout": None, "state": "running"}, None, 100),
-        R_OLD: ({"pid": 1005, "profile": "explore", "tags": None, "model": "claude-sonnet-5",
-                 "started": iso(7300), "parent_session": None, "fanout": None, "state": "done", "rc": 0,
-                 "ended": iso(7200)}, None, 7200),
-    }
-    for rid, (rj, pj, ago) in plant.items():
-        wjson(runs / rid / "run.json", dict(rj, id=rid), ago)
-        if pj is not None:
-            wjson(runs / rid / "progress.json", pj, ago)
-    raw(runs / R_JUNK / "run.json", "not json {", 10)
-    wjson(runs / R_NAMES / "run.json", {"id": R_NAMES, "pid": 1008, "profile": "explore", "tags": None,
-                                        "model": "claude x", "started": iso(90), "parent_session": None,
-                                        "fanout": None, "state": "done", "rc": 0, "ended": iso(50)}, 50)
-    wjson(runs / R_NAMES / "progress.json", {"turns": 1, "model": "claude-x\nZQX-LEAK", "last_tool": "t" * 81,
-                                             "last_tool_at": iso(55), "usage": None, "cost_usd": 0}, 50)
-    wjson(runs / R_ODD / "run.json", {"id": R_ODD, "pid": "abc", "profile": ["x"], "tags": "id=1",
-                                      "model": 5, "started": "yesterday", "parent_session": [BUSY],
-                                      "fanout": {}, "state": "done", "rc": "0", "ended": iso(60)}, 60)
-    wjson(runs / R_ODD / "progress.json", {"turns": -1, "usage": {"in": "x", "cr": None},
-                                           "cost_usd": "1", "last_tool": 7}, 60)
-    return {"api_log": base / "usage.jsonl", "api_xdg": root / "apix", "api_runs": runs}
-
-
-def api_checks(root: pathlib.Path, w: dict) -> None:
-    print("== lane api: claude-api-agent's runs (packet a-s5) ==")
-    env = env_for(root, CLAUDE_AGENTS_SESSIONS_DIR=w["sessions"], AGENTROUTE_LOG=w["ledger"],
-                  CLAUDE_API_AGENT_LOG=w["api_log"])
-    p = run(["status", "--json"], env)
-    doc = load(p) or {"agents": []}
-    rows = {a.get("id"): a for a in doc["agents"]}
-    ids = [a.get("id") for a in doc["agents"]]
-    check(p.returncode == 0 and set(doc) == {"generated", "since_min", "agents"},
-          "with run dirs, status --json exits 0 with the same top-level keys", f"rc={p.returncode}")
-    bad = [sorted(set(a) ^ FIELDS) for a in doc["agents"] if set(a) != FIELDS]
-    check(not bad, "an api row adds no field and renames none", str(bad))
-    check(all(r in rows for r in (R_LIVE, R_DONE, R_FAIL, R_STALE)) and R_OLD not in rows and R_JUNK not in rows,
-          "running runs and runs ended in the window are listed; an old or unreadable one is not", str(ids))
-    lv = rows.get(R_LIVE, {})
-    check(lv.get("lane") == "api" and lv.get("parent") == BUSY and lv.get("session_id") is None
-          and lv.get("agent_id") is None and lv.get("state") == "busy",
-          "a running run: lane api, parent its seat, busy", str(lv))
-    check(lv.get("turns") == 4 and lv.get("model") == "claude-sonnet-5" and lv.get("last_tool") == "Read"
-          and lv.get("cost_usd") == 0.05 and lv.get("context") == 2400 and lv.get("window") is None,
-          "turns, model, last tool and cost from progress.json; context in+cr+cw over no window", str(lv))
-    check(lv.get("what") == "explore id=t1 phase=fix", "what is the profile plus its tags", str(lv.get("what")))
-    seats = [i for i in ids if rows[i].get("lane") in ("seat", "local") and not rows[i].get("agent_id")
-             and not rows[i].get("parent")]
-    check(all(x in ids for x in (BUSY, IDLE, R_LIVE)) and ids.index(BUSY) < ids.index(R_LIVE) < ids.index(IDLE)
-          and all(rows[i].get("parent") == BUSY for i in ids[ids.index(BUSY) + 1:ids.index(R_LIVE) + 1]),
-          "a run whose parent seat is listed nests under it, after its helpers", str(ids))
-    last_seat = max(ids.index(s) for s in seats) if seats else -1
-    check(all(ids.index(r) > last_seat for r in (R_DONE, R_FAIL, R_STALE) if r in ids),
-          "a run with no listed parent is a top-level row after the seats", str(ids))
-    dn, fl = rows.get(R_DONE, {}), rows.get(R_FAIL, {})
-    check(dn.get("state") == "done" and dn.get("parent") is None and dn.get("turns") is None
-          and dn.get("cost_usd") is None and dn.get("last_tool") is None and dn.get("context") is None
-          and dn.get("what") == "review",
-          "no progress.json: turns, cost, tool and context are null", str(dn))
-    check(fl.get("state") == "failed" and fl.get("parent") == "ffffffff-0000-4000-8000-unlisted0000"
-          and fl.get("last_tool") == "Grep", "a failed run with an unlisted parent: failed, parent kept", str(fl))
-    od = rows.get(R_ODD, {})
-    check(od.get("lane") == "api" and od.get("state") == "done" and od.get("parent") is None
-          and od.get("model") is None and od.get("turns") is None and od.get("context") is None
-          and od.get("what") is None and ids.index(R_ODD) > ids.index(IDLE),
-          "a run.json of wrong types is a top-level row of nulls", str(od))
-    nm = rows.get(R_NAMES, {})
-    check(nm.get("model") == "?" and nm.get("last_tool") == "?",
-          "an api row's model or tool name outside the safe charset or over 80 characters is ? (A F3)", str(nm))
-    st = rows.get(R_STALE, {})
-    disk = json.loads((w["api_runs"] / R_STALE / "run.json").read_text())
-    check(st.get("state") == "failed" and disk.get("state") == "running" and "rc" not in disk,
-          "a running run whose pid is gone reads failed, and status never rewrites it", f"{st} disk={disk}")
-    leaked = API_SECRET in p.stdout + p.stderr
-    pt = run(["status"], env)
-    leaked = leaked or API_SECRET in pt.stdout + pt.stderr
-    check(not leaked, "no text beyond the named keys leaves run.json or progress.json", "leaked")
-    tl = pt.stdout.splitlines()
-    check(any(ln.startswith("  " + R_LIVE[-8:]) and " api " in ln for ln in tl)
-          and any(ln.startswith(R_DONE[-8:]) for ln in tl),
-          "text: a nested run is indented; a top-level run is not; the id shows its tail",
-          "\n".join(tl)[:600])
-
-    pa = load(run(["status", "--json", "--all"], env)) or {"agents": []}
-    check(R_OLD in [a.get("id") for a in pa["agents"]], "--all lists a run that ended outside the window",
-          str([a.get("id") for a in pa["agents"]])[:300])
-    ps = load(run(["status", "--json", "--since", "1"], env)) or {"agents": []}
-    sids = [a.get("id") for a in ps["agents"]]
-    check(R_LIVE in sids and R_DONE not in sids, "--since 1: the running run stays, the one done 5 min ago goes",
-          str(sids))
-    ex = env_for(root, CLAUDE_AGENTS_SESSIONS_DIR=w["sessions"], AGENTROUTE_LOG=w["ledger"],
-                 XDG_STATE_HOME=w["api_xdg"])
-    px = load(run(["status", "--json"], ex)) or {"agents": []}
-    check(R_LIVE in [a.get("id") for a in px["agents"]],
-          "XDG_STATE_HOME finds the runs dir when CLAUDE_API_AGENT_LOG is unset", str(px)[:200])
 
 
 def env_for(root: pathlib.Path, **kw) -> dict:
@@ -632,34 +502,28 @@ def cap_checks(root: pathlib.Path, w: dict) -> None:
 
 def guard_checks(root: pathlib.Path, w: dict) -> None:
     print("== a row that raises degrades to '-' and never changes the exit code ==")
-    keep = {k: os.environ.get(k) for k in ("CLAUDE_AGENTS_SESSIONS_DIR", "AGENTROUTE_LOG",
-                                           "CLAUDE_API_AGENT_LOG")}
+    keep = {k: os.environ.get(k) for k in ("CLAUDE_AGENTS_SESSIONS_DIR", "AGENTROUTE_LOG")}
     os.environ["CLAUDE_AGENTS_SESSIONS_DIR"] = str(w["sessions"])
     os.environ["AGENTROUTE_LOG"] = str(w["ledger"])
-    os.environ["CLAUDE_API_AGENT_LOG"] = str(w["api_log"])
     try:
         mod = load_tool()
 
         def boom(*a, **k):
             raise RuntimeError("synthetic")
         args = mod.parse(["status", "--json"])
-        for name in ("seat_row", "helper_row", "api_row"):
+        for name in ("seat_row", "helper_row"):
             real = getattr(mod, name)
             setattr(mod, name, boom)
             try:
-                table = mod.collect(args, mod.CostScan(None))
+                table = mod.collect(args, mod.CostScan())
                 rows = {a.get("id"): a for a in table["agents"]}
                 text = mod.render_text(table, args)
                 if name == "seat_row":
                     r = rows.get(BUSY, {})
                     ok = r.get("session_id") == BUSY and r.get("model") is None and H1 in rows
-                elif name == "helper_row":
+                else:
                     r = rows.get(H1, {})
                     ok = r.get("parent") == BUSY and r.get("model") is None and rows.get(BUSY, {}).get("model")
-                else:
-                    r = rows.get(R_LIVE, {})
-                    ok = (r.get("lane") == "api" and r.get("state") == "busy" and r.get("model") is None
-                          and rows.get(H1, {}).get("model"))
                 check(bool(ok) and "Traceback" not in text, f"{name} raising degrades its row only", str(r))
             except Exception as e:                       # noqa: BLE001
                 check(False, f"{name} raising degrades its row only", f"{type(e).__name__}: {e}")
@@ -741,6 +605,70 @@ def folder_checks() -> None:
                 os.environ.pop(k, None)
             else:
                 os.environ[k] = v
+
+
+def price_checks() -> None:
+    """The price table moved here from the cost tool, its checks with it (packet a-s17, ruling 4)."""
+    cc = load_tool()
+    print("== model-name canonicalization ==")
+    for raw, want in (("claude-opus-5[1m]", "claude-opus-5"),
+                      ("claude-haiku-4-5-20251001", "claude-haiku-4-5"),
+                      ("claude-sonnet-5", "claude-sonnet-5")):
+        got = cc.canonical(raw)
+        check(got == want, f"{raw} -> {want}", f"got {got}")
+
+    print("== pricing arithmetic ==")
+    # 1M cache reads on Sonnet 5 ($2 in): cached 1M*2*0.10 = $0.20.
+    tok = {"in": 0, "out": 0, "cr": 1_000_000, "cw": 0, "usd": 0.20}
+    check(abs(cc.predicted_cost("claude-sonnet-5", tok) - 0.20) < 1e-9,
+          "predicted_cost applies the cache-read multiplier",
+          str(cc.predicted_cost("claude-sonnet-5", tok)))
+    check(cc.predicted_cost("some-unknown-model", tok) is None,
+          "unknown model is unpriced rather than assumed")
+
+    print("== the 5.x price rows (packet a-s3, ruling 9) ==")
+    for m, want in (("claude-opus-5-5", (4.00, 20.00)), ("claude-fable-5-1", (10.00, 50.00)),
+                    ("claude-sonnet-5-5", (2.00, 10.00)), ("claude-haiku-5-5", (0.10, 0.50))):
+        check(cc.rates(m) == want, f"{m} is priced at {want[0]:g}/{want[1]:g}", str(cc.rates(m)))
+        check(cc.rates(m + "[1m]") == want, f"{m}[1m] folds into {m}", str(cc.rates(m + "[1m]")))
+    one_m_read = {"in": 0, "out": 0, "cr": 1_000_000, "cw": 0}
+    for m, want in (("claude-opus-5-5", 0.20), ("claude-sonnet-5-5", 0.10), ("claude-fable-5-1", 0.25),
+                    ("claude-haiku-5-5", 0.10 * cc.CACHE_READ_MULT),
+                    ("claude-sonnet-5", 2.00 * cc.CACHE_READ_MULT)):
+        got = cc.predicted_cost(m, one_m_read)
+        check(got is not None and abs(got - want) < 1e-12,
+              f"{m}: 1M cache reads cost ${want:g} (a per-model rate overrides the multiplier "
+              f"where the list names one)", str(got))
+    got = cc.predicted_cost("claude-opus-5-5", {"in": 1000, "out": 2000, "cr": 100_000, "cw": 10_000})
+    check(got is not None and abs(got - 0.114) < 1e-12,
+          "opus 5.5: input, output, cache read and cache write together", str(got))
+    # packet a-s7, ruling 3: the page's model table and footnote (Pricing page, as of
+    # 2026-10-14): Sonnet 5's $2/$10 launch price is now its standard price.
+    check(cc.rates("claude-sonnet-5") == (2.00, 10.00), "claude-sonnet-5 is priced at the page's 2/10",
+          str(cc.rates("claude-sonnet-5")))
+
+    print("== Haiku 5.5's long-prompt tier (packet a-s7, ruling 2) ==")
+    # prompt = 50,000 + 40,000 + 20,000 = 110,000, over the 100,000 threshold. At the tier
+    # (Pricing page, as of 2026-10-14: 0.50 in, 2.50 out, 0.05 read, 0.625 five-minute write):
+    # 50000*0.50 + 1000*2.50 + 40000*0.05 + 20000*0.625 = 42000 -> $0.042;
+    # at the base tier the same tokens are 5000 + 2500/5 + 400 + 2500 = 8400 -> $0.0084.
+    long_req = {"in": 50_000, "out": 1_000, "cr": 40_000, "cw": 20_000}
+    got = cc.predicted_cost("claude-haiku-5-5", long_req, one_request=True)
+    check(isinstance(got, float) and abs(got - 0.042) < 1e-12,
+          "haiku 5.5: one request over 100,000 prompt tokens is priced at the long-prompt tier", str(got))
+    got = cc.predicted_cost("claude-haiku-5-5", {"in": 100_000, "out": 0, "cr": 0, "cw": 0}, one_request=True)
+    check(isinstance(got, float) and abs(got - 0.01) < 1e-12,
+          "haiku 5.5: a request of exactly 100,000 prompt tokens stays at the base tier", str(got))
+    got = cc.predicted_cost("claude-haiku-5-5", long_req)
+    check(isinstance(got, float) and abs(got - 0.0084) < 1e-12,
+          "haiku 5.5: an aggregate of requests is priced at the base tier (a lower bound)", str(got))
+    got = cc.predicted_cost("claude-sonnet-5-5", long_req, one_request=True)
+    want = (50_000 * 2 + 1_000 * 10 + 40_000 * 0.10 + 20_000 * 2.5) / 1e6
+    check(isinstance(got, float) and abs(got - want) < 1e-12,
+          "a model with no tier is priced the same as one request", f"{got} vs {want}")
+    scan = cc.CostScan()._sum({"msg_1": ("claude-haiku-5-5", dict(long_req))})
+    check(scan.get("cost") == 0.042, "the status cost scan prices each message as one request",
+          f"scan {scan.get('cost')}")
 
 
 def main() -> int:
@@ -930,7 +858,6 @@ def main() -> int:
         bad_checks(root, w)
         cap_checks(root, w)
         guard_checks(root, w)
-        api_checks(root, w)
 
         print("== --watch ==")
         try:
@@ -957,6 +884,7 @@ def main() -> int:
 
     watch_rescan_checks()
     folder_checks()
+    price_checks()
     print(f"\n{passed} passed, {failed} failed")
     return 1 if failed else 0
 
