@@ -16,16 +16,9 @@ api-key
 .env
 .env.*
 
-# the fan-out's run directories (agentik agents fanout: envelopes + aggregates, regenerated per run)
-fanout-runs/
-
 # python bytecode from the test loaders
 __pycache__/
 *.pyc
 
 # make check's lock (scripts/bounded --lock, conventions §5)
 .check.lock
-
-# The API lane's proxy pin names one machine's network: it lives in the config home
-# (agentik/agents/proxy-pin.conf), never in the repo.
-/proxy-pin.conf

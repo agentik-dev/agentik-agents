@@ -1,10 +1,10 @@
 # agentik-agents — install / test targets.
 #
 # The tools are sh, bash and python3; there is nothing to compile. `install` links the
-# dispatcher, agentik-agents, and the eight tools it runs onto PATH (~/.local/bin, where
+# dispatcher, agentik-agents, and the four tools it runs onto PATH (~/.local/bin, where
 # `claude` already is), and copies the vendored agentik front door there (agentik-r1 D3).
 # It is idempotent and reversible, and it only ever touches $(BINDIR) -- never anything
-# else outside this repo. The eight keep their names as aliases until 2026-12-31.
+# else outside this repo. The four keep their names as aliases until 2026-12-31.
 
 SHELL := /bin/bash
 REPO  := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
@@ -16,8 +16,8 @@ PY := $(shell pyenv which python3 2>/dev/null || command -v python3)
 export PATH := $(dir $(PY)):$(PATH)
 # a-s10: `test` names the interpreter it runs first (F2), with `pin: absent` when $(PY) is
 # not .python-version's; then reruns the stdlib suites under Apple's python3, the 3.9 floor
-# (F4), which the pin alone never exercises: test-route, test-status, test-fanout and test-costs
-# run their tools under their own interpreter, test-rig the bash tools' inline `python3` under a
+# (F4), which the pin alone never exercises: test-route and test-status run their tools under
+# their own interpreter, test-rig the bash tools' inline `python3` under a
 # temp link first on PATH. PIN is read as pyenv reads the file: the first word of the first line
 # that is not blank or a comment, CRs dropped; the compare is string equality, so any 3.12.7 is it.
 PIN   := $(shell awk '{ gsub(/\r/, "") } $$1 != "" && $$1 !~ /^\#/ { print $$1; exit }' $(REPO)/.python-version 2>/dev/null)
@@ -32,8 +32,11 @@ PYNOTE := (pin: absent; .python-version says $(PIN))
 endif
 # ~/.local/bin is already on PATH here (claude itself lives there); override with BINDIR=
 BINDIR ?= $(HOME)/.local/bin
-TOOLS := claude-api-agent claude-fanout claude-costs agentroute claude-local localrig claude-agents queue-mvp
+TOOLS := agentroute claude-local localrig claude-agents
 LINKS := agentik-agents $(TOOLS)
+# The API lane's tools, gone with packet a-s17: a link of theirs that still points into this
+# checkout would dangle, so install and uninstall remove it and touch no other file.
+RETIRED := claude-api-agent claude-fanout claude-costs queue-mvp
 # scripts/doclint is the session plugin's doc gate, copied byte for byte (conventions §6);
 # sync does not carry it, so `doclint` checks it against this pin first (a-s8).
 DOCLINT_SHA = 26eaf2c84aadb822f8d63a0257b063afcc0ba6d9bbcf1d2d856abe4c6388341f
@@ -59,6 +62,7 @@ install: ## Symlink agentik-agents and its tools into BINDIR (default ~/.local/b
 	  && cp -- "$(REPO)/scripts/agentik" "$$tmp" && chmod 0755 "$$tmp" \
 	  && mv -f -- "$$tmp" "$(BINDIR)/agentik" \
 	  && printf '  copied %s (the agentik front door, vendored)\n' "$(BINDIR)/agentik"
+	@$(MAKE) --no-print-directory unlink-retired
 	@case ":$$PATH:" in *":$(BINDIR):"*) : ;; \
 	  *) printf '  NOTE: %s is not on PATH; add it to use the bare command names.\n' "$(BINDIR)" ;; \
 	esac
@@ -73,19 +77,31 @@ uninstall: ## Remove the symlinks from BINDIR (only if they point back here); ag
 	    printf '  skipped %s (not our symlink)\n' "$$link"; \
 	  fi; \
 	done
+	@$(MAKE) --no-print-directory unlink-retired
+
+# A retired tool's link goes only when it is a symlink whose target is this checkout's bin/;
+# readlink without -f, since the target no longer exists.
+.PHONY: unlink-retired
+unlink-retired:
+	@for t in $(RETIRED); do \
+	  link="$(BINDIR)/$$t"; \
+	  if [ -L "$$link" ] && [ "$$(readlink -- "$$link")" = "$(REPO)/bin/$$t" ]; then \
+	    rm -- "$$link" && printf '  removed %s (retired)\n' "$$link"; \
+	  fi; \
+	done
 
 .PHONY: test
-test: ## Run every test suite (stub-driven ones spend nothing; pinning needs claude), then the 3.9 floor's reruns
+test: ## Run every test suite (stub-driven, they spend nothing), then the 3.9 floor's reruns
 	@printf '%s\n' 'python3: $(PY) $(PYV) $(PYNOTE)'
 	@fail=0; floor=; trap '[ -z "$$floor" ] || rm -rf -- "$${floor:?}"' EXIT; \
-	for t in tests/test-dispatch.sh tests/test-arg-handling.sh tests/test-run-path.sh tests/test-flag-pinning.sh tests/test-rig.sh tests/test-readme.sh; do \
+	for t in tests/test-dispatch.sh tests/test-rig.sh tests/test-readme.sh; do \
 	  printf '=== %s ===\n' "$$t"; bash "$$t" || fail=1; \
 	done; \
-	for t in tests/test-fanout.py tests/test-costs.py tests/test-route.py tests/test-status.py tests/test-queue.py tests/test-queue-http.py tests/test-apirun.py tests/test-hygiene.py; do \
+	for t in tests/test-route.py tests/test-status.py tests/test-hygiene.py; do \
 	  printf '=== %s ===\n' "$$t"; $(PY) "$$t" || fail=1; \
 	done; \
 	if $(FLOOR) -c '' 2>/dev/null; then \
-	  for t in tests/test-fanout.py tests/test-costs.py tests/test-route.py tests/test-status.py tests/test-queue.py tests/test-queue-http.py; do \
+	  for t in tests/test-route.py tests/test-status.py; do \
 	    printf '=== %s (the 3.9 floor) ===\n' "$$t"; $(FLOOR) "$$t" || fail=1; \
 	  done; \
 	  printf '=== %s (the 3.9 floor) ===\n' tests/test-rig.sh; \
@@ -111,11 +127,10 @@ check-unlocked: test lint doclint hygiene plugin-version-check validate ## The g
 
 lint: ## Syntax-check every tool (sh, bash, python)
 	@sh -n bin/agentik-agents && echo "  bin/agentik-agents: sh syntax OK"
-	@bash -n bin/claude-api-agent && echo "  bin/claude-api-agent: bash syntax OK"
 	@bash -n bin/claude-local && echo "  bin/claude-local: bash syntax OK"
 	@bash -n bin/localrig && echo "  bin/localrig: bash syntax OK"
 	@$(PY) -c "import ast,sys; [ast.parse(open(f).read()) for f in sys.argv[1:]]" \
-	  bin/claude-fanout bin/claude-costs bin/agentroute bin/claude-agents bin/queue-mvp \
+	  bin/agentroute bin/claude-agents \
 	  && echo "  python tools: syntax OK"
 	@bash -n scripts/readme-render && echo "  scripts/readme-render: bash syntax OK"
 
@@ -146,7 +161,7 @@ validate: ## claude plugin validate on plugin/, walled at 60 s (spends nothing);
 
 .PHONY: plugin-dev
 plugin-dev: ## Print the command to load the plugin for ONE session (no persistent change)
-	@printf 'Load /agents:delegate-review and /agents:delegate-costs for one session with:\n\n'
+	@printf 'Load /agents:status and /agents:delegate-local for one session with:\n\n'
 	@printf '  claude --plugin-dir %s\n\n' "$(REPO)/plugin"
 
 .PHONY: plugin-install
@@ -158,5 +173,5 @@ plugin-install: ## Print the lines that install the plugin persistently (Claude 
 	@printf 'Verify the manifest first with: claude plugin validate %s\n' "$(REPO)/plugin"
 
 .PHONY: doctor
-doctor: ## Report install/key/proxy/local-lane readiness (spends nothing): agentik agents doctor
+doctor: ## Report install and local-lane readiness (spends nothing): agentik agents doctor
 	@bin/agentik-agents doctor

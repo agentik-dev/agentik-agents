@@ -2,8 +2,8 @@
 #
 # The stores live outside the repo, in the secrets directory: $AGENTIK_AGENTS_SECRETS, else
 # ${XDG_CONFIG_HOME:-$HOME/.config}/agentik/agents/secrets. sops looks for this file from the
-# current directory up, so run `sops updatekeys` from the repo; `agentik agents setup-key`
-# does so itself. The rule below matches a store's absolute path by its `secrets/` segment.
+# current directory up, so run `sops updatekeys` from the repo. The rule below matches a
+# store's absolute path by its `secrets/` segment.
 #
 # Only secret VALUES are encrypted (see encrypted_regex); the surrounding YAML keys stay
 # in cleartext so a diff of a store shows which value changed without showing it.
@@ -12,8 +12,8 @@
 # encrypted to two older identities, neither of them this Mac, so nothing here could read
 # it, and the API lane had never been run on this machine. Its ciphertext remains in git
 # history, so the key itself was retired by REVOKING it in the Anthropic Console --
-# deleting the file does not do that. Anyone who wants the API lane runs
-# `agentik agents setup-key`, which writes a fresh store under the rule below.
+# deleting the file does not do that. The API lane left the repo with packet a-s17
+# (design/04-api-lane.md); the store this file serves now is the local backends'.
 #
 # One recipient, the owner's Mac. On your own machine, put yours in its place
 # (`age-keygen -y ~/.config/sops/age/keys.txt` prints it).

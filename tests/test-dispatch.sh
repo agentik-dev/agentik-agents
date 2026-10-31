@@ -8,7 +8,7 @@ REPO="$(cd "$(dirname "$0")/.." && pwd -P)"
 D="$(mktemp -d)"
 trap 'rm -r "${D:?}"' EXIT
 cp "$REPO/bin/agentik-agents" "$D/"
-for s in claude-api-agent claude-fanout claude-costs claude-local claude-agents localrig agentroute; do
+for s in claude-local claude-agents localrig agentroute; do
   printf '#!/bin/sh\necho "$#:$*"\n' > "$D/$s"
   chmod +x "$D/$s"
 done
@@ -41,28 +41,16 @@ expect_exit() {
   fi
 }
 
-# the API lane
-expect "api" "2:p1 a b" "$A" api p1 'a b'
-expect "api bare" "0:" "$A" api
-for v in setup-key key-status edit-key remove-key pin-proxy usage; do
-  expect "$v" "1:--$v" "$A" "$v"
-done
-expect "pin-proxy args" "2:--pin-proxy x" "$A" pin-proxy x
-expect "profiles" "1:--list-profiles" "$A" profiles
-expect "help api" "1:--wrapper-help" "$A" help api
-# the fan-out, costs and local lanes
-expect "fanout" "2:--plan p.json" "$A" fanout --plan p.json
-expect "costs" "1:--today" "$A" costs --today
+# the local lane
 expect "local" "2:-p hi" "$A" local -p hi
-# the status tool's two verbs
+# the status tool
 expect "status" "1:status" "$A" status
 expect "status args" "2:status --json" "$A" status --json
-expect "fold" "2:fold run1" "$A" fold run1
 # the local rig and the router
 expect "rig" "1:up" "$A" rig up
 expect "route" "1:--check" "$A" route --check
 # version and help
-expect "--version" "agentik-agents 1.2.0" "$A" --version
+expect "--version" "agentik-agents 1.4.0" "$A" --version
 for h in --help help -h; do
   got="$("$A" "$h")"; code=$?
   if [ "$code" = 0 ] && printf '%s\n' "$got" | grep -q '^  route \.\.\. *agentroute \.\.\.$'; then
@@ -77,7 +65,11 @@ expect_exit "unknown verb" 2 "$A" nosuch
 expect_exit "help unknown" 2 "$A" help nosuch
 expect_exit "--version arg" 2 "$A" --version x
 expect_exit "doctor arg" 2 "$A" doctor x
-expect_exit "queue-mvp has no verb" 2 "$A" queue-mvp
+# the API lane's verbs left with packet a-s17: each is a usage error now, like any unknown verb
+for v in api setup-key key-status edit-key remove-key pin-proxy usage profiles fanout costs fold queue-mvp; do
+  expect_exit "$v is gone" 2 "$A" "$v"
+done
+expect_exit "help api is gone" 2 "$A" help api
 if "$A" nosuch 2>&1 >/dev/null | grep -q '^usage: agentik agents'; then
   pass=$((pass + 1))
 else
@@ -90,9 +82,9 @@ expect_exit "exit passes through" 7 "$A" rig status
 mkdir "$D/bin"
 ln -s "$A" "$D/bin/agentik-agents"
 expect "via link" "1:--check" "$D/bin/agentik-agents" route --check
-# doctor reports and exits 0, the key status and the router's check from beside it
+# doctor reports and exits 0, the router's check from beside it
 got="$(PATH="$D/bin:/usr/bin:/bin" "$A" doctor)"; code=$?
-if [ "$code" = 0 ] && printf '%s\n' "$got" | grep -q '^    1:--key-status$' \
+if [ "$code" = 0 ] && ! printf '%s\n' "$got" | grep -q 'API lane' \
    && printf '%s\n' "$got" | grep -q '^    1:--check$' \
    && printf '%s\n' "$got" | grep -q "^  agentik-agents  *$D/bin/agentik-agents$" \
    && printf '%s\n' "$got" | grep -q '^  agentik  *NOT ON PATH$'; then
@@ -109,7 +101,7 @@ done
 mkdir "$D/py-bad" && printf '#!/bin/sh\nexit 1\n' > "$D/py-bad/python3" && chmod +x "$D/py-bad/python3"
 mkdir "$D/nopy" && for t in readlink dirname sed; do ln -s "$(command -v "$t")" "$D/nopy/$t"; done
 for c in nopin pin pin-comment; do
-  mkdir -p "$D/$c/bin" && cp "$REPO/bin/agentik-agents" "$D/claude-api-agent" "$D/agentroute" "$D/$c/bin/"
+  mkdir -p "$D/$c/bin" && cp "$REPO/bin/agentik-agents" "$D/agentroute" "$D/$c/bin/"
 done
 printf '3.12.7\n' > "$D/pin/.python-version"
 # read as pyenv reads it (fix round 1): the first word of the first line not blank or a comment
@@ -171,10 +163,10 @@ PY
 got="$(cat "$D/plugin-paths")"
 if [ -z "$got" ]; then pass=$((pass + 1)); else fail=$((fail + 1)); printf 'FAIL plugin paths:\n%s\n' "$got"; fi
 
-# the interpreter (a-s9, portfolio entry 26): the five python tools run on `env python3`, the
+# the interpreter (a-s9, portfolio entry 26): the two python tools run on `env python3`, the
 # pin under make; the floor is 3.9, so each one's --help exits 0 under Apple's python3 with a
 # temp HOME and nothing else inherited, skipped where that python3 does not run
-PYTOOLS="agentroute claude-agents claude-costs claude-fanout queue-mvp"
+PYTOOLS="agentroute claude-agents"
 for t in $PYTOOLS; do
   first="$(head -1 "$REPO/bin/$t")"
   if [ "$first" = '#!/usr/bin/env python3' ]; then
