@@ -1,6 +1,6 @@
 {
   "name": "agents",
-  "version": "1.3.1",
+  "version": "1.3.2",
   "description": "Delegate Claude Code work to the lane that fits it: read-only review on API-billed headless agents under a budget cap, mechanical work on a local model, and cost reporting.",
   "author": {"name": "Kevin Tegtmeier"},
   "homepage": "https://github.com/agentik-dev/agentik-agents",
