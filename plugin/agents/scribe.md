@@ -47,7 +47,10 @@ The three records:
    `n<k>`, the highest ever used plus one (the file's rows and the rows removed in
    `git log -p -- NICE_TO_HAVE.md`); a HANDOFF `#` is the highest in the table or in
    `history/handoff-done.md` plus one. A `level` is `S1` to `S4`, S4 when unsure. A file
-   still in bullets keeps bullets.
+   still in bullets keeps bullets. A HANDOFF row marked done
+   leaves the table in the commit that marks it, appended as one line to
+   `history/handoff-done.md` (created when absent): `<#> <item>, done <date> <sha>`
+   (design/05 §2); that commit holds both files.
 
 Records 2 and 3 are committed one commit per record file, the note included: by
 explicit path (`git -C <repo> add <paths>`, never `-A` or `-u`), each message written to
