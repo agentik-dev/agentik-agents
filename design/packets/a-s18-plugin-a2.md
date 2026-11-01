@@ -4,7 +4,7 @@ The amendment as a private hq wrote it (its `history/sessions/BRIEF-2026-11-01-a
 
 | item | value |
 |---|---|
-| from | a-s18's refuter, round 2, FAIL at d656fe0 on a regression (hq sitting 2026-11-01-1); amendment 1 and the packet stand. Macbase entry 20: no round 3; the gate and the new tests are the proof, as sc3's round-2 regressions were |
+| from | a-s18's refuter, round 2, FAIL at d656fe0 on a regression (hq sitting 2026-11-01-1); amendment 1 and the packet stand. The review rule (this Mac's ledger, entry 20): no round 3; the gate and the new tests are the proof, as sc3's round-2 regressions were |
 | pin | branch `a-s18-plugin` at d656fe0, worktree `.claude/worktrees/a-s18-plugin` |
 | wall | amendment 1's, unchanged |
 | may touch | `Makefile`, `tests/`, `NICE_TO_HAVE.md`, this amendment beside the others, the branch's charter; `plugin/` not at all (so no bump; if `plugin-version-check` asks for one, stop and report) |
