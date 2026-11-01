@@ -50,3 +50,9 @@
 - **S4 · the packet and the charter overstate what cites the 10 `.log` files** (a-s17's refuter, round 1, 2026-10-31; filed, not fixed). Packet ruling 6 and the a-s17 charter say design/01 and 02 cite them, but only `design/02-local-rig.md:135`'s `rig-*.log` covers any (6); `e2e-runs`, `live-e2e`, `ollama-0.33.2-gates` and `ollama-mlx-runner` are named nowhere. Fix: correct the claim or drop those 4.
 - **S4 · the cut leaves a config file and an unchecked price table** (a-s17's refuter, round 1, 2026-10-31; filed, not fixed). `~/.config/agentik/agents/proxy-pin.conf` is orphaned on this Mac by the cut; the status price table has no check against billed cost now that the cost tool's drift checks left with it.
 - **S4 · the repo has no DECISIONS.md or CLAUDE.md** (a-s17's refuter, round 1, 2026-10-31; filed, not fixed). Whether a first ledger is its own packet is open.
+
+## a-s18's build (2026-11-01): what it leaves (S4)
+
+- **S4 · `claude-local` holds a copy of the Explore agent** (a-s18's builder, 2026-11-01). A frozen tree holds `lib/` alone, so `plugin/lib/share/local-explore.md` copies `plugin/agents/local-explore.md` for the terminal's `claude-local`; `tests/test-rig.sh` holds them byte-equal. A change to the agent needs both.
+- **S4 · the doctor does not read the launcher's `VERSION=`** (a-s18's builder, 2026-11-01). hq design/04 §6 has the doctor read it; agents' doctor names what is on PATH and the local lane, and says how `install-cli` puts the tools there, but not whether the launcher is behind the plugin.
+- **S4 · a bare `status` exits 1** (a-s18's builder, 2026-11-01). With no session plugin's `sessions/` folder it says which folder it could not read and exits 1, as before the move; on a machine with no session plugin a read with nothing to show could be 0.

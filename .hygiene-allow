@@ -66,6 +66,9 @@ tests/test-readme.sh: sibling
 design/04-api-lane.md: renamed
 # a-s17's section 1 quotes a review naming a sibling's verb; ruling 8 names the ledger file.
 design/packets/a-s17-cut.md: sibling
+# The README and its source name the old names install-cli links until 2026-12-31 (a-s18).
+README.md: renamed
+design/readme/source.md: renamed
 # /agents:install-cli names the old names it links until 2026-12-31 (a-s18).
 plugin/commands/install-cli.md: renamed
 # a-s18 names the sibling repos whose shape it follows.

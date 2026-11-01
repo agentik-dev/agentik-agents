@@ -1,6 +1,6 @@
 {
   "name": "agents",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "description": "See every agent on this Mac, run a session's mechanical subagents on a local model through a loopback router, and write a repo's records from a hand-back.",
   "author": {"name": "Kevin Tegtmeier"},
   "homepage": "https://github.com/agentik-dev/agentik-agents",
