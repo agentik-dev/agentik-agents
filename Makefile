@@ -30,10 +30,12 @@ PYNOTE := (pin: $(PIN))
 else
 PYNOTE := (pin: absent; .python-version says $(PIN))
 endif
-# ~/.local/bin is already on PATH here (claude itself lives there); override with BINDIR=
-BINDIR ?= $(HOME)/.local/bin
+# install-cli's root (a-s18): PREFIX defaults to $(HOME)/.local, so HOME or PREFIX aims install
+# and uninstall at a temp home; ~/.local/bin is already on PATH here (claude itself lives there).
+PREFIX ?= $(HOME)/.local
+BINDIR ?= $(PREFIX)/bin
+SHARE := $(PREFIX)/share/agentik-agents
 TOOLS := agentroute claude-local localrig claude-agents
-LINKS := agentik-agents $(TOOLS)
 # The API lane's tools, gone with packet a-s17: a link of theirs that still points into this
 # checkout would dangle, so install and uninstall remove it and touch no other file.
 RETIRED := claude-api-agent claude-fanout claude-costs queue-mvp
@@ -52,31 +54,29 @@ help: ## Show this help
 	  | sed 's/:.*## /\t/' | sort | awk -F'\t' '{printf "  %-12s %s\n", $$1, $$2}'
 
 .PHONY: install
-install: ## Symlink agentik-agents and its tools into BINDIR (default ~/.local/bin), copy agentik there; idempotent
-	@mkdir -p -- "$(BINDIR)"
-	@for t in $(LINKS); do \
-	  ln -sfn -- "$(REPO)/plugin/lib/$$t" "$(BINDIR)/$$t" \
-	    && printf '  linked %s -> %s\n' "$(BINDIR)/$$t" "$(REPO)/plugin/lib/$$t"; \
-	done
-	@tmp="$(BINDIR)/.agentik.$$$$" \
-	  && cp -- "$(REPO)/scripts/agentik" "$$tmp" && chmod 0755 "$$tmp" \
-	  && mv -f -- "$$tmp" "$(BINDIR)/agentik" \
-	  && printf '  copied %s (the agentik front door, vendored)\n' "$(BINDIR)/agentik"
+install: ## Refuse a dirty tree, then the plugin's install-cli under PREFIX (default ~/.local): the launcher, the agentik door, the old names' links into a frozen tree
+	@if [ -n "$$(git status --porcelain 2>/dev/null)" ] || ! git rev-parse --verify --quiet HEAD >/dev/null; then \
+	  echo "install: refused, the tree is dirty or has no HEAD; commit first" >&2; exit 2; fi
+	plugin/bin/agentik-agents install-cli --prefix "$(PREFIX)"
 	@$(MAKE) --no-print-directory unlink-retired
 	@case ":$$PATH:" in *":$(BINDIR):"*) : ;; \
 	  *) printf '  NOTE: %s is not on PATH; add it to use the bare command names.\n' "$(BINDIR)" ;; \
 	esac
 
 .PHONY: uninstall
-uninstall: ## Remove the symlinks from BINDIR (only if they point back here); agentik stays, other tools install it too
-	@for t in $(LINKS); do \
+uninstall: ## Remove what install-cli wrote under PREFIX: its launcher, the old names' links that point into its share, the share; the agentik door stays, other tools install it too
+	@l="$(BINDIR)/agentik-agents"; \
+	if [ -f "$$l" ] && [ ! -L "$$l" ] && grep -qF -e "TREE=$(SHARE)/" -e "TREE='$(SHARE)/" "$$l"; then \
+	  rm -- "$$l" && printf '  removed %s\n' "$$l"; \
+	else printf '  skipped %s (not the launcher install-cli wrote)\n' "$$l"; fi; \
+	for t in $(TOOLS); do \
 	  link="$(BINDIR)/$$t"; \
-	  if [ -L "$$link" ] && [ "$$(readlink -f -- "$$link")" = "$(REPO)/plugin/lib/$$t" ]; then \
-	    rm -- "$$link" && printf '  removed %s\n' "$$link"; \
-	  else \
-	    printf '  skipped %s (not our symlink)\n' "$$link"; \
-	  fi; \
-	done
+	  case "$$(readlink -- "$$link" 2>/dev/null)" in \
+	  "$(SHARE)"/*) rm -- "$$link" && printf '  removed %s\n' "$$link" ;; \
+	  *) printf '  skipped %s (not a link into %s)\n' "$$link" "$(SHARE)" ;; \
+	  esac; \
+	done; \
+	if [ -d "$(SHARE)" ] && [ ! -L "$(SHARE)" ]; then rm -rf -- "$(SHARE)" && printf '  removed %s\n' "$(SHARE)"; fi
 	@$(MAKE) --no-print-directory unlink-retired
 
 # A retired tool's link goes only when it is a symlink whose target is this checkout's bin/;
