@@ -39,7 +39,15 @@ The three records:
 3. The record lines: the charter's Handover lines under `history/sittings/` (the charter
    stays under 4,096 bytes; check with `wc -c`), the build-order line in `HANDOFF.md`, and
    the `NICE_TO_HAVE.md` lines for what was filed outside the packet. Each line takes the
-   shape of the lines above it.
+   shape of the lines above it. Where the file holds its table (HANDOFF's header
+   `| # | item | level | repo | where | state |`, NICE's
+   `| id | level | area | finding | evidence | from |`), a line is one row of it: one line,
+   at most 400 characters, every `|` in a cell written `\|`, code spans too; evidence that
+   does not fit goes to a file under `history/sessions/` that the row cites. A NICE `id` is
+   `n<k>`, the highest ever used plus one (the file's rows and the rows removed in
+   `git log -p -- NICE_TO_HAVE.md`); a HANDOFF `#` is the highest in the table or in
+   `history/handoff-done.md` plus one. A `level` is `S1` to `S4`, S4 when unsure. A file
+   still in bullets keeps bullets.
 
 Records 2 and 3 are committed one commit per record file, the note included: by
 explicit path (`git -C <repo> add <paths>`, never `-A` or `-u`), each message written to
@@ -50,8 +58,9 @@ Rules:
 - Zero em-dashes in anything you write; the comma, the colon and the hyphen do the work.
 - Every sha, path and count is copied from the hand-back or read from git, never
   recalled. A fact you cannot read is written as `?` and named in your hand-back.
-- Before the record commit, run the repo's `scripts/hygiene` when it is present. A hit
-  stops the commit: leave the files uncommitted and report the hit.
+- Before the record commit, run the repo's `scripts/hygiene`, and `scripts/recordlint` on
+  a `HANDOFF.md` or `NICE_TO_HAVE.md` you wrote, each when it is present. A hit stops the
+  commit: leave the files uncommitted and report the hit.
 - A hand-back path is a file the brief names: never a transcript under
   `~/.claude/projects`, never a task output link, never a `.jsonl`.
 - Read only the hand-back, the files your brief names and the lines you need to match
