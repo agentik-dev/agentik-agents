@@ -130,7 +130,7 @@ lint: ## Syntax-check every tool (sh, bash, python)
 	@bash -n plugin/lib/claude-local && echo "  plugin/lib/claude-local: bash syntax OK"
 	@bash -n plugin/lib/localrig && echo "  plugin/lib/localrig: bash syntax OK"
 	@$(PY) -c "import ast,sys; [ast.parse(open(f).read()) for f in sys.argv[1:]]" \
-	  plugin/lib/agentroute plugin/lib/claude-agents \
+	  plugin/lib/agentroute plugin/lib/claude-agents plugin/lib/agentik-agents.py plugin/lib/agents_install.py \
 	  && echo "  python tools: syntax OK"
 	@bash -n scripts/readme-render && echo "  scripts/readme-render: bash syntax OK"
 

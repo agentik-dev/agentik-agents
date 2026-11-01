@@ -8,6 +8,9 @@ REPO="$(cd "$(dirname "$0")/.." && pwd -P)"
 D="$(mktemp -d)"
 trap 'rm -r "${D:?}"' EXIT
 cp "$REPO/plugin/lib/agentik-agents" "$D/"
+# the version is plugin.json's, the one pin: a frozen tree holds a copy beside the dispatcher (a-s18)
+cp "$REPO/plugin/.claude-plugin/plugin.json" "$D/plugin.json"
+V="$(/usr/bin/python3 -I -c 'import json, sys; print(json.load(open(sys.argv[1]))["version"])' "$D/plugin.json")"
 for s in claude-local claude-agents localrig agentroute; do
   printf '#!/bin/sh\necho "$#:$*"\n' > "$D/$s"
   chmod +x "$D/$s"
@@ -50,7 +53,7 @@ expect "status args" "2:status --json" "$A" status --json
 expect "rig" "1:up" "$A" rig up
 expect "route" "1:--check" "$A" route --check
 # version and help
-expect "--version" "agentik-agents 1.4.0" "$A" --version
+expect "--version" "agentik-agents $V" "$A" --version
 for h in --help help -h; do
   got="$("$A" "$h")"; code=$?
   if [ "$code" = 0 ] && printf '%s\n' "$got" | grep -q '^  route \.\.\. *agentroute \.\.\.$'; then
