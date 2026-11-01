@@ -5,8 +5,9 @@
 # LICENSE's copyright line and plugin.json's author field carry the owner's name.
 LICENSE: person
 plugin/.claude-plugin/plugin.json: person
-# The open items cite the session plugin's conventions doc by name.
+# The open items, and their archive of 2026-11-01, cite the session plugin's conventions doc by name.
 NICE_TO_HAVE.md: sibling
+history/NICE-2026-11-01.md: sibling
 # The README renderer's config path names the plugin that renders it.
 .claude/respeak/config.yaml: sibling
 # This file names the old names its rows except, and the sibling tools.

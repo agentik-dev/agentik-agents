@@ -134,9 +134,9 @@ test: ## Run every test suite (stub-driven, they spend nothing), then the 3.9 fl
 .PHONY: check check-unlocked lint doclint hygiene validate readme
 # conventions §5: one gate per tree (.check.lock), walled at 840 s (inside the relay's 900),
 # held off above load 4 x cores. A last stderr line `bounded: stop: lock|load|wall` is unrun,
-# never red. scripts/{agentik,hygiene,bounded} are vendored from agentik-commons by its
-# scripts/sync, which writes scripts/vendored.sha256; scripts/doclint is the session
-# plugin's, pinned by DOCLINT_SHA above; never edit any of the four here.
+# never red. scripts/{agentik,hygiene,recordlint,bounded} are vendored from agentik-commons
+# by its scripts/sync, which writes scripts/vendored.sha256; scripts/doclint is the session
+# plugin's, pinned by DOCLINT_SHA above; never edit any of the five here.
 check: ## The gate: check-unlocked under scripts/bounded (lock, 840 s wall, load 4)
 	scripts/bounded --lock .check.lock --wall 840 --load 4 -- $(MAKE) check-unlocked
 
@@ -154,10 +154,11 @@ lint: ## Syntax-check every tool (sh, bash, python)
 	  && echo "  python tools: syntax OK"
 	@bash -n scripts/readme-render && echo "  scripts/readme-render: bash syntax OK"
 
-doclint: ## The doc gate (conventions §5): scripts/doclint against DOCLINT_SHA, then the script
+doclint: ## The doc gate (conventions §5): scripts/doclint against DOCLINT_SHA, then the script, then scripts/recordlint on HANDOFF.md and NICE_TO_HAVE.md (hq design/05 §4)
 	@printf '%s  scripts/doclint\n' '$(DOCLINT_SHA)' | shasum -a 256 -c --status - \
 	  || { echo "doclint: scripts/doclint is not DOCLINT_SHA; copy agentik-session's again" >&2; exit 2; }
 	scripts/doclint
+	scripts/recordlint
 
 # conventions §6: scripts/hygiene is vendored from agentik-commons; never edit it here.
 # It scans for the generic groups in the file and the owner's terms in the private list kept
