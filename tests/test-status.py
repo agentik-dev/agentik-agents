@@ -25,7 +25,7 @@ import tempfile
 import time
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
-TOOL = REPO / "bin" / "claude-agents"
+TOOL = REPO / "plugin" / "lib" / "claude-agents"
 # The tool runs on `env python3`: a temp dir whose python3 is this suite's interpreter goes
 # first on its PATH (a-s9), so it runs under the pin under make, under the caller's python3
 # outside it, and under Apple's when the suite does.
@@ -384,10 +384,10 @@ def strict(text: str):
 
 def snapshot(root: pathlib.Path) -> dict:
     """Every file and dir under the fake HOME (except where Apple's python3 caches its own
-    stdlib bytecode when HOME is new), and the repo's bin/."""
+    stdlib bytecode when HOME is new), and the repo's plugin/lib/."""
     skip = root / "Library" / "Caches" / "com.apple.python"
     out = {}
-    for top in (root, REPO / "bin"):
+    for top in (root, REPO / "plugin" / "lib"):
         for p in [top, *top.rglob("*")]:
             if p == skip or skip in p.parents:
                 continue
@@ -396,7 +396,7 @@ def snapshot(root: pathlib.Path) -> dict:
 
 
 def load_tool():
-    sys.dont_write_bytecode = True      # the test's own import must not write bin/__pycache__
+    sys.dont_write_bytecode = True      # the test's own import must not write plugin/lib/__pycache__
     loader = importlib.machinery.SourceFileLoader("claude_agents", str(TOOL))
     spec = importlib.util.spec_from_loader("claude_agents", loader)
     mod = importlib.util.module_from_spec(spec)
@@ -880,7 +880,7 @@ def main() -> int:
         print("== nothing is written (the whole fake HOME, every run above) ==")
         after = snapshot(root)
         changed = sorted(k for k in set(before) | set(after) if before.get(k) != after.get(k))
-        check(not changed, "the tool writes nothing anywhere under HOME or in bin/", str(changed[:5]))
+        check(not changed, "the tool writes nothing anywhere under HOME or in plugin/lib/", str(changed[:5]))
 
     watch_rescan_checks()
     folder_checks()

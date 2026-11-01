@@ -38,7 +38,7 @@ set -euo pipefail
 PROG=$(basename -- "$0"); SELF=$0
 RIG="agentik agents rig"   # the form a printed next step names (agentik-r1 4.2)
 command -v readlink >/dev/null 2>&1 && SELF=$(readlink -f -- "$0" 2>/dev/null || printf '%s' "$0")
-REPO=$(cd -- "$(dirname -- "$SELF")/.." && pwd)
+HERE=$(cd -- "$(dirname -- "$SELF")" && pwd)   # its siblings and share/ sit beside it
 # migrated NEW OLD: agentik-r1 6.3, the new folder when it exists, else the old one when it
 # exists, else the new; writers use it too, so old and new code share the old folder until
 # the cold window moves it.
@@ -68,7 +68,7 @@ if man.exists():
 PY
 }
 Q8_BLOB=$(resolve_q8_blob)
-TEMPLATE=$REPO/share/qwen3.8-chat_template.jinja
+TEMPLATE=$HERE/share/qwen3.8-chat_template.jinja
 LLAMA_PORT=${LOCALRIG_LLAMA_PORT:-8081}
 # `flash`: the Unsloth Dynamic GGUF downloaded by hand into ~/models (2026-09-06), served on the
 # same port as `llama` because the two are alternatives on this box, never co-resident (53 GB).
@@ -346,15 +346,15 @@ status() {
   echo "backends.json ($BACKENDS):"
   if [[ -f "$BACKENDS" ]]; then sed -E 's/("auth": "Bearer )[^"]*/\1…/' "$BACKENDS" | sed 's/^/  /'; else echo "  (none)"; fi
   echo "processes:"
-  local procs; procs=$(ps -eo pid=,command= | grep -E 'bin/agentroute --serve|llama-server |unsloth run --model' | grep -v grep || true)
+  local procs; procs=$(ps -eo pid=,command= | grep -E '/agentroute --serve|llama-server |unsloth run --model' | grep -v grep || true)
   if [[ -n "$procs" ]]; then
     while read -r pid cmd; do printf '  %-7s %s\n' "$pid" "$(sed -E 's#^.*/(agentroute|llama-server|unsloth)#\1#; s/--api-key [^ ]*/--api-key …/' <<<"$cmd" | cut -c1-90)"; done <<<"$procs"
-    local n; n=$(grep -c 'bin/agentroute --serve' <<<"$procs" || true)
+    local n; n=$(grep -c '/agentroute --serve' <<<"$procs" || true)
     [[ "${n:-0}" -gt 1 ]] && echo "  ⚠ $n agentroute processes: only the one holding ${ROUTER_LISTEN##*:} serves; stop the rest"
   else echo "  (none)"; fi
   echo "ollama resident:"
   curl -fsS -m 3 "$OLLAMA_URL/api/ps" 2>/dev/null | python3 -c 'import sys,json; m=json.load(sys.stdin)["models"]; print("  " + (", ".join("%s %.1f GB" % (x["name"], x["size_vram"]/1e9) for x in m) or "nothing"))' 2>/dev/null || echo "  (ollama unreachable)"
-  if [[ -x "$REPO/bin/agentroute" ]]; then echo "router:"; "$REPO/bin/agentroute" --check 2>&1 | sed 's/^/  /' || true; fi
+  if [[ -x "$HERE/agentroute" ]]; then echo "router:"; "$HERE/agentroute" --check 2>&1 | sed 's/^/  /' || true; fi
 }
 restart_router() {
   local port=${ROUTER_LISTEN##*:} pid
@@ -366,9 +366,9 @@ restart_router() {
     fi
   done
   sleep 1
-  ( nohup "$REPO/bin/agentroute" --serve >> "$STATE/agentroute.log" 2>&1 & echo $! > "$STATE/agentroute.restart.pid" )
+  ( nohup "$HERE/agentroute" --serve >> "$STATE/agentroute.log" 2>&1 & echo $! > "$STATE/agentroute.restart.pid" )
   sleep 1; rm -f "$STATE/agentroute.restart.pid"
-  "$REPO/bin/agentroute" --check
+  "$HERE/agentroute" --check
 }
 
 case "${1:-}" in

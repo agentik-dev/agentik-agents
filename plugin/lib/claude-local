@@ -44,7 +44,6 @@ PROG="$(basename -- "$0")"
 SELF="$0"
 command -v readlink >/dev/null 2>&1 && SELF="$(readlink -f -- "$0" 2>/dev/null || printf '%s' "$0")"
 BIN_DIR="$(cd -- "$(dirname -- "$SELF")" && pwd)"
-REPO="$(cd -- "${BIN_DIR}/.." && pwd)"
 ROUTER_BIN="${BIN_DIR}/agentroute"
 
 LISTEN="${AGENTROUTE_LISTEN:-127.0.0.1:8787}"
@@ -60,11 +59,17 @@ EXPLORE_MODE="${CLAUDE_LOCAL_EXPLORE:-local}"
 
 # Session-scoped override of the built-in Explore agent (same tools, same read-only role),
 # pinned to the local model. Passed with --agents, which outranks user/project scope.
-# The built-in Explore agent is overridden with THIS REPO'S plugin/agents/local-explore.md, built
-# at launch rather than copied here. An inlined copy drifted: the copy was live through the
+# The built-in Explore agent is overridden with the plugin's agents/local-explore.md, built at
+# launch rather than copied here; a frozen tree (install-cli) has no agents/, so it reads
+# share/local-explore.md, a copy tests/test-rig.sh holds byte-equal to the agent file. An inlined copy drifted: the copy was live through the
 # symlink while the agent file needed `claude plugin update`, so the two diverged silently.
+explore_md() {   # the plugin's own agent file, else the copy in share/ beside this file (a frozen tree)
+    local md="${BIN_DIR%/*}/agents/local-explore.md"
+    [[ -r "$md" ]] || md="${BIN_DIR}/share/local-explore.md"
+    printf '%s' "$md"
+}
 explore_agent_json() {
-    python3 - "$REPO/plugin/agents/local-explore.md" <<'PY'
+    python3 - "$(explore_md)" <<'PY'
 import json, pathlib, sys
 raw = pathlib.Path(sys.argv[1]).read_text()
 _, fm, body = raw.split("---", 2)
@@ -112,7 +117,7 @@ stop_started() { if [[ -n "$STARTED" ]]; then kill "$STARTED" 2>/dev/null || tru
 if ! router_up; then
     # Another agentroute may be mid-start (or wedged): starting a second one gives two
     # daemons, only one of which holds the port, and the loser is invisible.
-    if pgrep -f 'bin/agentroute --serve' >/dev/null 2>&1; then
+    if pgrep -f '/agentroute --serve' >/dev/null 2>&1; then
         warn "an agentroute process is already running but not answering on ${LISTEN}."
         warn "check it with 'agentik agents rig status'; restart it with 'agentik agents rig restart-router'."
         die "refusing to start a second router"
@@ -167,7 +172,7 @@ if [[ "$EXPLORE_MODE" == "local" ]]; then
 fi
 if [[ "$EXPLORE_MODE" == "local" ]]; then
     if ! EXPLORE_AGENT=$(explore_agent_json 2>/dev/null) || [[ -z "$EXPLORE_AGENT" ]]; then
-        warn "could not build the Explore override from ${REPO}/plugin/agents/local-explore.md; leaving Explore on the session model"
+        warn "could not build the Explore override from $(explore_md); leaving Explore on the session model"
     else
         EXTRA_ARGS+=(--agents "$EXPLORE_AGENT")
     fi

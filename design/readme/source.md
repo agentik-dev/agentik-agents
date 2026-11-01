@@ -8,21 +8,22 @@ Three things for Claude Code on one Mac, under one command, `agentik agents <ver
 
 ## Install
 
-The command line tools, from a checkout. `make install` links them into `~/.local/bin` (override with `BINDIR=`), and `make uninstall` removes the links:
-
-```sh
-make install
-agentik agents doctor
-```
-
-The plugin, from the agentik marketplace:
+The plugin, from the agentik marketplace. It runs its tools from its own folder, with no checkout:
 
 ```sh
 claude plugin marketplace add agentik-dev/agentik-commons
 claude plugin install agents@agentik
 ```
 
-It needs `bash`, `python3` 3.9 or later (the tools are stdlib only) and Claude Code. The plugin gives `/agents:status`, `/agents:delegate-local`, the agents `agents:local-explore`, `agents:local-summarize`, `agents:local-review`, `agents:local-implement`, `agents:local-test` and `agents:scribe`, and the skill `local-delegation`.
+The command line, for a terminal, is `install-cli`: `/agents:install-cli` in a session, or the plugin's own `bin/agentik-agents install-cli`. It freezes the plugin's code under `~/.local/share/agentik-agents/` and writes `agentik-agents`, the `agentik` door and links for the old names `agentroute`, `claude-agents`, `claude-local` and `localrig` (until 2026-12-31) into `~/.local/bin`; a file there that is not a link it leaves, and names. Then:
+
+```sh
+agentik agents doctor
+```
+
+From a checkout, `make install` runs the same `install-cli` (it refuses a dirty tree; `PREFIX=` moves it), and `make uninstall` removes what it wrote.
+
+It needs `bash`, `/usr/bin/python3` (3.9 or later; the tools are stdlib only) and Claude Code. The plugin gives `/agents:status`, `/agents:delegate-local`, `/agents:install-cli`, the agents `agents:local-explore`, `agents:local-summarize`, `agents:local-review`, `agents:local-implement`, `agents:local-test` and `agents:scribe`, and the skill `local-delegation`.
 
 ## The verbs
 
@@ -33,6 +34,7 @@ It needs `bash`, `python3` 3.9 or later (the tools are stdlib only) and Claude C
 | `route ...` | the loopback router: Claude models to Anthropic, local models to the local server; `route --check` exits non-zero on a FAIL row |
 | `rig ...` | bring local backends up and down, set the default, manage their keys |
 | `doctor` | what is on `PATH`, `python3` and its version, the local lane's check; it reports and never gates |
+| `install-cli [--prefix P]` | the command line on `PATH`, from the plugin's frozen code; exit 0 done, 1 it could not |
 
 `agentik agents --help` prints the table with the tool each verb runs. `agentik` is the front door every agentik tool installs; `agentik-agents <verb>` is the same command.
 
@@ -56,7 +58,7 @@ The router keeps a ledger at `~/.local/state/agentik-agents/route/requests.jsonl
 - `design/04-api-lane.md`: the API-billed lane this plugin once carried, why it went, and how to bring it back.
 - `design/packets/`: how each change was built. `NICE_TO_HAVE.md`: what a review left open.
 
-`make check` is the gate: the stub-driven suites, the lint, the doc gate, the public-hygiene scan and `claude plugin validate`. It spends nothing.
+`make check` is the gate: seven stub-driven suites, 391 checks, among them the plugin on a bare machine (`tests/test-bare-machine.py`), with three suites rerun at the 3.9 floor; the lint, the doc gate, the public-hygiene scan and `claude plugin validate`. It spends nothing.
 
 ## License
 

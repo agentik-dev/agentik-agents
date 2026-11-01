@@ -18,11 +18,11 @@ Makefile: renamed,sibling
 scripts/readme-render: sibling
 # The tools: the eight are the aliases (their own names, usage, the files they run), the
 # readers keep the old folders as fallbacks (6.3), and the dispatcher maps each verb to one.
-bin/*: renamed
+plugin/lib/*: renamed
 # The router forwards Claude Code's x-claude-code-session-id header, a name not ours, and
 # the status tool falls back to the session plugin's old state folder (c1).
-bin/agentroute: renamed,sibling
-bin/claude-agents: renamed,sibling
+plugin/lib/agentroute: renamed,sibling
+plugin/lib/claude-agents: renamed,sibling
 # A local agent's description names a task kind, design decisions.
 plugin/agents/local-implement.md: sibling
 
@@ -66,3 +66,10 @@ tests/test-readme.sh: sibling
 design/04-api-lane.md: renamed
 # a-s17's section 1 quotes a review naming a sibling's verb; ruling 8 names the ledger file.
 design/packets/a-s17-cut.md: sibling
+# The README and its source name the old names install-cli links until 2026-12-31 (a-s18).
+README.md: renamed
+design/readme/source.md: renamed
+# /agents:install-cli names the old names it links until 2026-12-31 (a-s18).
+plugin/commands/install-cli.md: renamed
+# a-s18 names the sibling repos whose shape it follows.
+design/packets/a-s18-plugin.md: sibling

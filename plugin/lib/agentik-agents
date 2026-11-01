@@ -5,19 +5,20 @@
 #   agentik-agents <verb> [args...]    directly
 #
 # Each verb execs one of the tools beside this file, its args unchanged (the table
-# in `--help`). The tools are found in this file's resolved directory (readlink -f),
-# so the installed link runs the checkout's own copies. Exit: the tool's own code on
-# dispatch; 0 for --help, help, --version and doctor (it reports, it does not gate);
-# 2 for usage, no verb or an unknown one. POSIX sh, no interpreter. The API lane's verbs
-# left with packet a-s17; design/04-api-lane.md says what they were.
-VERSION=1.4.0
+# in `--help`). The tools are found in this file's resolved directory (readlink -f): the
+# plugin's lib/, or the tree install-cli froze, which the launchers reach through the
+# runner, agentik-agents.py (packet a-s18). Exit: the tool's own code on dispatch;
+# install-cli's (0 done, 1 it could not); 0 for --help, help, --version and doctor (it
+# reports, it does not gate); 2 for usage, no verb or an unknown one. POSIX sh, no
+# interpreter but install-cli's. The API lane's verbs left with packet a-s17;
+# design/04-api-lane.md says what they were. The version is plugin.json's, the one pin.
 
 self=$(readlink -f -- "$0" 2>/dev/null) || self=$0
 here=$(CDPATH= cd -P -- "$(dirname -- "$self")" >/dev/null && pwd -P) || exit 2
 
 usage() {
 	echo "usage: agentik agents <verb> [args...] | agentik agents --help | --version" >&2
-	echo "verbs: local status rig route doctor help" >&2
+	echo "verbs: local status rig route doctor install-cli help" >&2
 	exit 2
 }
 
@@ -31,6 +32,9 @@ usage: agentik agents <verb> [args...]
   rig ...             localrig ...
   route ...           agentroute ...
   doctor              each tool on PATH, python3, the local lane's check
+  install-cli [--prefix P]
+                      freeze this lib/, write the launcher, the agentik door and
+                      the old names' links (agents_install.py, under python3)
 
 The old names on the right stay on PATH as aliases until 2026-12-31.
 EOF
@@ -42,8 +46,31 @@ run() {
 	exec "$here/$tool" "$@"
 }
 
+# The version: plugin.json beside this file in a frozen tree, else the plugin's manifest.
+version() {
+	for m in "$here/plugin.json" "${here%/*}/.claude-plugin/plugin.json"; do
+		[ -r "$m" ] || continue
+		v=$(sed -n 's/^[[:space:]]*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$m" | head -n 1)
+		[ -z "$v" ] || { echo "$v"; return 0; }
+	done
+	echo 0.0.0-unknown
+}
+
+# install-cli under the launchers' interpreter: AGENTIK_PYTHON, else /usr/bin/python3, else
+# PATH's python3; none is exit 3 (GUIDE section 10).
+install_cli() {
+	py=${AGENTIK_PYTHON:-/usr/bin/python3}
+	[ -f "$py" ] && [ -x "$py" ] || py=$(command -v python3) || {
+		echo "agentik-agents: no python3, at /usr/bin/python3 or on PATH" >&2
+		exit 3
+	}
+	exec "$py" -I -X pycache_prefix="${XDG_CACHE_HOME:-$HOME/.cache}/agentik/pycache" \
+		"$here/agents_install.py" "$@"
+}
+
 # The interpreter row (portfolio entry 26): PATH's python3, its version against the floor
-# (3.9), and the gate's pin, .python-version beside bin/, when the two differ. -I keeps a
+# (3.9), and the gate's pin, .python-version at the checkout's root above plugin/lib/, when the
+# two differ. -I keeps a
 # platform.py in the caller's directory or on PYTHONPATH out; the compare is sh. The pin is
 # read as pyenv reads it: the first word of the first line not blank or a comment, CRs dropped.
 python_row() {
@@ -59,7 +86,7 @@ python_row() {
 	else
 		note="3.9 or later"
 	fi
-	pin= vf=${here%/*}/.python-version
+	pin= vf=${here%/*/*}/.python-version
 	if [ -r "$vf" ]; then
 		while IFS=" 	$(printf '\r')" read -r w rest || [ -n "$w" ]; do
 			case $w in '' | '#'*) continue ;; esac
@@ -71,10 +98,14 @@ python_row() {
 }
 
 doctor() {
+	missing=
 	for t in agentroute claude-local localrig claude-agents agentik-agents agentik; do
-		p=$(command -v "$t" 2>/dev/null) || p=
+		p=$(command -v "$t" 2>/dev/null) || { p= && missing=1; }
 		printf '  %-18s %s\n' "$t" "${p:-NOT ON PATH}"
 	done
+	[ -z "$missing" ] || echo "  (/agents:install-cli, or 'agentik-agents install-cli', puts them on PATH)"
+	p=$(command -v claude 2>/dev/null) || p=
+	printf '  %-18s %s\n' claude "${p:-NOT ON PATH (the local lane runs it)}"
 	printf '  %-18s %s\n' python3 "$(python_row)"
 	echo ""
 	echo "  Local lane:"
@@ -96,13 +127,14 @@ help | -h | --help)
 	;;
 --version)
 	[ $# -eq 0 ] || usage
-	echo "agentik-agents $VERSION"
+	echo "agentik-agents $(version)"
 	exit 0
 	;;
 local) run claude-local "$@" ;;
 status) run claude-agents status "$@" ;;
 rig) run localrig "$@" ;;
 route) run agentroute "$@" ;;
+install-cli) install_cli "$@" ;;
 doctor)
 	[ $# -eq 0 ] || usage
 	doctor

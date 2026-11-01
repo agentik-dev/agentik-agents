@@ -1,10 +1,12 @@
 # agentik-agents — install / test targets.
 #
-# The tools are sh, bash and python3; there is nothing to compile. `install` links the
-# dispatcher, agentik-agents, and the four tools it runs onto PATH (~/.local/bin, where
-# `claude` already is), and copies the vendored agentik front door there (agentik-r1 D3).
-# It is idempotent and reversible, and it only ever touches $(BINDIR) -- never anything
-# else outside this repo. The four keep their names as aliases until 2026-12-31.
+# The tools are sh, bash and python3; there is nothing to compile. `install` runs the plugin's
+# install-cli under PREFIX (default ~/.local): it freezes plugin/lib/ into
+# PREFIX/share/agentik-agents/<hash>/ and writes PREFIX/bin/agentik-agents (the launcher), the
+# agentik door (agentik-r1 D3) and the four old names as links into the tree, until 2026-12-31.
+# It is idempotent and reversible; `uninstall` takes back all but the door. Python, run by the
+# launcher and by these recipes, also leaves $HOME/.cache/agentik/pycache and Apple's
+# $HOME/Library/Caches/com.apple.python; nothing else outside this repo is touched.
 
 SHELL := /bin/bash
 REPO  := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
@@ -30,10 +32,19 @@ PYNOTE := (pin: $(PIN))
 else
 PYNOTE := (pin: absent; .python-version says $(PIN))
 endif
-# ~/.local/bin is already on PATH here (claude itself lives there); override with BINDIR=
-BINDIR ?= $(HOME)/.local/bin
+# install-cli's root (a-s18): PREFIX defaults to $(HOME)/.local, so HOME or PREFIX aims install
+# and uninstall at a temp home; ~/.local/bin is already on PATH here (claude itself lives there).
+# PREFIX reaches the recipes through the environment, and PFX_SH sets the shell's $pfx to it as
+# install-cli reads it (os.path.abspath: no trailing or doubled slash, no . or ..), so uninstall
+# judges by the paths install-cli wrote (a1 F2); never make's $(abspath), which splits a path at
+# its spaces (a2 F1). Every use is quoted. install-cli writes into $pfx/bin and takes no bin dir
+# of its own, so there is no BINDIR: `install` refuses one given.
+PREFIX ?= $(HOME)/.local
+export PREFIX
+ABSPATH = $(FLOOR) -I -c 'import os, sys; print(os.path.abspath(sys.argv[1]))'
+REALPATH = $(FLOOR) -I -c 'import os, sys; print(os.path.realpath(sys.argv[1]))'
+PFX_SH  = pfx="$$($(ABSPATH) "$$PREFIX")" || exit 2; bin="$$pfx/bin"; share="$$pfx/share/agentik-agents"
 TOOLS := agentroute claude-local localrig claude-agents
-LINKS := agentik-agents $(TOOLS)
 # The API lane's tools, gone with packet a-s17: a link of theirs that still points into this
 # checkout would dangle, so install and uninstall remove it and touch no other file.
 RETIRED := claude-api-agent claude-fanout claude-costs queue-mvp
@@ -52,39 +63,48 @@ help: ## Show this help
 	  | sed 's/:.*## /\t/' | sort | awk -F'\t' '{printf "  %-12s %s\n", $$1, $$2}'
 
 .PHONY: install
-install: ## Symlink agentik-agents and its tools into BINDIR (default ~/.local/bin), copy agentik there; idempotent
-	@mkdir -p -- "$(BINDIR)"
-	@for t in $(LINKS); do \
-	  ln -sfn -- "$(REPO)/bin/$$t" "$(BINDIR)/$$t" \
-	    && printf '  linked %s -> %s\n' "$(BINDIR)/$$t" "$(REPO)/bin/$$t"; \
-	done
-	@tmp="$(BINDIR)/.agentik.$$$$" \
-	  && cp -- "$(REPO)/scripts/agentik" "$$tmp" && chmod 0755 "$$tmp" \
-	  && mv -f -- "$$tmp" "$(BINDIR)/agentik" \
-	  && printf '  copied %s (the agentik front door, vendored)\n' "$(BINDIR)/agentik"
+install: ## Refuse a dirty tree, then the plugin's install-cli under PREFIX (default ~/.local): the launcher, the agentik door, the old names' links into a frozen tree
+	@if [ "$(origin BINDIR)" = "command line" ]; then \
+	  echo "install: refused, BINDIR is not honoured: install-cli writes into PREFIX/bin; set PREFIX" >&2; exit 2; fi
+	@if [ -n "$$(git status --porcelain 2>/dev/null)" ] || ! git rev-parse --verify --quiet HEAD >/dev/null; then \
+	  echo "install: refused, the tree is dirty or has no HEAD; commit first" >&2; exit 2; fi
+	@$(PFX_SH); plugin/bin/agentik-agents install-cli --prefix "$$pfx"
 	@$(MAKE) --no-print-directory unlink-retired
-	@case ":$$PATH:" in *":$(BINDIR):"*) : ;; \
-	  *) printf '  NOTE: %s is not on PATH; add it to use the bare command names.\n' "$(BINDIR)" ;; \
+	@$(PFX_SH); case ":$$PATH:" in *":$$bin:"*) : ;; \
+	  *) printf '  NOTE: %s is not on PATH; add it to use the bare command names.\n' "$$bin" ;; \
 	esac
 
 .PHONY: uninstall
-uninstall: ## Remove the symlinks from BINDIR (only if they point back here); agentik stays, other tools install it too
-	@for t in $(LINKS); do \
-	  link="$(BINDIR)/$$t"; \
-	  if [ -L "$$link" ] && [ "$$(readlink -f -- "$$link")" = "$(REPO)/bin/$$t" ]; then \
-	    rm -- "$$link" && printf '  removed %s\n' "$$link"; \
-	  else \
-	    printf '  skipped %s (not our symlink)\n' "$$link"; \
-	  fi; \
-	done
+uninstall: ## Remove what install-cli wrote under PREFIX: its launcher, the old names' links that point into its share, then the share once the launcher is gone and it resolves under PREFIX; the agentik door stays, other tools install it too
+	@if [ "$(origin BINDIR)" = "command line" ]; then \
+	  echo "uninstall: refused, BINDIR is not honoured: install-cli writes into PREFIX/bin; set PREFIX" >&2; exit 2; fi
 	@$(MAKE) --no-print-directory unlink-retired
+	@$(PFX_SH); l="$$bin/agentik-agents"; gone=1; \
+	if [ -f "$$l" ] && [ ! -L "$$l" ] && grep -qF -e "TREE=$$share/" -e "TREE='$$share/" "$$l"; then \
+	  rm -- "$$l" && printf '  removed %s\n' "$$l" || gone=; \
+	elif [ -e "$$l" ] || [ -L "$$l" ]; then gone=; \
+	  printf '  skipped %s (not the launcher install-cli wrote)\n' "$$l"; fi; \
+	for t in $(TOOLS); do \
+	  link="$$bin/$$t"; \
+	  case "$$(readlink -- "$$link" 2>/dev/null)" in \
+	  "$$share"/*) rm -- "$$link" && printf '  removed %s\n' "$$link" ;; \
+	  *) printf '  skipped %s (not a link into %s)\n' "$$link" "$$share" ;; \
+	  esac; \
+	done; \
+	if [ -d "$$share" ] && [ ! -L "$$share" ]; then \
+	  real="$$($(REALPATH) "$$share")" && want="$$($(REALPATH) "$$pfx")/share/agentik-agents" || exit 2; \
+	  if [ "$$real" != "$$want" ]; then \
+	    printf 'uninstall: %s stays: it resolves to %s, not under PREFIX %s\n' "$$share" "$$real" "$$want" >&2; exit 2; \
+	  elif [ -n "$$gone" ]; then rm -rf -- "$$share" && printf '  removed %s\n' "$$share"; \
+	  else printf 'uninstall: %s stays: %s is not the launcher install-cli wrote, and may run from it\n' "$$share" "$$l" >&2; exit 2; fi; \
+	fi
 
 # A retired tool's link goes only when it is a symlink whose target is this checkout's bin/;
 # readlink without -f, since the target no longer exists.
 .PHONY: unlink-retired
 unlink-retired:
-	@for t in $(RETIRED); do \
-	  link="$(BINDIR)/$$t"; \
+	@$(PFX_SH); for t in $(RETIRED); do \
+	  link="$$bin/$$t"; \
 	  if [ -L "$$link" ] && [ "$$(readlink -- "$$link")" = "$(REPO)/bin/$$t" ]; then \
 	    rm -- "$$link" && printf '  removed %s (retired)\n' "$$link"; \
 	  fi; \
@@ -97,7 +117,7 @@ test: ## Run every test suite (stub-driven, they spend nothing), then the 3.9 fl
 	for t in tests/test-dispatch.sh tests/test-rig.sh tests/test-readme.sh; do \
 	  printf '=== %s ===\n' "$$t"; bash "$$t" || fail=1; \
 	done; \
-	for t in tests/test-route.py tests/test-status.py tests/test-hygiene.py; do \
+	for t in tests/test-route.py tests/test-status.py tests/test-hygiene.py tests/test-bare-machine.py; do \
 	  printf '=== %s ===\n' "$$t"; $(PY) "$$t" || fail=1; \
 	done; \
 	if $(FLOOR) -c '' 2>/dev/null; then \
@@ -126,11 +146,11 @@ check-unlocked: test lint doclint hygiene plugin-version-check validate ## The g
 	else echo "readme: stale, run make readme"; exit 2; fi
 
 lint: ## Syntax-check every tool (sh, bash, python)
-	@sh -n bin/agentik-agents && echo "  bin/agentik-agents: sh syntax OK"
-	@bash -n bin/claude-local && echo "  bin/claude-local: bash syntax OK"
-	@bash -n bin/localrig && echo "  bin/localrig: bash syntax OK"
+	@sh -n plugin/lib/agentik-agents && echo "  plugin/lib/agentik-agents: sh syntax OK"
+	@bash -n plugin/lib/claude-local && echo "  plugin/lib/claude-local: bash syntax OK"
+	@bash -n plugin/lib/localrig && echo "  plugin/lib/localrig: bash syntax OK"
 	@$(PY) -c "import ast,sys; [ast.parse(open(f).read()) for f in sys.argv[1:]]" \
-	  bin/agentroute bin/claude-agents \
+	  plugin/lib/agentroute plugin/lib/claude-agents plugin/lib/agentik-agents.py plugin/lib/agents_install.py \
 	  && echo "  python tools: syntax OK"
 	@bash -n scripts/readme-render && echo "  scripts/readme-render: bash syntax OK"
 
@@ -174,4 +194,4 @@ plugin-install: ## Print the lines that install the plugin persistently (Claude 
 
 .PHONY: doctor
 doctor: ## Report install and local-lane readiness (spends nothing): agentik agents doctor
-	@bin/agentik-agents doctor
+	@plugin/lib/agentik-agents doctor
