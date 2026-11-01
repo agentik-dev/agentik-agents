@@ -97,7 +97,7 @@ test: ## Run every test suite (stub-driven, they spend nothing), then the 3.9 fl
 	for t in tests/test-dispatch.sh tests/test-rig.sh tests/test-readme.sh; do \
 	  printf '=== %s ===\n' "$$t"; bash "$$t" || fail=1; \
 	done; \
-	for t in tests/test-route.py tests/test-status.py tests/test-hygiene.py; do \
+	for t in tests/test-route.py tests/test-status.py tests/test-hygiene.py tests/test-bare-machine.py; do \
 	  printf '=== %s ===\n' "$$t"; $(PY) "$$t" || fail=1; \
 	done; \
 	if $(FLOOR) -c '' 2>/dev/null; then \
