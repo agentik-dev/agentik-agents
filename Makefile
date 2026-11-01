@@ -1,10 +1,12 @@
 # agentik-agents — install / test targets.
 #
-# The tools are sh, bash and python3; there is nothing to compile. `install` links the
-# dispatcher, agentik-agents, and the four tools it runs onto PATH (~/.local/bin, where
-# `claude` already is), and copies the vendored agentik front door there (agentik-r1 D3).
-# It is idempotent and reversible, and it only ever touches $(PFX)/bin and its share -- never
-# anything else outside this repo. The four keep their names as aliases until 2026-12-31.
+# The tools are sh, bash and python3; there is nothing to compile. `install` runs the plugin's
+# install-cli under PREFIX (default ~/.local): it freezes plugin/lib/ into
+# PREFIX/share/agentik-agents/<hash>/ and writes PREFIX/bin/agentik-agents (the launcher), the
+# agentik door (agentik-r1 D3) and the four old names as links into the tree, until 2026-12-31.
+# It is idempotent and reversible; `uninstall` takes back all but the door. Python, run by the
+# launcher and by these recipes, also leaves $HOME/.cache/agentik/pycache and Apple's
+# $HOME/Library/Caches/com.apple.python; nothing else outside this repo is touched.
 
 SHELL := /bin/bash
 REPO  := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
