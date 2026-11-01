@@ -32,13 +32,15 @@ PYNOTE := (pin: absent; .python-version says $(PIN))
 endif
 # install-cli's root (a-s18): PREFIX defaults to $(HOME)/.local, so HOME or PREFIX aims install
 # and uninstall at a temp home; ~/.local/bin is already on PATH here (claude itself lives there).
-# PFX is PREFIX as install-cli reads it (abspath: no trailing or doubled slash, no . or ..), so
-# uninstall judges by the paths install-cli wrote (a1 F2). install-cli writes into $(PFX)/bin
-# and takes no bin dir of its own, so there is no BINDIR: `install` refuses one given.
+# PREFIX reaches the recipes through the environment, and PFX_SH sets the shell's $pfx to it as
+# install-cli reads it (os.path.abspath: no trailing or doubled slash, no . or ..), so uninstall
+# judges by the paths install-cli wrote (a1 F2); never make's $(abspath), which splits a path at
+# its spaces (a2 F1). Every use is quoted. install-cli writes into $pfx/bin and takes no bin dir
+# of its own, so there is no BINDIR: `install` refuses one given.
 PREFIX ?= $(HOME)/.local
-PFX   := $(abspath $(PREFIX))
-BIN   := $(PFX)/bin
-SHARE := $(PFX)/share/agentik-agents
+export PREFIX
+ABSPATH = $(FLOOR) -I -c 'import os, sys; print(os.path.abspath(sys.argv[1]))'
+PFX_SH  = pfx="$$($(ABSPATH) "$$PREFIX")" || exit 2; bin="$$pfx/bin"; share="$$pfx/share/agentik-agents"
 TOOLS := agentroute claude-local localrig claude-agents
 # The API lane's tools, gone with packet a-s17: a link of theirs that still points into this
 # checkout would dangle, so install and uninstall remove it and touch no other file.
@@ -63,38 +65,38 @@ install: ## Refuse a dirty tree, then the plugin's install-cli under PREFIX (def
 	  echo "install: refused, BINDIR is not honoured: install-cli writes into PREFIX/bin; set PREFIX" >&2; exit 2; fi
 	@if [ -n "$$(git status --porcelain 2>/dev/null)" ] || ! git rev-parse --verify --quiet HEAD >/dev/null; then \
 	  echo "install: refused, the tree is dirty or has no HEAD; commit first" >&2; exit 2; fi
-	plugin/bin/agentik-agents install-cli --prefix "$(PFX)"
+	@$(PFX_SH); plugin/bin/agentik-agents install-cli --prefix "$$pfx"
 	@$(MAKE) --no-print-directory unlink-retired
-	@case ":$$PATH:" in *":$(BIN):"*) : ;; \
-	  *) printf '  NOTE: %s is not on PATH; add it to use the bare command names.\n' "$(BIN)" ;; \
+	@$(PFX_SH); case ":$$PATH:" in *":$$bin:"*) : ;; \
+	  *) printf '  NOTE: %s is not on PATH; add it to use the bare command names.\n' "$$bin" ;; \
 	esac
 
 .PHONY: uninstall
 uninstall: ## Remove what install-cli wrote under PREFIX: its launcher, the old names' links that point into its share, then the share once the launcher is gone; the agentik door stays, other tools install it too
 	@$(MAKE) --no-print-directory unlink-retired
-	@l="$(BIN)/agentik-agents"; gone=1; \
-	if [ -f "$$l" ] && [ ! -L "$$l" ] && grep -qF -e "TREE=$(SHARE)/" -e "TREE='$(SHARE)/" "$$l"; then \
+	@$(PFX_SH); l="$$bin/agentik-agents"; gone=1; \
+	if [ -f "$$l" ] && [ ! -L "$$l" ] && grep -qF -e "TREE=$$share/" -e "TREE='$$share/" "$$l"; then \
 	  rm -- "$$l" && printf '  removed %s\n' "$$l" || gone=; \
 	elif [ -e "$$l" ] || [ -L "$$l" ]; then gone=; \
 	  printf '  skipped %s (not the launcher install-cli wrote)\n' "$$l"; fi; \
 	for t in $(TOOLS); do \
-	  link="$(BIN)/$$t"; \
+	  link="$$bin/$$t"; \
 	  case "$$(readlink -- "$$link" 2>/dev/null)" in \
-	  "$(SHARE)"/*) rm -- "$$link" && printf '  removed %s\n' "$$link" ;; \
-	  *) printf '  skipped %s (not a link into %s)\n' "$$link" "$(SHARE)" ;; \
+	  "$$share"/*) rm -- "$$link" && printf '  removed %s\n' "$$link" ;; \
+	  *) printf '  skipped %s (not a link into %s)\n' "$$link" "$$share" ;; \
 	  esac; \
 	done; \
-	if [ -d "$(SHARE)" ] && [ ! -L "$(SHARE)" ]; then \
-	  if [ -n "$$gone" ]; then rm -rf -- "$(SHARE)" && printf '  removed %s\n' "$(SHARE)"; \
-	  else printf 'uninstall: %s stays: %s is not the launcher install-cli wrote, and may run from it\n' "$(SHARE)" "$$l" >&2; exit 1; fi; \
+	if [ -d "$$share" ] && [ ! -L "$$share" ]; then \
+	  if [ -n "$$gone" ]; then rm -rf -- "$$share" && printf '  removed %s\n' "$$share"; \
+	  else printf 'uninstall: %s stays: %s is not the launcher install-cli wrote, and may run from it\n' "$$share" "$$l" >&2; exit 2; fi; \
 	fi
 
 # A retired tool's link goes only when it is a symlink whose target is this checkout's bin/;
 # readlink without -f, since the target no longer exists.
 .PHONY: unlink-retired
 unlink-retired:
-	@for t in $(RETIRED); do \
-	  link="$(BIN)/$$t"; \
+	@$(PFX_SH); for t in $(RETIRED); do \
+	  link="$$bin/$$t"; \
 	  if [ -L "$$link" ] && [ "$$(readlink -- "$$link")" = "$(REPO)/bin/$$t" ]; then \
 	    rm -- "$$link" && printf '  removed %s (retired)\n' "$$link"; \
 	  fi; \

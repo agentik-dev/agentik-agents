@@ -249,6 +249,27 @@ class BareMachine(unittest.TestCase):
         with open(launcher, encoding="utf-8") as handle:
             self.assertEqual(handle.read(), "mine\n")
 
+    def test_10_a_home_with_a_space(self):
+        # a2 F1: make's $(abspath) split "John Smith" in two; a read-only parent makes the
+        # split an error, and nothing may appear beside the home
+        parent = os.path.join(self.t, "ro")
+        home = os.path.join(parent, "John Smith")
+        os.makedirs(home)
+        bindir, share = self.installed(home)
+        os.chmod(parent, 0o555)
+        try:
+            self.ok(self.make(home, "install"))
+            self.assertEqual(os.listdir(parent), ["John Smith"])
+            launcher = os.path.join(bindir, "agentik-agents")
+            self.assertEqual(self.ok(self.run_tool("--version", exe=launcher, home=home)).stdout,
+                             "agentik-agents %s\n" % self.version)
+            run = self.ok(self.make(home, "uninstall"))
+            self.assertNotIn("skipped", run.stdout + run.stderr)
+        finally:
+            os.chmod(parent, 0o755)
+        self.assertEqual(os.listdir(bindir), ["agentik"])                  # the door stays
+        self.assertFalse(os.path.lexists(share))
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
