@@ -44,13 +44,14 @@ The three records:
    `| id | level | area | finding | evidence | from |`), a line is one row of it: one line,
    at most 400 characters, every `|` in a cell written `\|`, code spans too; evidence that
    does not fit goes to a file under `history/sessions/` that the row cites. A NICE `id` is
-   `n<k>`, the highest ever used plus one (the file's rows and the rows removed in
-   `git log -p -- NICE_TO_HAVE.md`); a HANDOFF `#` is the highest in the table or in
-   `history/handoff-done.md` plus one. A `level` is `S1` to `S4`, S4 when unsure. A file
-   still in bullets keeps bullets. A HANDOFF row marked done
-   leaves the table in the commit that marks it, appended as one line to
-   `history/handoff-done.md` (created when absent): `<#> <item>, done <date> <sha>`
-   (design/05 §2); that commit holds both files.
+   `n<k>`, the highest ever used plus one, the rows its history removed counted too; in
+   the repo's root this line prints that highest (no output: none yet, the first is `n1`):
+   `{ grep -oE '^\| n[0-9]+ ' NICE_TO_HAVE.md; git log -p -- NICE_TO_HAVE.md | grep -oE '^[-+]\| n[0-9]+ '; } | grep -oE '[0-9]+' | sort -n | tail -1`.
+   A HANDOFF `#` is the highest in the table or in `history/handoff-done.md` plus one.
+   A `level` is `S1` to `S4`, S4 when unsure. A file still in bullets keeps bullets.
+   A HANDOFF row marked done leaves the table in the commit that marks it, appended as
+   one line to `history/handoff-done.md` (created when absent):
+   `<#> <item>, done <date> <sha>` (design/05 §2); that commit holds both files.
 
 Records 2 and 3 are committed one commit per record file, the note included: by
 explicit path (`git -C <repo> add <paths>`, never `-A` or `-u`), each message written to
