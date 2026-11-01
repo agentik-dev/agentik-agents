@@ -169,15 +169,32 @@ class BareMachine(unittest.TestCase):
         for name in OLD:
             self.assertTrue(os.access(os.path.join(share, trees[0], name), os.X_OK), name)
 
+    @classmethod
+    def source(cls):
+        """HEAD as a clean checkout of its own, made once, for `make install`'s dirty guard."""
+        src = os.path.join(cls.t, "src")
+        if not os.path.isdir(src):
+            os.makedirs(src)
+            subprocess.run(["tar", "-x", "-C", src], input=git("archive", "HEAD"), check=True)
+            genv = {"HOME": cls.t, "PATH": "/usr/bin:/bin", "GIT_CONFIG_NOSYSTEM": "1"}
+            for argv in (["init", "-q"], ["add", "-A"],
+                         ["-c", "user.name=t", "-c", "user.email=t", "commit", "-q",
+                          "-m", "HEAD"]):
+                git(*argv, cwd=src, env=genv)
+        return src
+
+    @staticmethod
+    def make_env(home):
+        """HOME and PATH only, never the caller's env: an exported PREFIX or XDG_* stays out."""
+        return {"HOME": home, "PATH": "/usr/bin:/bin", "GIT_CONFIG_NOSYSTEM": "1"}
+
+    def make(self, home, *argv):
+        return subprocess.run(["make", "-C", self.source(), "--no-print-directory", *argv],
+                              env=self.make_env(home), capture_output=True, text=True,
+                              timeout=120)
+
     def test_7_make_install_and_uninstall(self):
-        src = os.path.join(self.t, "src")
-        os.makedirs(src)
-        subprocess.run(["tar", "-x", "-C", src], input=git("archive", "HEAD"), check=True)
-        genv = {"HOME": self.t, "PATH": "/usr/bin:/bin", "GIT_CONFIG_NOSYSTEM": "1"}
-        for argv in (["init", "-q"], ["add", "-A"],
-                     ["-c", "user.name=t", "-c", "user.email=t", "commit", "-q",
-                      "-m", "HEAD"]):
-            git(*argv, cwd=src, env=genv)
+        src = self.source()
         home = os.path.join(self.t, "home-by-make")
         os.makedirs(home)
         menv = {k: v for k, v in os.environ.items() if k not in ("MAKEFLAGS", "MFLAGS", "MAKELEVEL")}
@@ -204,6 +221,36 @@ class BareMachine(unittest.TestCase):
         self.assertEqual(os.readlink(mine), "/elsewhere/claude-local")
         self.assertFalse(os.path.exists(share))
         self.assertTrue(os.path.isfile(os.path.join(bindir, "agentik")))
+
+    def test_8_a_trailing_slash_prefix_round_trip_leaves_nothing(self):
+        home = os.path.join(self.t, "home-slash")
+        os.makedirs(home)
+        prefix = os.path.join(home, "p") + "/"
+        self.ok(self.make(home, "install", "PREFIX=" + prefix))
+        run = self.ok(self.make(home, "uninstall", "PREFIX=" + prefix))
+        self.assertNotIn("skipped", run.stdout + run.stderr)
+        self.assertEqual(os.listdir(os.path.join(home, "p", "bin")), ["agentik"])  # the door stays
+        self.assertFalse(os.path.lexists(os.path.join(home, "p", "share", "agentik-agents")))
+        given = self.make(home, "install", "PREFIX=" + prefix, "BINDIR=" + os.path.join(home, "b"))
+        self.assertEqual(given.returncode, 2, given.stdout + given.stderr)
+        self.assertIn("BINDIR is not honoured", given.stderr)
+        self.assertFalse(os.path.lexists(os.path.join(home, "b")))
+
+    def test_9_a_launcher_not_ours_keeps_the_share(self):
+        home = os.path.join(self.t, "home-not-ours")
+        os.makedirs(home)
+        bindir, share = self.installed(home)
+        self.ok(self.make(home, "install"))
+        launcher = os.path.join(bindir, "agentik-agents")
+        os.unlink(launcher)
+        with open(launcher, "w", encoding="utf-8") as handle:
+            handle.write("mine\n")
+        run = self.make(home, "uninstall")
+        self.assertNotEqual(run.returncode, 0, run.stdout + run.stderr)
+        self.assertIn("%s stays" % share, run.stderr)
+        self.assertTrue(os.path.isdir(share))
+        with open(launcher, encoding="utf-8") as handle:
+            self.assertEqual(handle.read(), "mine\n")
 
 
 if __name__ == "__main__":
