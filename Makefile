@@ -55,8 +55,8 @@ help: ## Show this help
 install: ## Symlink agentik-agents and its tools into BINDIR (default ~/.local/bin), copy agentik there; idempotent
 	@mkdir -p -- "$(BINDIR)"
 	@for t in $(LINKS); do \
-	  ln -sfn -- "$(REPO)/bin/$$t" "$(BINDIR)/$$t" \
-	    && printf '  linked %s -> %s\n' "$(BINDIR)/$$t" "$(REPO)/bin/$$t"; \
+	  ln -sfn -- "$(REPO)/plugin/lib/$$t" "$(BINDIR)/$$t" \
+	    && printf '  linked %s -> %s\n' "$(BINDIR)/$$t" "$(REPO)/plugin/lib/$$t"; \
 	done
 	@tmp="$(BINDIR)/.agentik.$$$$" \
 	  && cp -- "$(REPO)/scripts/agentik" "$$tmp" && chmod 0755 "$$tmp" \
@@ -71,7 +71,7 @@ install: ## Symlink agentik-agents and its tools into BINDIR (default ~/.local/b
 uninstall: ## Remove the symlinks from BINDIR (only if they point back here); agentik stays, other tools install it too
 	@for t in $(LINKS); do \
 	  link="$(BINDIR)/$$t"; \
-	  if [ -L "$$link" ] && [ "$$(readlink -f -- "$$link")" = "$(REPO)/bin/$$t" ]; then \
+	  if [ -L "$$link" ] && [ "$$(readlink -f -- "$$link")" = "$(REPO)/plugin/lib/$$t" ]; then \
 	    rm -- "$$link" && printf '  removed %s\n' "$$link"; \
 	  else \
 	    printf '  skipped %s (not our symlink)\n' "$$link"; \
@@ -126,11 +126,11 @@ check-unlocked: test lint doclint hygiene plugin-version-check validate ## The g
 	else echo "readme: stale, run make readme"; exit 2; fi
 
 lint: ## Syntax-check every tool (sh, bash, python)
-	@sh -n bin/agentik-agents && echo "  bin/agentik-agents: sh syntax OK"
-	@bash -n bin/claude-local && echo "  bin/claude-local: bash syntax OK"
-	@bash -n bin/localrig && echo "  bin/localrig: bash syntax OK"
+	@sh -n plugin/lib/agentik-agents && echo "  plugin/lib/agentik-agents: sh syntax OK"
+	@bash -n plugin/lib/claude-local && echo "  plugin/lib/claude-local: bash syntax OK"
+	@bash -n plugin/lib/localrig && echo "  plugin/lib/localrig: bash syntax OK"
 	@$(PY) -c "import ast,sys; [ast.parse(open(f).read()) for f in sys.argv[1:]]" \
-	  bin/agentroute bin/claude-agents \
+	  plugin/lib/agentroute plugin/lib/claude-agents \
 	  && echo "  python tools: syntax OK"
 	@bash -n scripts/readme-render && echo "  scripts/readme-render: bash syntax OK"
 
@@ -174,4 +174,4 @@ plugin-install: ## Print the lines that install the plugin persistently (Claude 
 
 .PHONY: doctor
 doctor: ## Report install and local-lane readiness (spends nothing): agentik agents doctor
-	@bin/agentik-agents doctor
+	@plugin/lib/agentik-agents doctor

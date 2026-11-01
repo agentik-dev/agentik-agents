@@ -16,8 +16,8 @@
 #     tests/test-rig.sh
 set -uo pipefail
 REPO="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
-LOCALRIG="$REPO/bin/localrig"
-CLAUDE_LOCAL="$REPO/bin/claude-local"
+LOCALRIG="$REPO/plugin/lib/localrig"
+CLAUDE_LOCAL="$REPO/plugin/lib/claude-local"
 passed=0; failed=0
 check() { if [ "$1" = "0" ]; then printf '  PASS  %s\n' "$2"; passed=$((passed+1)); else printf '  FAIL  %s\n     %s\n' "$2" "${3:-}"; failed=$((failed+1)); fi; }
 contains() { case "$1" in *"$2"*) return 0;; *) return 1;; esac; }
@@ -292,13 +292,24 @@ echo "== claude-local: the Explore override is built from plugin/agents/local-ex
 # a-s6: a-s4 moved the agents into plugin/. A launcher left reading the old place only warns and
 # leaves Explore on the session model, so the override is built here, by the launcher's own
 # function with REPO at this tree, and its model is checked.
-out="$( eval "$(sed -n '/^explore_agent_json() {$/,/^}$/p' "$CLAUDE_LOCAL")"; explore_agent_json 2>&1 )"; rc=$?
+fns="$(sed -n '/^explore_md() {/,/^}$/p;/^explore_agent_json() {$/,/^}$/p' "$CLAUDE_LOCAL")"
+out="$( eval "$fns"; BIN_DIR="$REPO/plugin/lib"; explore_agent_json 2>&1 )"; rc=$?
 model="$(printf '%s' "$out" | /usr/bin/python3 -c 'import json, sys
 e = json.load(sys.stdin)["Explore"]
 print(e["model"] if e["prompt"].strip() and e["tools"] else "empty")' 2>/dev/null)"
 check "$( [ "$rc" = "0" ] && [ "$model" = "local/default" ] && echo 0 || echo 1 )" \
   "explore_agent_json builds the Explore override from plugin/agents/local-explore.md, on model local/default" \
   "rc=$rc model=${model:-none} ${out##*$'\n'}"
+# a-s18: a frozen tree (install-cli) holds lib/ alone, so the launcher reads share/'s copy, which
+# must be the agent file byte for byte
+cmp -s "$REPO/plugin/agents/local-explore.md" "$REPO/plugin/lib/share/local-explore.md"
+check "$?" "plugin/lib/share/local-explore.md is plugin/agents/local-explore.md byte for byte"
+mkdir -p "$TMP/frozen/tree" && cp -R "$REPO/plugin/lib/share" "$TMP/frozen/tree/"
+got="$( eval "$fns"; BIN_DIR="$TMP/frozen/tree"; explore_md )"
+check "$( [ "$got" = "$TMP/frozen/tree/share/local-explore.md" ] && echo 0 || echo 1 )" \
+  "  and a tree with no agents/ above it reads that copy" "$got"
+out="$( eval "$fns"; BIN_DIR="$TMP/frozen/tree"; explore_agent_json 2>&1 )"
+check "$( contains "$out" '"model": "local/default"' && echo 0 || echo 1 )" "  and builds the override from it" "${out:0:200}"
 
 echo "== help, version, and unknown commands =="
 for a in --help -h help; do "$LOCALRIG" "$a" >/dev/null 2>&1; check "$?" "localrig $a exits 0"; done
@@ -323,10 +334,10 @@ chmod +x "$TMP/decoy/bin/agentroute"
 "$TMP/decoy/bin/agentroute" --serve & DECOY_PID=$!
 disown "$DECOY_PID"
 for _ in $(seq 1 40); do pgrep -f "$TMP/decoy/bin/agentroute --serve" >/dev/null && break; sleep 0.05; done
-before="$(pgrep -f 'bin/agentroute --serve' | sort)"
+before="$(pgrep -f '/agentroute --serve' | sort)"
 : > "$FAKE_CLAUDE_LOG"
 out="$(CLAUDE_LOCAL_NO_PREFLIGHT=1 AGENTROUTE_LISTEN=127.0.0.1:$DEAD "$CLAUDE_LOCAL" --not-a-real-flag 2>&1)"; rc=$?
-after="$(pgrep -f 'bin/agentroute --serve' | sort)"
+after="$(pgrep -f '/agentroute --serve' | sort)"
 check "$( [ "$rc" != "0" ] && contains "$out" "refusing to start a second router" && echo 0 || echo 1 )" \
   "with a router already running but not answering here, claude-local refuses rather than spawning another" "rc=$rc $out"
 check "$( [ ! -s "$FAKE_CLAUDE_LOG" ] && echo 0 || echo 1 )" "  and never reaches claude" "$(cat "$FAKE_CLAUDE_LOG")"
@@ -346,7 +357,7 @@ echo "== claude-local: a cold start stops the router it started only while it ha
 # launcher, so only the first is stopped.
 COLD="$TMP/cold"; mkdir -p "$COLD/bin" "$COLD/fakebin"
 cp "$CLAUDE_LOCAL" "$COLD/bin/claude-local"
-ln -s "$REPO/plugin" "$COLD/plugin"   # the copy builds its Explore override from $REPO/plugin (a-s6)
+ln -s "$REPO/plugin/agents" "$COLD/agents"   # the copy builds its Explore override from the agents/ above it (a-s6, a-s18)
 cat > "$COLD/bin/agentroute" <<'PY'
 #!/usr/bin/python3
 import http.server, os, sys, time

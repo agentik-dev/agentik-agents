@@ -7,7 +7,7 @@ set -u
 REPO="$(cd "$(dirname "$0")/.." && pwd -P)"
 D="$(mktemp -d)"
 trap 'rm -r "${D:?}"' EXIT
-cp "$REPO/bin/agentik-agents" "$D/"
+cp "$REPO/plugin/lib/agentik-agents" "$D/"
 for s in claude-local claude-agents localrig agentroute; do
   printf '#!/bin/sh\necho "$#:$*"\n' > "$D/$s"
   chmod +x "$D/$s"
@@ -93,15 +93,15 @@ else
   fail=$((fail + 1)); printf 'FAIL doctor: exit %s\n%s\n' "$code" "$got"
 fi
 # doctor's python3 row (a-s10, portfolio entry 26): PATH's python3 and its version against the
-# 3.9 floor, from stubs first on PATH, and the gate's pin when a .python-version beside a copy's
-# bin/ names another version; doctor still exits 0 (entry 25)
+# 3.9 floor, from stubs first on PATH, and the gate's pin when a .python-version at a copy's root
+# above plugin/lib/ names another version; doctor still exits 0 (entry 25)
 for v in 3.8.12 3.12.7; do
   mkdir "$D/py-$v" && printf '#!/bin/sh\necho %s\n' "$v" > "$D/py-$v/python3" && chmod +x "$D/py-$v/python3"
 done
 mkdir "$D/py-bad" && printf '#!/bin/sh\nexit 1\n' > "$D/py-bad/python3" && chmod +x "$D/py-bad/python3"
 mkdir "$D/nopy" && for t in readlink dirname sed; do ln -s "$(command -v "$t")" "$D/nopy/$t"; done
 for c in nopin pin pin-comment; do
-  mkdir -p "$D/$c/bin" && cp "$REPO/bin/agentik-agents" "$D/agentroute" "$D/$c/bin/"
+  mkdir -p "$D/$c/plugin/lib" && cp "$REPO/plugin/lib/agentik-agents" "$D/agentroute" "$D/$c/plugin/lib/"
 done
 printf '3.12.7\n' > "$D/pin/.python-version"
 # read as pyenv reads it (fix round 1): the first word of the first line not blank or a comment
@@ -109,7 +109,7 @@ printf "# the gate's pin\n3.12.7 # pyenv reads the first word\n" > "$D/pin-comme
 # expect_row NAME WANT COPY PATH: the copy's doctor under PATH exits 0 and prints the row WANT
 expect_row() {
   local name=$1 want=$2 got code
-  got="$(PATH="$4" "$D/$3/bin/agentik-agents" doctor 2>/dev/null)"; code=$?
+  got="$(PATH="$4" "$D/$3/plugin/lib/agentik-agents" doctor 2>/dev/null)"; code=$?
   if [ "$code" = 0 ] && printf '%s\n' "$got" | grep -q -x -F -- "$(printf '  %-18s %s' python3 "$want")"; then
     pass=$((pass + 1))
   else
@@ -124,7 +124,7 @@ expect_row "the pin's comment form" "$D/py-3.8.12/python3 3.8.12 (below 3.9; the
 expect_row "does not run" "$D/py-bad/python3 does not run" nopin "$D/py-bad:/usr/bin:/bin"
 expect_row "not on PATH" "NOT ON PATH" nopin "$D/nopy"
 # the dispatcher is POSIX sh
-if sh -n "$REPO/bin/agentik-agents"; then pass=$((pass + 1)); else fail=$((fail + 1)); echo "FAIL sh -n"; fi
+if sh -n "$REPO/plugin/lib/agentik-agents"; then pass=$((pass + 1)); else fail=$((fail + 1)); echo "FAIL sh -n"; fi
 # the plugin's edges (a-s6): plugin/ ships alone and reaches the tools through this dispatcher,
 # so its manifest is the only one, a marketplace here (if one returns) ships plugin/, not the
 # repo root, and no file under plugin/ names a path outside it
@@ -168,7 +168,7 @@ if [ -z "$got" ]; then pass=$((pass + 1)); else fail=$((fail + 1)); printf 'FAIL
 # temp HOME and nothing else inherited, skipped where that python3 does not run
 PYTOOLS="agentroute claude-agents"
 for t in $PYTOOLS; do
-  first="$(head -1 "$REPO/bin/$t")"
+  first="$(head -1 "$REPO/plugin/lib/$t")"
   if [ "$first" = '#!/usr/bin/env python3' ]; then
     pass=$((pass + 1))
   else
@@ -178,7 +178,7 @@ done
 if /usr/bin/python3 -c '' >/dev/null 2>&1; then
   mkdir "$D/home"
   for t in $PYTOOLS; do
-    if env -i HOME="$D/home" PATH=/usr/bin:/bin /usr/bin/python3 "$REPO/bin/$t" --help >/dev/null 2>&1; then
+    if env -i HOME="$D/home" PATH=/usr/bin:/bin /usr/bin/python3 "$REPO/plugin/lib/$t" --help >/dev/null 2>&1; then
       pass=$((pass + 1))
     else
       fail=$((fail + 1)); printf 'FAIL %s --help under /usr/bin/python3 (the 3.9 floor)\n' "$t"

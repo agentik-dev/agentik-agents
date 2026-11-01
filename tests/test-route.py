@@ -24,7 +24,7 @@ import threading
 import time
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
-ROUTER = REPO / "bin" / "agentroute"
+ROUTER = REPO / "plugin" / "lib" / "agentroute"
 # the router runs under this suite's interpreter: the pin under make (a-s9)
 PY = sys.executable
 

@@ -43,7 +43,8 @@ run() {
 }
 
 # The interpreter row (portfolio entry 26): PATH's python3, its version against the floor
-# (3.9), and the gate's pin, .python-version beside bin/, when the two differ. -I keeps a
+# (3.9), and the gate's pin, .python-version at the checkout's root above plugin/lib/, when the
+# two differ. -I keeps a
 # platform.py in the caller's directory or on PYTHONPATH out; the compare is sh. The pin is
 # read as pyenv reads it: the first word of the first line not blank or a comment, CRs dropped.
 python_row() {
@@ -59,7 +60,7 @@ python_row() {
 	else
 		note="3.9 or later"
 	fi
-	pin= vf=${here%/*}/.python-version
+	pin= vf=${here%/*/*}/.python-version
 	if [ -r "$vf" ]; then
 		while IFS=" 	$(printf '\r')" read -r w rest || [ -n "$w" ]; do
 			case $w in '' | '#'*) continue ;; esac
