@@ -284,6 +284,23 @@ class BareMachine(unittest.TestCase):
         self.assertEqual(sorted(os.listdir(bindir)), before)
         self.assertTrue(os.path.isdir(share))
 
+    def test_12_a_share_through_a_symlink_stays(self):
+        # a2 F3: with C/share a link to ../A/share, uninstall PREFIX=C removed A's live share
+        home = os.path.join(self.t, "home-linked")
+        a, c = os.path.join(home, "A"), os.path.join(home, "C")
+        os.makedirs(a)
+        os.makedirs(c)
+        os.symlink(os.path.join("..", "A", "share"), os.path.join(c, "share"))
+        self.ok(self.make(home, "install", "PREFIX=" + a))
+        run = self.make(home, "uninstall", "PREFIX=" + c)
+        self.assertEqual(run.returncode, 2, run.stdout + run.stderr)
+        self.assertIn("stays: it resolves to %s" % os.path.join(a, "share", "agentik-agents"),
+                      run.stderr)
+        self.assertTrue(os.path.isdir(os.path.join(a, "share", "agentik-agents")))
+        launcher = os.path.join(a, "bin", "agentik-agents")
+        self.assertEqual(self.ok(self.run_tool("--version", exe=launcher, home=home)).stdout,
+                         "agentik-agents %s\n" % self.version)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

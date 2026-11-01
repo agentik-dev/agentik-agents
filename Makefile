@@ -40,6 +40,7 @@ endif
 PREFIX ?= $(HOME)/.local
 export PREFIX
 ABSPATH = $(FLOOR) -I -c 'import os, sys; print(os.path.abspath(sys.argv[1]))'
+REALPATH = $(FLOOR) -I -c 'import os, sys; print(os.path.realpath(sys.argv[1]))'
 PFX_SH  = pfx="$$($(ABSPATH) "$$PREFIX")" || exit 2; bin="$$pfx/bin"; share="$$pfx/share/agentik-agents"
 TOOLS := agentroute claude-local localrig claude-agents
 # The API lane's tools, gone with packet a-s17: a link of theirs that still points into this
@@ -72,7 +73,7 @@ install: ## Refuse a dirty tree, then the plugin's install-cli under PREFIX (def
 	esac
 
 .PHONY: uninstall
-uninstall: ## Remove what install-cli wrote under PREFIX: its launcher, the old names' links that point into its share, then the share once the launcher is gone; the agentik door stays, other tools install it too
+uninstall: ## Remove what install-cli wrote under PREFIX: its launcher, the old names' links that point into its share, then the share once the launcher is gone and it resolves under PREFIX; the agentik door stays, other tools install it too
 	@if [ "$(origin BINDIR)" = "command line" ]; then \
 	  echo "uninstall: refused, BINDIR is not honoured: install-cli writes into PREFIX/bin; set PREFIX" >&2; exit 2; fi
 	@$(MAKE) --no-print-directory unlink-retired
@@ -89,7 +90,10 @@ uninstall: ## Remove what install-cli wrote under PREFIX: its launcher, the old 
 	  esac; \
 	done; \
 	if [ -d "$$share" ] && [ ! -L "$$share" ]; then \
-	  if [ -n "$$gone" ]; then rm -rf -- "$$share" && printf '  removed %s\n' "$$share"; \
+	  real="$$($(REALPATH) "$$share")" && want="$$($(REALPATH) "$$pfx")/share/agentik-agents" || exit 2; \
+	  if [ "$$real" != "$$want" ]; then \
+	    printf 'uninstall: %s stays: it resolves to %s, not under PREFIX %s\n' "$$share" "$$real" "$$want" >&2; exit 2; \
+	  elif [ -n "$$gone" ]; then rm -rf -- "$$share" && printf '  removed %s\n' "$$share"; \
 	  else printf 'uninstall: %s stays: %s is not the launcher install-cli wrote, and may run from it\n' "$$share" "$$l" >&2; exit 2; fi; \
 	fi
 
