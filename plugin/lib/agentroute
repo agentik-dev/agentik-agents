@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/python3
 """agentroute — a model-name router in front of Claude Code.
 
 Claude Code allows ONE API endpoint per session. agentroute sits on loopback as that
