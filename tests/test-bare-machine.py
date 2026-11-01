@@ -197,10 +197,7 @@ class BareMachine(unittest.TestCase):
         src = self.source()
         home = os.path.join(self.t, "home-by-make")
         os.makedirs(home)
-        menv = {k: v for k, v in os.environ.items() if k not in ("MAKEFLAGS", "MFLAGS", "MAKELEVEL")}
-        menv.update(HOME=home)
-        make = lambda goal: subprocess.run(["make", "-C", src, "--no-print-directory", goal],  # noqa: E731
-                                           env=menv, capture_output=True, text=True, timeout=120)
+        make = lambda goal: self.make(home, goal)  # noqa: E731  (a1 F3: never the caller's env)
         bindir, share = self.installed(home)
         self.ok(make("install"))
         for name in OLD:
