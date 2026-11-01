@@ -159,7 +159,15 @@ class BareMachine(unittest.TestCase):
         with open(os.path.join(bindir, "localrig"), encoding="utf-8") as handle:
             self.assertEqual(handle.read(), "mine\n")
         self.assertTrue(os.readlink(os.path.join(bindir, "agentroute")).startswith(share + os.sep))
-        self.assertTrue(os.path.isfile(os.path.join(bindir, "agentik-agents")))
+        launcher = os.path.join(bindir, "agentik-agents")
+        self.assertTrue(os.path.isfile(launcher))
+        # a1 F1: the refused name's tool is still executable in the tree, so its verb runs
+        rig = self.run_tool("rig", "--version", exe=launcher, home=home)
+        self.assertEqual(rig.returncode, 0, rig.stdout + rig.stderr)
+        self.assertIn("localrig (agentik-agents)", rig.stdout)
+        trees = [n for n in os.listdir(share) if not n.startswith(".")]
+        for name in OLD:
+            self.assertTrue(os.access(os.path.join(share, trees[0], name), os.X_OK), name)
 
     def test_7_make_install_and_uninstall(self):
         src = os.path.join(self.t, "src")

@@ -21,9 +21,19 @@ UNTIL = "2026-12-31"
 def link_old(bin_dir, tree, err):
     """Each old name in bin_dir to its file in tree; the names left unlinked."""
     left = []
+    # The freeze writes 0644 but for the runner and the door, and the dispatcher runs each tool
+    # from the tree whether its old name links or not (a1 F1): every chmod before any link.
+    for name in OLD:
+        try:
+            os.chmod(os.path.join(tree, name), 0o755)
+        except OSError as e:
+            print("install-cli: %s: %s" % (os.path.join(tree, name), e), file=err)
+            left.append(name)
     for name in OLD:
         path = os.path.join(bin_dir, name)
         target = os.path.join(tree, name)
+        if name in left:
+            continue
         if os.path.lexists(path) and not os.path.islink(path):
             print("install-cli: %s is not a link, left as it is; %s is not linked" % (path, name),
                   file=err)
@@ -31,7 +41,6 @@ def link_old(bin_dir, tree, err):
             continue
         temp = os.path.join(bin_dir, ".%s.%d.tmp" % (name, os.getpid()))
         try:
-            os.chmod(target, 0o755)      # the freeze writes 0644 but for the runner and the door
             if os.path.lexists(temp):
                 os.unlink(temp)
             os.symlink(target, temp)
