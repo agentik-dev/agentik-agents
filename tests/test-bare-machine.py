@@ -270,6 +270,20 @@ class BareMachine(unittest.TestCase):
         self.assertEqual(os.listdir(bindir), ["agentik"])                  # the door stays
         self.assertFalse(os.path.lexists(share))
 
+    def test_11_uninstall_refuses_bindir(self):
+        # a2 F2: uninstall ignored BINDIR and removed the default PREFIX's install
+        home = os.path.join(self.t, "home-bindir")
+        os.makedirs(home)
+        bindir, share = self.installed(home)
+        self.ok(self.make(home, "install"))
+        before = sorted(os.listdir(bindir))
+        run = self.make(home, "uninstall", "BINDIR=" + os.path.join(home, "else"))
+        self.assertEqual(run.returncode, 2, run.stdout + run.stderr)
+        self.assertIn("uninstall: refused, BINDIR is not honoured", run.stderr)
+        self.assertNotIn("removed", run.stdout + run.stderr)
+        self.assertEqual(sorted(os.listdir(bindir)), before)
+        self.assertTrue(os.path.isdir(share))
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

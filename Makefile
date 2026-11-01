@@ -73,6 +73,8 @@ install: ## Refuse a dirty tree, then the plugin's install-cli under PREFIX (def
 
 .PHONY: uninstall
 uninstall: ## Remove what install-cli wrote under PREFIX: its launcher, the old names' links that point into its share, then the share once the launcher is gone; the agentik door stays, other tools install it too
+	@if [ "$(origin BINDIR)" = "command line" ]; then \
+	  echo "uninstall: refused, BINDIR is not honoured: install-cli writes into PREFIX/bin; set PREFIX" >&2; exit 2; fi
 	@$(MAKE) --no-print-directory unlink-retired
 	@$(PFX_SH); l="$$bin/agentik-agents"; gone=1; \
 	if [ -f "$$l" ] && [ ! -L "$$l" ] && grep -qF -e "TREE=$$share/" -e "TREE='$$share/" "$$l"; then \
