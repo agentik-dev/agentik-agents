@@ -670,6 +670,52 @@ def price_checks() -> None:
     check(scan.get("cost") == 0.042, "the status cost scan prices each message as one request",
           f"scan {scan.get('cost')}")
 
+    print("== Fable 5.2's row (the Pricing page, as of 2026-11-10) ==")
+    # The page: $8 in, $10 5-minute write, $0.20 cache hits (0.025x), $40 out, per MTok.
+    for m in ("claude-fable-5-2", "claude-fable-5-2[1m]"):
+        check(cc.rates(m) == (8.00, 40.00), f"{m} is priced at the page's 8/40", str(cc.rates(m)))
+    got = cc.predicted_cost("claude-fable-5-2", one_m_read)
+    check(got is not None and abs(got - 0.20) < 1e-12,
+          "claude-fable-5-2: 1M cache reads cost the page's $0.20, not 0.1x input", str(got))
+
+
+# a seat with a Fable 5.2 helper and a helper on a model the table does not hold
+F_SEAT = "f0000001-0000-4000-8000-0000000000ff"
+H8 = "f8ff8888beef0008"                              # on claude-fable-5-2
+H9 = "f9ff9999beef0009"                              # on a model with no price
+UNPRICED = "claude-unpriced-0"
+
+
+def fable_checks() -> None:
+    """Finding 3 of hq's 2026-11-10 review: a Fable 5.2 helper's cost printed `-`."""
+    print("== a Fable 5.2 helper is priced; an unpriced model is named under the table ==")
+    with tempfile.TemporaryDirectory() as d:
+        root = pathlib.Path(d)
+        sessions, proj = root / "sessions", root / "projects" / "-p"
+        tp = seat(sessions, proj, F_SEAT, 20, act=20, ended=10)
+        sub = tp.parent / F_SEAT / "subagents"
+        jl(sub / f"agent-{H8}.jsonl", [
+            user(200, "SECRET-HELPER-PROMPT-aa10"),
+            asst(30, "msg_h8a", "claude-fable-5-2", u(1000, 2000, 100_000, 10_000), [tool_use("Read")],
+                 stop="tool_use")], 30)
+        jl(sub / f"agent-{H9}.jsonl", [
+            user(200, "SECRET-HELPER-PROMPT-aa10"),
+            asst(40, "msg_h9a", UNPRICED, u(10, 10, 0, 0), [tool_use("Grep")], stop="tool_use")], 40)
+        env = env_for(root, CLAUDE_AGENTS_SESSIONS_DIR=sessions, AGENTROUTE_LOG=root / "none.jsonl")
+        doc = load(run(["status", "--json"], env)) or {"agents": []}
+        rows = {a.get("id"): a for a in doc["agents"]}
+        # 1000*8 + 100000*0.20 + 10000*8*1.25 + 2000*40 = 208000 -> $0.208
+        c8 = rows.get(H8, {}).get("cost_usd")
+        check(isinstance(c8, float) and abs(c8 - 0.208) < 1e-9,
+              "a Fable 5.2 helper's cost is a number: the page's rates, its cache read at $0.20", str(c8))
+        check(H9 in rows and rows[H9].get("cost_usd") is None, "an unpriced helper's cost stays null",
+              str(rows.get(H9)))
+        lines = run(["status"], env).stdout.splitlines()
+        h8_ln = next((ln for ln in lines if ln.startswith("  " + H8[:8])), "")
+        check("$0.21" in h8_ln, "the text form prints the Fable 5.2 helper's cost", h8_ln)
+        check(lines[-1:] == [f"no price for {UNPRICED}"],
+              "a footer line names the model with no price", str(lines[-1:]))
+
 
 def main() -> int:
     with tempfile.TemporaryDirectory() as d:
@@ -885,6 +931,7 @@ def main() -> int:
     watch_rescan_checks()
     folder_checks()
     price_checks()
+    fable_checks()
     print(f"\n{passed} passed, {failed} failed")
     return 1 if failed else 0
 

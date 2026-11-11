@@ -6,3 +6,4 @@ One row per finding, in agentik-hq design/05 §2's table, held by `scripts/recor
 
 | id | level | area | finding | evidence | from |
 |---|---|---|---|---|---|
+| n1 | S4 | `plugin/lib/claude-agents` | PRICES holds no claude-mythos-5-2 or claude-mythos-5-1: a helper on one reads cost `-`, named by the footer | Pricing page, 2026-11-10: Mythos 5.2 $8/$40, Mythos 5.1 $10/$50, cache hits 0.025x ($0.20, $0.25) | 2026-11-10, price-fable-5-2's build |

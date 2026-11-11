@@ -14,7 +14,9 @@ agentik-agents repo` and stop.
 2. `agentik-agents status` — relay the table: one row per seat (a session) and one per
    helper under it, with its lane (`seat`, `helper`, or `local`), model, elapsed time, turns, context, cost, last tool and
    state (`busy`, `idle`, `quiet` or `done`). A seat's cost is its whole session's; a
-   `local` helper costs 0. If it prints `no agents in the last 30 min`, say so. An exit of 1
+   `local` helper costs 0. A last line `no price for <model>` names a helper's model the
+   price table does not hold, whose cost reads `-`: relay it. If it prints `no agents in the
+   last 30 min`, say so. An exit of 1
    means the session plugin's state dir could not be read: say that, and nothing more.
 3. `agentik-agents route --check` — relay the table. Any `FAIL` row is the headline for the local lane.
 
