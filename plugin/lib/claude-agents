@@ -77,7 +77,10 @@ CTRL_RE = re.compile("[\x00-\x1f\x7f-\x9f\u2028\u2029\u202a-\u202e\u2066-\u2069]
 # 2026-10-14; packet a-s7).
 # claude-haiku-5-5 is the tier for prompts up to 100,000 tokens; see LONG_PROMPT_TIERS.
 # The table moved here from the cost tool, whole (packet a-s17, ruling 4).
+# claude-fable-5-2 is the page's $8/$40 (Pricing page, platform.claude.com/docs/en/about-claude/
+# pricing, as of 2026-11-10; hq's review 2026-11-10, finding 3).
 PRICES = {
+    "claude-fable-5-2": (8.00, 40.00),
     "claude-fable-5-1": (10.00, 50.00),
     "claude-opus-5-5": (4.00, 20.00),
     "claude-sonnet-5-5": (2.00, 10.00),
@@ -98,10 +101,12 @@ PRICES = {
 # Cache-read rates in USD per million tokens, where the list names one. In
 # predicted_cost such a rate overrides CACHE_READ_MULT below; every other model
 # reads cache at the multiplier. (0.05x input on Opus 5.5 and Sonnet 5.5, 0.025x on
-# Fable 5.1; Pricing page, as of 2026-10-14.)
+# Fable 5.1; Pricing page, as of 2026-10-14. 0.025x on Fable 5.2, its $0.20; Pricing page,
+# platform.claude.com/docs/en/about-claude/pricing, as of 2026-11-10.)
 CACHE_READ_RATES = {
     "claude-opus-5-5": 0.20,
     "claude-sonnet-5-5": 0.10,
+    "claude-fable-5-2": 0.20,
     "claude-fable-5-1": 0.25,
 }
 
@@ -694,12 +699,25 @@ def line(vals) -> str:
     return " ".join(out).rstrip()
 
 
+def unpriced(agents) -> list:
+    """The models of helper rows whose cost is `-` because PRICES holds no row for them."""
+    found = []
+    for r in agents:
+        m = r["model"]
+        if r["lane"] == "helper" and r["cost_usd"] is None and m and rates(m) is None and m not in found:
+            found.append(m)
+    return found
+
+
 def render_text(table: dict, args) -> str:
     out = [line([name for name, _w in COLS])]
     for r in table["agents"]:
         out.append(line(cells(r, table["_now"])))
     if not table["agents"]:
         out.append("no agents" if args.all else f"no agents in the last {args.since} min")
+    missing = unpriced(table["agents"])
+    if missing:
+        out.append("no price for " + ", ".join(missing))
     return "\n".join(out)
 
 
