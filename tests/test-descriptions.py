@@ -8,6 +8,7 @@ import json
 import os
 import re
 import subprocess
+import threading
 import unittest
 from pathlib import Path
 
@@ -105,6 +106,39 @@ class DescriptionsTest(unittest.TestCase):
         self.assertEqual(hooks["PreToolUse"][0]["hooks"][0]["args"],
                          ["${CLAUDE_PLUGIN_ROOT}/hooks/local-guard"])
         self.assertTrue(os.access(GUARD, os.X_OK))
+
+    def test_t7_the_guard_reads_a_large_input_whole_on_every_early_exit(self):
+        # review F1: an exit before stdin is read leaves Claude Code's write of an event over
+        # the pipe buffer (about 64 KB) failing with EPIPE, a hook error; 200 KB on each path
+        big = "x" * 200000
+        cases = (("loopback session", call("agents:local-explore"), "http://127.0.0.1:8787"),
+                 ("not a local type", call("agents:scribe"), None),
+                 ("malformed JSON, loopback", "{agents:local-explore " + big, "http://127.0.0.1:8787"),
+                 ("malformed JSON, no router", "{agents:local-explore " + big, None))
+        for name, event, url in cases:
+            if not isinstance(event, str):
+                event["tool_input"]["prompt"] = big
+                event = json.dumps(event)
+            env = {"PATH": "/usr/bin:/bin"}
+            if url is not None:
+                env["ANTHROPIC_BASE_URL"] = url
+            p = subprocess.Popen(["/bin/sh", str(GUARD)], stdin=subprocess.PIPE,
+                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
+            errors = []
+
+            def write(data=event.encode("utf-8")):
+                try:
+                    p.stdin.write(data)
+                    p.stdin.close()
+                except OSError as e:  # BrokenPipeError: the hook exited unread
+                    errors.append(e)
+
+            writer = threading.Thread(target=write)
+            writer.start()
+            out, err = p.stdout.read(), p.stderr.read()
+            code = p.wait(timeout=30)
+            writer.join(timeout=30)
+            self.assertEqual((errors, code, out, err), ([], 0, b"", b""), name)
 
     def test_t6_the_vendored_copy_is_listed(self):
         rows = (REPO / "scripts" / "vendored.sha256").read_text().splitlines()
