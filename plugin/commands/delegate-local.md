@@ -1,7 +1,7 @@
 ---
 allowed-tools: Bash(agentik-agents *), Bash(echo:*), Bash(tail:*), Agent, Read
 description: Run a task on the LOCAL model (free, seat untouched) through the plugin's local-* agents, after checking this session is routed through the local router
-disable-model-invocation: false
+disable-model-invocation: true
 ---
 
 Run `$ARGUMENTS` on the local model by delegating it to one of this plugin's `local-*`

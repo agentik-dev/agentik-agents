@@ -1,6 +1,6 @@
 ---
 allowed-tools: Bash(agentik-agents *), Bash(echo:*)
-description: What every agent on this Mac is doing now (seats, their helpers, the local lane), and whether the local lane is usable
+description: What every agent on this Mac is doing now, and whether the local lane is usable
 disable-model-invocation: false
 ---
 

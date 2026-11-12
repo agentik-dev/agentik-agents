@@ -1,6 +1,6 @@
 ---
 name: local-implement
-description: Local model only: works in a session started by `agentik agents local` and fails in any other (/agents:status shows which). Bounded mechanical implementation on the LOCAL model (free), in an isolated worktree — bulk edits, renames, boilerplate, a small function with a named test as the contract. The task MUST name the files to edit and the exact test or command that proves it done; the caller verifies. Not for design decisions or open-ended work.
+description: A mechanical edit in a worktree whose task names the files and the test that proves it; the caller verifies.
 tools: Read, Edit, Write, Bash, Glob, Grep
 model: local/default
 effort: medium

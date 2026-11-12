@@ -1,6 +1,6 @@
 ---
 name: scribe
-description: Writes one repo's records from a builder's or refuter's hand-back, in that repo's own shape: the merge message to a file, the intake or hand-back note under history/sessions/, and the record commit (the charter's Handover lines, the build-order line, the NICE lines) by explicit path. Use after a hand-back when the coordinator would otherwise write the records inline; the coordinator reads six lines. It changes no code, packet or test and never pushes or merges.
+description: Writes a repo's records (merge message, note, record commit) from a builder's or refuter's hand-back, in place of the coordinator. Changes no code; never pushes.
 tools: Read, Grep, Glob, Bash, Write, Edit
 model: sonnet
 experimental:

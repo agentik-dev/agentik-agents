@@ -1,6 +1,6 @@
 ---
 name: local-summarize
-description: Local model only: works in a session started by `agentik agents local` and fails in any other (/agents:status shows which). Condense a named file, directory listing, transcript, or log into a short brief on the LOCAL model (free). Use to keep large material out of the main context — "summarize X in N lines", "what does this log say happened", "list the sections of this document". Input must be named files; the agent cannot fetch or run anything.
+description: Condense named files or a log into a short brief, to keep them out of the main context.
 tools: Read, Glob
 model: local/default
 effort: low

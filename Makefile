@@ -117,7 +117,7 @@ test: ## Run every test suite (stub-driven, they spend nothing), then the 3.9 fl
 	for t in tests/test-dispatch.sh tests/test-rig.sh tests/test-readme.sh; do \
 	  printf '=== %s ===\n' "$$t"; bash "$$t" || fail=1; \
 	done; \
-	for t in tests/test-route.py tests/test-status.py tests/test-hygiene.py tests/test-bare-machine.py; do \
+	for t in tests/test-route.py tests/test-status.py tests/test-hygiene.py tests/test-bare-machine.py tests/test-descriptions.py; do \
 	  printf '=== %s ===\n' "$$t"; $(PY) "$$t" || fail=1; \
 	done; \
 	if $(FLOOR) -c '' 2>/dev/null; then \
@@ -131,7 +131,7 @@ test: ## Run every test suite (stub-driven, they spend nothing), then the 3.9 fl
 	else echo "skip: the 3.9 floor"; fi; \
 	exit $$fail
 
-.PHONY: check check-unlocked lint doclint hygiene validate readme
+.PHONY: check check-unlocked lint doclint hygiene descriptions validate readme
 # conventions §5: one gate per tree (.check.lock), walled at 840 s (inside the relay's 900),
 # held off above load 4 x cores. A last stderr line `bounded: stop: lock|load|wall` is unrun,
 # never red. scripts/{agentik,hygiene,recordlint,bounded} are vendored from agentik-commons
@@ -140,7 +140,7 @@ test: ## Run every test suite (stub-driven, they spend nothing), then the 3.9 fl
 check: ## The gate: check-unlocked under scripts/bounded (lock, 840 s wall, load 4)
 	scripts/bounded --lock .check.lock --wall 840 --load 4 -- $(MAKE) check-unlocked
 
-check-unlocked: test lint doclint hygiene plugin-version-check validate ## The gate unbounded: test, lint, doclint, hygiene, validate, README freshness
+check-unlocked: test lint doclint hygiene plugin-version-check descriptions validate ## The gate unbounded: test, lint, doclint, hygiene, descriptions, validate, README freshness
 	@if [ ! -f design/readme/source.md ]; then echo "readme: skipped, absent design/readme/source.md"; \
 	elif shasum -c --status design/readme/rendered.sha256 2>/dev/null; then echo "readme: fresh"; \
 	else echo "readme: stale, run make readme"; exit 2; fi
@@ -168,6 +168,12 @@ hygiene: ## The vendored copies' sums, then the public-hygiene scan (conventions
 	  || { shasum -a 256 -c scripts/vendored.sha256; exit 2; }
 	@echo "  scripts/vendored.sha256: vendored copies OK"
 	scripts/hygiene
+
+# hq design/09 §2: the descriptions the model may start are in every session's context, so the
+# plugin's sum stays at or under 1,024 B; scripts/plugin-description-bytes is vendored from
+# agentik-commons with the others (packet p1).
+descriptions: ## The plugin's loaded description bytes, one line each and the sum: exit 1 over 1,024 B
+	PYTHONDONTWRITEBYTECODE=1 $(PY) scripts/plugin-description-bytes plugin
 
 .PHONY: plugin-version-check
 plugin-version-check: ## The plugin-version check (GUIDE §7), under the pin: exit 1 when a file under plugin/ changed after plugin.json's version last moved

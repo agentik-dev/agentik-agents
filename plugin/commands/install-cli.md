@@ -1,6 +1,7 @@
 ---
 description: "Give the terminal the CLI: freeze this plugin's code and write the agentik-agents launcher"
 argument-hint: "[--prefix DIR]"
+disable-model-invocation: true
 allowed-tools: [Bash(*/bin/agentik-agents install-cli*)]
 ---
 
