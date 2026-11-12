@@ -34,13 +34,15 @@ The brief as a private hq wrote it (its `history/sessions/BRIEF-2026-11-11-plugi
 - `scripts/plugin-description-bytes [--max BYTES] [PLUGIN_DIR]`: commons' (packet p1 there).
 - `plugin/hooks/local-guard`: stdin a PreToolUse event; stdout nothing, or `{"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": ...}}`.
 
-## 4. Tests
+- **Tests.** `tests/test-descriptions.py`, run by `make test`: T1 the script exits 0 on `plugin/`; T2 the two hidden commands set it, bodies byte-equal to c204a3c's (sha256); T3 every visible description non-empty, a skill's under 201 characters (doclint); T4 `agentik agents local` in one agent description only; T5 the hook: deny for `agents:local-explore` unset and remote, pass for loopback, for `agents:scribe`, for no input; T6 the vendored copy is listed.
 
-`tests/test-descriptions.py`, run by `make test`: T1 the script exits 0 on `plugin/`; T2 the two hidden commands set it, bodies byte-equal to c204a3c's (sha256); T3 every visible description non-empty, a skill's under 201 characters (doclint); T4 `agentik agents local` in one agent description only; T5 the hook: deny for `agents:local-explore` unset and remote, pass for loopback, for `agents:scribe`, for no input; T6 the vendored copy is listed.
-
-## 5. Findings that name this row
+## 4. Findings that name this row
 
 None in `NICE_TO_HAVE.md` at the pin.
+
+## 5. Forbidden reads
+
+A file over 8 KB whole; the owner's state under `~/.local/state`; transcripts.
 
 ## 6. Report
 
