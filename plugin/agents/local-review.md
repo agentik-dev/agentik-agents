@@ -1,6 +1,6 @@
 ---
 name: local-review
-description: Local model only: works in a session started by `agentik agents local` and fails in any other (/agents:status shows which). First-pass, read-only code review on the LOCAL model (free). Use for a quick sweep of a named file or diff for correctness bugs, error handling, and obvious security issues before spending a Sonnet/Opus reviewer. Findings are LEADS to be verified by the caller, never facts.
+description: A first-pass bug review of a named file or diff; its findings are leads to verify.
 tools: Read, Glob, Grep
 model: local/default
 effort: medium
