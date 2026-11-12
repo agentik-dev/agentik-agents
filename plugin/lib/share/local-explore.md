@@ -1,6 +1,6 @@
 ---
 name: local-explore
-description: ONLY works in a session started by `agentik-agents local` (it uses model local/default); in a plain `claude` session the call fails — check with /agents:status. Read-only explorer on the LOCAL model (free, ~30-60 s first turn, seconds after). Use for mechanical retrieval — "where is X handled", which file contains Y, file and directory inventories, finding call sites, checking whether a symbol or string exists. Not for judgment calls, design, or anything a wrong answer makes expensive.
+description: Local model only: works in a session started by `agentik agents local` and fails in any other (/agents:status shows which). Read-only explorer on the LOCAL model (free, ~30-60 s first turn, seconds after). Use for mechanical retrieval — "where is X handled", which file contains Y, file and directory inventories, finding call sites, checking whether a symbol or string exists. Not for judgment calls, design, or anything a wrong answer makes expensive.
 tools: Read, Glob, Grep
 model: local/default
 effort: low
