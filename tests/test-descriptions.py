@@ -102,7 +102,7 @@ class DescriptionsTest(unittest.TestCase):
         hooks = json.loads((PLUGIN / "hooks" / "hooks.json").read_text())["hooks"]
         self.assertEqual(hooks["PreToolUse"][0]["matcher"], "Agent|Task")
         self.assertEqual(hooks["PreToolUse"][0]["hooks"][0]["command"],
-                         '"${CLAUDE_PLUGIN_ROOT}/hooks/local-guard"')
+                         "${CLAUDE_PLUGIN_ROOT}/hooks/local-guard")
         self.assertTrue(os.access(GUARD, os.X_OK))
 
     def test_t6_the_vendored_copy_is_listed(self):
