@@ -2,11 +2,15 @@
 # local-guard: the PreToolUse hook on the Agent tool (packet p1). An agents:local-* type runs on
 # model local/default, which only the local router answers, so in a session not started by
 # `agentik agents local` its call is denied here with one plain sentence instead of failing at
-# the API. A loopback http ANTHROPIC_BASE_URL is such a session and passes at once; elsewhere
-# the event is read only when it names agents:local-. Every other call passes with no output.
-# Exit 0 always.
+# the API. A loopback http ANTHROPIC_BASE_URL is such a session and passes; elsewhere the event
+# is parsed only when it names agents:local-. Every other call passes with no output. Stdin is
+# read whole on every path before the exit: an exit with it unread leaves Claude Code's write of
+# an event over the pipe buffer failing with EPIPE, a hook error (review F1). Exit 0 always.
 case ${ANTHROPIC_BASE_URL:-} in
-http://127.0.0.1:* | http://localhost:* | http://\[::1\]:*) exit 0 ;;
+http://127.0.0.1:* | http://localhost:* | http://\[::1\]:*)
+	cat >/dev/null
+	exit 0
+	;;
 esac
 input=$(cat)
 case $input in
