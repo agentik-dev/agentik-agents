@@ -13,8 +13,8 @@
 - [x] act 1, 5563d4d: R1-F1, every fault a read can meet held to one object (N6 with it).
 - [x] act 2, 691630e: N5, the text `doctor` reads a dead plug as a lane, not as none.
 - [x] act 3, 9676923: R1-F2, a derived key takes the env source of what feeds it (N1 with it).
-- [x] act 4: R1-F3, `backends.default.*`'s line names a backend.
-- [ ] act 5: NICE rows R1-F4, N1 to N4, N7.
+- [x] act 4, 30d04f2: R1-F3, `backends.default.*`'s line names a backend.
+- [x] act 5: NICE rows n10 to n14 (R1-F4, N2, N3, N4, N7); N1, N5, N6 fixed, so not filed.
 - [ ] act 6: main merged after al0, al0's notes filed, 1.7.0 last under `plugin/`.
 - [ ] act 7: the gate, once.
 
@@ -30,4 +30,4 @@
 - None yet.
 
 ## Next act
-- Act 5.
+- Act 6: wait for `Merge al0-fanout-stub` on main, then merge.
