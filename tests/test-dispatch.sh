@@ -69,9 +69,33 @@ expect_exit "help unknown" 2 "$A" help nosuch
 expect_exit "--version arg" 2 "$A" --version x
 expect_exit "doctor arg" 2 "$A" doctor x
 # the API lane's verbs left with packet a-s17: each is a usage error now, like any unknown verb
-for v in api setup-key key-status edit-key remove-key pin-proxy usage profiles fanout costs fold queue-mvp; do
+for v in setup-key key-status edit-key remove-key pin-proxy usage profiles costs fold queue-mvp; do
   expect_exit "$v is gone" 2 "$A" "$v"
 done
+# the API lane's two verbs (al4): a copy beside apilane/, under HOME at this temp folder, so the
+# real user file is never read; the lane refuses there in one stderr line that names HOME, never
+# the usage line. fanout reaches the lane only where a wall is proved; elsewhere, with no file
+# under this HOME, it is main's usage error
+mkdir "$D/lane"
+cp "$REPO/plugin/lib/agentik-agents" "$D/lane/"
+cp -R "$REPO/plugin/lib/apilane" "$D/lane/apilane"
+lane_case() {
+  local name=$1 err code
+  shift
+  err="$(HOME="$D" XDG_CACHE_HOME="$D/cache" "$D/lane/agentik-agents" "$@" 2>&1 >/dev/null)"; code=$?
+  if [ "$code" = 2 ] && [ "$(printf '%s\n' "$err" | wc -l | tr -d ' ')" = 1 ] \
+     && printf '%s\n' "$err" | grep -q 'HOME' && ! printf '%s\n' "$err" | grep -q '^usage:'; then
+    pass=$((pass + 1))
+  else
+    fail=$((fail + 1)); printf 'FAIL %s: exit %s stderr [%s]\n' "$name" "$code" "$err"
+  fi
+}
+lane_case "api names HOME" api x
+if [ -x /usr/bin/sandbox-exec ]; then
+  lane_case "fanout names HOME" fanout x
+else
+  expect_exit "fanout with no wall and no file" 2 env HOME="$D" "$D/lane/agentik-agents" fanout x
+fi
 expect_exit "help api is gone" 2 "$A" help api
 if "$A" nosuch 2>&1 >/dev/null | grep -q '^usage: agentik agents'; then
   pass=$((pass + 1))
