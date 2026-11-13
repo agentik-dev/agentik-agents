@@ -8,6 +8,7 @@ Keys outside `api` are not this reader's and are left alone.
 """
 import collections
 import json
+import math
 import os
 import re
 import stat
@@ -223,9 +224,15 @@ def lane(roots):
     for key in MONEY:
         if key in api:
             v = api[key]
-            if isinstance(v, bool) or not isinstance(v, (int, float)) or not v > 0:
+            try:
+                # an int too large for a float, or a decimal that reads as infinity, is no
+                # ceiling (review 1, R1-F4)
+                f = None if isinstance(v, bool) or not isinstance(v, (int, float)) else float(v)
+            except OverflowError:
+                f = None
+            if f is None or not math.isfinite(f) or not f > 0:
                 raise ConfigFault(path, line(key), "api.%s is a number of dollars above 0" % key)
-            values[key] = float(v)
+            values[key] = f
     for key in ("proxy", "ca_file"):
         if key in api:
             if not isinstance(api[key], str) or not api[key]:

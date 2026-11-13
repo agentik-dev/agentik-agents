@@ -65,8 +65,12 @@ def _good(obj):
     for k in MONEY:
         if k in obj:
             v = obj[k]
-            if (not isinstance(v, (int, float)) or isinstance(v, bool)
-                    or not math.isfinite(v)):
+            if not isinstance(v, (int, float)) or isinstance(v, bool):
+                return False
+            try:
+                if not math.isfinite(v):
+                    return False
+            except OverflowError:   # an int too large for a float (review 1, R1-F4)
                 return False
     for k in ("fanout", "day", "at"):
         if k in obj and not isinstance(obj[k], str):

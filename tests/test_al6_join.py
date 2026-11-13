@@ -285,6 +285,108 @@ class PlugTest(Temp):
         self.assertEqual(names, ["api key", "api probe", "api limit", "api wall", "api gates"])
 
 
+# review 1, R1-F4: money that is not a finite number above 0 is the coded refusal, never a
+# traceback and never an infinite ceiling
+HUGE_INT = "1" + "0" * 400
+HUGE_DEC = "9" * 400 + ".0"
+
+
+class MoneyConfigTest(Temp):
+    def test_refused(self):
+        for key in config.MONEY:
+            for v in (HUGE_INT, HUGE_DEC, "nan", "inf", ".inf", "-inf", "0", "-1"):
+                self.write_config("api:\n  enabled: true\n  %s: %s\n" % (key, v))
+                with self.assertRaises(config.ConfigFault, msg=(key, v)) as cm:
+                    config.lane(self.roots)
+                self.assertEqual(cm.exception.code, "config.fault")
+                self.assertEqual(cm.exception.fields["line"], 3)
+
+    def test_callers(self):
+        import agents_install
+        self.write_config("api:\n  enabled: true\n  max_day_usd: %s\n" % HUGE_INT)
+        want = "api.max_day_usd is a number of dollars above 0"
+        for verb in ("fanout", "api", "unwalled"):
+            out, err = io.StringIO(), io.StringIO()
+            rc = cli.main([verb], roots=self.roots, stdout=out, stderr=err)
+            self.assertEqual(rc, 2, verb)
+            self.assertIn(want, err.getvalue())
+        for verb in ("help-lines", "doctor-block"):
+            out, err = io.StringIO(), io.StringIO()
+            rc = cli.main([verb], roots=self.roots, stdout=out, stderr=err)
+            self.assertEqual((rc, out.getvalue(), err.getvalue()), (0, "", ""), verb)
+        err = io.StringIO()
+        with mock.patch.object(paths, "account", lambda: self.roots):
+            self.assertFalse(agents_install.lane_on(err))
+        if backend() is not None:
+            self.assertIn(want, err.getvalue())
+        import agents_plug
+        got = agents_plug.config(roots=self.roots)
+        self.assertIsInstance(got, dict)
+
+
+class MoneyLedgerTest(Temp):
+    def lines(self, *objs):
+        from apilane import ledger
+        os.makedirs(self.roots.state, mode=0o700)
+        with open(os.path.join(self.roots.state, ledger.LOG), "w") as fh:
+            for obj in objs:
+                fh.write(obj + "\n")
+
+    def bad(self, settle):
+        from apilane import ledger
+        reserve = ('{"schema": "%s", "kind": "reserve", "fanout": "f1", "day": "2026-11-13", '
+                   '"at": "2026-11-13T10:00:00Z", "budget_usd": 10.0, "pid": 1, '
+                   '"pid_started": "x", "session": "s"}' % ledger.SCHEMA)
+        self.lines(reserve, '{"schema": "%s", "kind": "settle", "fanout": "f1", "day": '
+                   '"2026-11-13", "at": "2026-11-13T10:01:00Z", "spent_usd": %s}'
+                   % (ledger.SCHEMA, settle))
+        from datetime import datetime, timezone
+        now = datetime(2026, 11, 13, 12, tzinfo=timezone.utc)
+        with self.assertRaises(ledger.LedgerError, msg=settle) as cm:
+            ledger.day(self.roots, now=now)
+        self.assertEqual((cm.exception.code, cm.exception.fields["line"]), ("log.fault", 2))
+
+    def test_huge(self):
+        self.bad(HUGE_INT)
+
+    def test_cost(self):
+        from apilane import run
+        self.assertIsNone(run._cost({"total_cost_usd": 10 ** 400}))
+        self.assertEqual(run._cost({"total_cost_usd": 1}), 1.0)
+
+
+class MoneyJobTest(unittest.TestCase):
+    BASE = {"id": "run1", "budget_usd": 1, "shards": [{"label": "a", "type": "review",
+                                                       "prompt": "p"}]}
+
+    def refused(self, obj):
+        from apilane import job
+        with self.assertRaises(job.JobError) as cm:
+            job.from_obj(obj, types=("review",))
+        return cm.exception.code
+
+    def test_values(self):
+        for key in ("budget_usd", "max_shard_usd", "timeout_sec"):
+            for v in (10 ** 400, float("inf"), float("nan"), -1, 0):
+                obj = dict(self.BASE, **{key: v})
+                self.assertEqual(self.refused(obj), "job.shape", (key, v))
+
+    def test_text(self):
+        from apilane import job
+        for text in ('{"budget_usd": %s' % HUGE_INT, '{"budget_usd": %s' % HUGE_DEC,
+                     '{"budget_usd": 1e400', '{"budget_usd": NaN', '{"budget_usd": Infinity'):
+            src = text + ', "shards": [{"label": "a", "type": "review", "prompt": "p"}]}'
+            with self.assertRaises(job.JobError, msg=text) as cm:
+                job.parse(["-"], types=("review",), stdin=io.StringIO(src))
+            self.assertEqual(cm.exception.code, "job.shape", text)
+        for flag in ("--budget-usd", "--max-shard-usd", "--timeout-sec"):
+            for v in (HUGE_DEC, HUGE_INT, "nan", "inf"):
+                argv = ["--budget-usd", "1", flag, v, "--profile", "review", "p"]
+                with self.assertRaises(job.JobError, msg=(flag, v)) as cm:
+                    job.parse(argv, types=("review",))
+                self.assertEqual(cm.exception.code, "job.shape", (flag, v))
+
+
 # -- the money lines: real modules, the fake CLI, the loopback stub (packet al6, R6) ------------
 
 FAKE = os.path.join(REPO, "tests", "fake-claude")

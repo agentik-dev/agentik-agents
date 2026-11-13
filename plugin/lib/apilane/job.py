@@ -53,8 +53,13 @@ def _types(types):
 
 
 def _number(value):
-    return (isinstance(value, (int, float)) and not isinstance(value, bool)
-            and math.isfinite(value))
+    """A finite int or float; an int too large for a float is none (review 1, R1-F4)."""
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        return False
+    try:
+        return math.isfinite(value)
+    except OverflowError:
+        return False
 
 
 def _positive(obj, key, default):
@@ -202,7 +207,7 @@ def _tasks(path):
 def _value(flag, text, kind):
     try:
         value = kind(text)
-    except ValueError:
+    except (ValueError, OverflowError):
         raise _shape(flag.lstrip("-").replace("-", "_"), "kind")
     if kind is float and not math.isfinite(value):
         raise _shape(flag.lstrip("-").replace("-", "_"), "kind")

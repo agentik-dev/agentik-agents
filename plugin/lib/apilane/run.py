@@ -85,7 +85,10 @@ def _cost(envelope):
     v = envelope.get("total_cost_usd") if envelope else None
     if isinstance(v, bool) or not isinstance(v, (int, float)):
         return None
-    v = float(v)
+    try:
+        v = float(v)
+    except OverflowError:   # an int too large for a float has no usable figure (R1-F4)
+        return None
     if not math.isfinite(v) or v < 0:
         return None
     return v
