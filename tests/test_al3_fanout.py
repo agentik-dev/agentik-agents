@@ -587,7 +587,9 @@ class RunTest(Base):
         with open(path) as f:
             rec = json.load(f)
         self.assertTrue(rec["ended"])
-        self.assertNotEqual(rec["beat"], h.events[1][2][0]["beat"])
+        self.assertEqual(h.events[1][0], "reserved")
+        self.assertEqual(h.events[1][2], [])   # the live record follows it
+        self.assertNotEqual(rec["beat"], starts[0][2][0]["beat"])
         self.assertEqual(oct(os.stat(path).st_mode & 0o777), oct(0o600))
         kw = h.shard_kw[0]
         self.assertEqual((kw["fanout"], kw["number"], kw["session"]), ("t1", 1, "sess-1"))
