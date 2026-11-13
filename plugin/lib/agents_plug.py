@@ -22,6 +22,7 @@ import ast
 import builtins
 import fnmatch
 import json
+import math
 import os
 import pathlib
 import re
@@ -155,6 +156,9 @@ def bare_environ():
 
 
 def plain(value):
+    """A value as JSON holds it: a number JSON has no word for (nan, inf) is its text."""
+    if isinstance(value, float) and not math.isfinite(value):
+        return repr(value)
     if isinstance(value, pathlib.PurePath):
         return str(value)
     if isinstance(value, (set, frozenset)):
@@ -192,6 +196,14 @@ def secret(key):
 
 
 # --------------------------------------------------------------------------- the readers
+DIGITS = re.compile(r"[0-9]+")   # what sh takes as a number: str.isdigit also takes "\u00b2"
+
+
+def exists(path):
+    """A path the router names, or None where its assignment could not run here."""
+    return isinstance(path, str) and os.path.exists(path)
+
+
 def read_python(row):
     """agentroute's `env`/`env_num` reads: each module-level assignment that holds one is run
     twice, from the script's own text, with the functions it defines: once as the router runs it,
@@ -299,15 +311,16 @@ def read_shell(row):
         default = expand(shell_default(text, m.end()), bare) or None
         raw = os.environ.get(var) or None
         value = raw if raw is not None else default
-        if default is not None and default.isdigit():
+        if default is not None and DIGITS.fullmatch(default):
             default = int(default)
-            value = int(value) if isinstance(value, str) and value.isdigit() else value
+            value = int(value) if isinstance(value, str) and DIGITS.fullmatch(value) else value
         out.append((name, value, default))
     return out
 
 
 # --------------------------------------------------------------------------- the settings
 def setting(key, value, default, kind, source, change, values=None):
+    value, default = plain(value), plain(default)
     if kind == "secret":
         value, default = ("(set)" if value else None), None
     rows = values
@@ -350,7 +363,7 @@ def read_backends(row, route, state):
     var = row["prefix"] + row["variable"]
     file = route["route.backends_file"]["value"]
     raw, origin, path = os.environ.get(var, ""), "env", None
-    if not raw and os.path.exists(file):
+    if not raw and exists(file):
         origin, path = "rig", file
         try:
             with open(file, encoding="utf-8") as handle:
@@ -363,7 +376,7 @@ def read_backends(row, route, state):
             found = json.loads(raw)
             if not isinstance(found, dict):
                 raise ValueError("not an object")
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, RecursionError):  # RecursionError: nested past the limit
             print("agents: %s is not a JSON object; ignoring it, as the router does"
                   % (path or var), file=sys.stderr)
             state["warnings"].append({"key": None, "reason": "unreadable", "value": None,
@@ -423,8 +436,9 @@ def config(key=None):
             route = {s["key"]: s for s in got}
         settings.extend(got)
     file = route["route.backends_file"]["value"]
+    file = file if isinstance(file, str) else None
     layers = [{"name": "default", "path": None, "present": True, "travels": False},
-              {"name": "rig", "path": file, "present": os.path.exists(file), "travels": False},
+              {"name": "rig", "path": file, "present": exists(file), "travels": False},
               {"name": "env", "path": None, "present": any_set, "travels": False}]
     if key is not None:
         settings = [s for s in settings if s["key"] == key]
@@ -459,7 +473,7 @@ def lane_set_up():
     try:
         socket.create_connection((host, int(port)), timeout=1).close()
         return True
-    except OSError:
+    except (OSError, OverflowError, ValueError):
         return False
 
 
@@ -481,7 +495,7 @@ def check_python(c):
                               "import platform; print(platform.python_version())"],
                              capture_output=True, text=True, timeout=10, stdin=subprocess.DEVNULL)
         version = got.stdout.strip() if got.returncode == 0 else ""
-    except (OSError, subprocess.SubprocessError):
+    except Exception:  # noqa: BLE001  any fault is "does not run" (review 1, R1-F1)
         version = ""
     parts = re.match(r"(\d+)\.(\d+)", version)
     if not parts:
@@ -505,7 +519,7 @@ def check_lane(c):
         rows = json.loads(got.stdout)["rows"]
         return [{"name": r["what"].strip(), "status": ROUTER_STATES.get(r["state"], "warn"),
                  "detail": r["detail"], "remedy": None} for r in rows]
-    except (OSError, subprocess.SubprocessError, ValueError, KeyError, TypeError) as e:
+    except Exception as e:  # noqa: BLE001  any answer it cannot read (review 1, R1-F1)
         return [{"name": c["name"], "status": "fail",
                  "detail": "the router's check gave no answer: %s" % (str(e).splitlines() or [""])[0],
                  "remedy": None}]
@@ -527,32 +541,42 @@ def doctor():
 USAGE = "usage: agentik agents describe --json | describe config --json [KEY] | doctor --json"
 
 
+def fault(schema, e):
+    """The contract's §2 answer for a read that could not run."""
+    return {"schema": schema, "ok": False, "tool": TOOL,
+            "error": {"code": "unreadable",
+                      "message": "%s: %s" % (type(e).__name__, (str(e).splitlines() or [""])[0]),
+                      "remedy": REMEDY}}
+
+
 def main(argv=None, out=sys.stdout, err=sys.stderr):
+    """Each read prints one object and a newline; any fault inside one is §2's answer, exit 2,
+    never a traceback (review 1, R1-F1). `lane` exits 3 on a fault, so no fault reads as 1."""
     argv = sys.argv[1:] if argv is None else argv
     version, args = (argv[0], argv[1:]) if argv else ("0.0.0-unknown", [])
     if args == ["lane"]:
-        return 0 if lane_set_up() else 1
+        try:
+            up = lane_set_up()
+        except Exception:  # noqa: BLE001
+            return 3
+        return 0 if up else 1
     if args == ["describe", "--json"]:
-        answer = describe(version)
+        schema, read = "agentik.describe/1", lambda: describe(version)
     elif args == ["doctor", "--json"]:
-        answer = doctor()
+        schema, read = "agentik.doctor/1", doctor
     elif args[:1] == ["describe"] and args[1:2] == ["config"] and args.count("--json") == 1 \
             and len(args) <= 4:
         rest = [a for a in args[2:] if a != "--json"]
-        try:
-            answer = config(rest[0] if rest else None)
-        except (OSError, SyntaxError, UnicodeDecodeError, KeyError) as e:
-            answer = {"schema": "agentik.config/1", "ok": False, "tool": TOOL,
-                      "error": {"code": "unreadable",
-                                "message": str(e).splitlines()[0] if str(e) else type(e).__name__,
-                                "remedy": REMEDY}}
-            out.write(json.dumps(answer) + "\n")
-            return 2
+        schema, read = "agentik.config/1", lambda: config(rest[0] if rest else None)
     else:
         print(USAGE, file=err)
         return 2
-    out.write(json.dumps(answer) + "\n")
-    return 0
+    try:
+        text, code = json.dumps(read(), allow_nan=False), 0
+    except Exception as e:  # noqa: BLE001  a MemoryError aside, any fault is held here
+        text, code = json.dumps(fault(schema, e)), 2
+    out.write(text + "\n")
+    return code
 
 
 if __name__ == "__main__":

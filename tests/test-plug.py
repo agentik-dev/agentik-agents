@@ -393,6 +393,104 @@ class Plug(unittest.TestCase):
         self.assertIn(b"cannot read the sessions dir", run.stderr)
         self.unchanged(before)
 
+    def strict(self, run, code=0):
+        """answer(), and the object is strict JSON: no NaN or Infinity."""
+        doc = self.answer(run, code)
+
+        def refuse(word):
+            raise AssertionError("not JSON: %s in %r" % (word, run.stdout[:200]))
+        json.loads(run.stdout.decode("utf-8"), parse_constant=refuse)
+        return doc
+
+    def tree(self):
+        """A copy of plugin/ under the temp dir, to break one file of it."""
+        copy = os.path.join(self.t, "plugin")
+        shutil.copytree(os.path.join(REPO, "plugin"), copy, symlinks=True,
+                        ignore=shutil.ignore_patterns("__pycache__"))
+        return copy
+
+    # review 1, R1-F1: no input a read takes ends in a traceback, an empty stdout or a word
+    # that is not JSON; each answer is one object, ok true where the router goes on
+    def test_11_no_traceback(self):
+        deep = "[" * 1000
+        cases = [({}, deep), ({"AGENTROUTE_BACKENDS": deep}, None),
+                 ({"AGENTROUTE_BACKENDS": '{"x": {"model": NaN}}'}, None),
+                 ({"AGENTROUTE_BACKENDS": '{"x": {"model": 1e400}}'}, None),
+                 ({"AGENTROUTE_PING_AFTER_S": "nan"}, None),
+                 ({"AGENTROUTE_TIMEOUT_S": "-inf"}, None),
+                 ({"LOCALRIG_LLAMA_PORT": "²"}, None)]
+        for extra, text in cases:
+            with self.subTest(extra=sorted(extra), file=bool(text)):
+                if os.path.exists(self.backends):
+                    os.remove(self.backends)
+                if text:
+                    self.write_backends(text)
+                doc = self.strict(self.run_a("describe", "config", "--json", **extra))
+                self.assertIs(doc["ok"], True)
+                if text or extra.get("AGENTROUTE_BACKENDS") == deep:
+                    self.assertEqual([w["reason"] for w in doc["warnings"]], ["unreadable"])
+                    self.assertIn("backends.default.url", self.by_key(doc))
+                self.strict(self.run_a("doctor", "--json", **extra))
+        if os.path.exists(self.backends):
+            os.remove(self.backends)
+        by =self.by_key(self.strict(self.run_a("describe", "config", "--json",
+                                                AGENTROUTE_PING_AFTER_S="nan",
+                                                LOCALRIG_LLAMA_PORT="²")))
+        self.assertEqual(by["route.ping_after_s"]["value"], "nan")
+        self.assertEqual(by["rig.llama_port"]["value"], "²")
+        # a config folder the reads cannot look into: the router's file is no path here
+        locked = os.path.join(self.config, "agentik")
+        os.makedirs(os.path.join(locked, "agents"), exist_ok=True)
+        os.chmod(locked, 0)
+        self.addCleanup(os.chmod, locked, 0o700)
+        doc = self.strict(self.run_a("describe", "config", "--json"))
+        self.assertEqual(doc["layers"][1], {"name": "rig", "path": None, "present": False,
+                                            "travels": False})
+        self.assertIsNone(self.by_key(doc)["route.backends_file"]["value"])
+        self.strict(self.run_a("doctor", "--json"))
+        os.chmod(locked, 0o700)
+        # any other fault inside a read: the contract's §2 answer, exit 2, never a traceback
+        plug = load_plug()
+        for argv, schema in ((["describe", "--json"], "describe"),
+                             (["describe", "config", "--json"], "config"),
+                             (["doctor", "--json"], "doctor")):
+            out, err = io.StringIO(), io.StringIO()
+            with mock.patch.object(plug, "describe", side_effect=RecursionError("made-up")), \
+                    mock.patch.object(plug, "config", side_effect=AttributeError("made-up")), \
+                    mock.patch.object(plug, "doctor", side_effect=LookupError("made-up")):
+                self.assertEqual(plug.main(["0.0.0-test"] + argv, out=out, err=err), 2)
+            doc = json.loads(out.getvalue())
+            self.assertEqual((doc["schema"], doc["ok"], doc["tool"], doc["error"]["code"]),
+                             ("agentik.%s/1" % schema, False, "agents", "unreadable"))
+            self.assertEqual(out.getvalue().count("\n"), 1)
+        with mock.patch.object(plug, "lane_set_up", side_effect=OSError("made-up")):
+            self.assertEqual(plug.main(["0.0.0-test", "lane"], out=io.StringIO()), 3)
+        # review 1, N6: the plug gone, or dying before it answers: the dispatcher answers §2
+        copy = self.tree()
+        script = os.path.join(copy, "lib", "agents_plug.py")
+        with open(script, encoding="utf-8") as handle:
+            body = handle.read()
+        for broken in (None, 'raise RuntimeError("made-up")\n' + body):
+            if broken is None:
+                os.remove(script)
+            else:
+                with open(script, "w", encoding="utf-8") as handle:
+                    handle.write(broken)
+            for argv, schema in ((["describe", "--json"], "describe"),
+                                 (["describe", "config", "--json", "route.log"], "config"),
+                                 (["doctor", "--json"], "doctor")):
+                with self.subTest(broken=broken is not None, argv=argv):
+                    run = subprocess.run(SANDBOX + [os.path.join(copy, "lib", "agentik-agents")]
+                                         + argv, cwd=self.t, env=self.env(), capture_output=True,
+                                         timeout=60)
+                    doc = self.strict(run, 2)
+                    self.assertEqual((doc["schema"], doc["ok"], doc["error"]["code"]),
+                                     ("agentik.%s/1" % schema, False, "unreadable"))
+        # a malformed argv stays the usage on stderr, exit 2, nothing on stdout
+        run = self.run_a("describe", "--bogus")
+        self.assertEqual((run.returncode, run.stdout), (2, b""))
+        self.assertIn(b"usage:", run.stderr)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=1)

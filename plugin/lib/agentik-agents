@@ -85,6 +85,20 @@ plug() {
 		"$here/agents_plug.py" "$(version)" "$@"
 }
 
+# A read through the plug: its one line, or, where it printed nothing (the script gone, no
+# python3, a fault before its own guard), the contract's section 2 answer and exit 2 (review 1,
+# R1-F1 and N6). Exit 2 with nothing printed is the plug's usage, left as it is.
+plug_read() {
+	schema=$1 && shift
+	answer=$(plug "$@") && rc=0 || rc=$?
+	if [ -n "$answer" ] || [ "$rc" -eq 2 ]; then
+		[ -z "$answer" ] || printf '%s\n' "$answer"
+		exit "$rc"
+	fi
+	printf '{"schema": "agentik.%s/1", "ok": false, "tool": "agents", "error": {"code": "unreadable", "message": "agents_plug.py gave no answer (exit %s): it is missing, or no python3 runs it", "remedy": "/agents:install-cli"}}\n' "$schema" "$rc"
+	exit 2
+}
+
 # The interpreter row (portfolio entry 26): PATH's python3, its version against the floor
 # (3.9), and the gate's pin, .python-version at the checkout's root above plugin/lib/, when the
 # two differ. -I keeps a
@@ -166,8 +180,10 @@ status)
 	run claude-agents status "$@"
 	;;
 describe)
-	plug describe "$@"
-	exit $?
+	case ${1-} in
+	config) plug_read config describe "$@" ;;
+	*) plug_read describe describe "$@" ;;
+	esac
 	;;
 rig) run localrig "$@" ;;
 route) run agentroute "$@" ;;
@@ -175,10 +191,7 @@ install-cli) install_cli "$@" ;;
 doctor)
 	case $#:${1-} in
 	0:) doctor ;;
-	1:--json)
-		plug doctor --json
-		exit $?
-		;;
+	1:--json) plug_read doctor doctor --json ;;
 	*) usage ;;
 	esac
 	;;
