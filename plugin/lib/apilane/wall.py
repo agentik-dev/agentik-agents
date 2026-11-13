@@ -161,5 +161,4 @@ def _sandbox_exec_wrap(argv, *, read, write, net, home):
     if net == "loopback":
         rules.append("(deny network*)")
         rules.append('(allow network* (remote ip "localhost:*"))')
-        rules.append('(allow network* (local ip "localhost:*"))')
     return [_SANDBOX_EXEC, "-p", "\n".join(rules)] + argv
