@@ -39,9 +39,30 @@ def backend():
     return wall.backend()
 
 
+def user_temp():
+    """The user's own temp root (`getconf DARWIN_USER_TEMP_DIR`), real, or None where it is
+    missing or under a root the wall denies (review 1, R1-F3): the fake behind the wall writes
+    its records there, whatever TMPDIR says."""
+    from apilane import wall
+    try:
+        got = subprocess.run(["/usr/bin/getconf", "DARWIN_USER_TEMP_DIR"], capture_output=True,
+                             text=True, stdin=subprocess.DEVNULL)
+    except OSError:
+        return None
+    root = got.stdout.strip()
+    if got.returncode != 0 or not root or not os.path.isdir(root):
+        return None
+    real = wall._canon(root)
+    if any(real == d or real.startswith(d + "/") for d in wall._DENIED):
+        return None
+    return real
+
+
 class Temp(unittest.TestCase):
+    root = None   # the folder the test's temp folder is made in; None is TMPDIR's
+
     def setUp(self):
-        self.t = tempfile.mkdtemp(prefix="al6-")
+        self.t = tempfile.mkdtemp(prefix="al6-", dir=self.root)
         self.addCleanup(shutil.rmtree, self.t, True)
         home = os.path.join(self.t, "home")
         os.makedirs(home)
@@ -456,9 +477,13 @@ class Lane(Temp):
     PATH built from nothing, and a job dir outside the home."""
 
     def setUp(self):
-        super().setUp()
         if backend() is None:
             self.skipTest("no wall is proved on this platform: the lane cannot run here")
+        self.root = user_temp()
+        if self.root is None:
+            self.skipTest("the user's own temp root is missing or the wall denies it: the fake "
+                          "behind the wall could not write its records")
+        super().setUp()
         from apilane import key
         self.bin = os.path.join(self.t, "bin")
         self.records = os.path.join(self.bin, "fake-records")
