@@ -643,6 +643,31 @@ class Plug(unittest.TestCase):
                          "agentik agents rig default BACKEND")
         self.assertEqual(by["backends.x.url"]["change"]["command"], "agentik agents rig up x")
 
+    # review 2, R2-F4: a field the file leaves out and the router fills takes the source and the
+    # rows of what fills it, never the file's
+    def test_18_filled_field_source(self):
+        self.write_backends(json.dumps({"x": {"model": "mx"}, "y": {"url": "http://127.0.0.1:9"}}))
+        rig = {"layer": "rig", "path": self.backends, "line": None}
+        by = self.by_key(self.config_read(AGENTROUTE_LOCAL_URL="http://127.0.0.1:7",
+                                          AGENTROUTE_LOCAL_MODEL="made-up-model"))
+        for key, value in (("backends.x.url", "http://127.0.0.1:7"),
+                           ("backends.y.model", "made-up-model")):
+            with self.subTest(key=key):
+                s = by[key]
+                self.assertEqual(s["value"], value)
+                self.assertEqual(s["source"], {"layer": "env", "path": None, "line": None})
+                self.assertEqual(s["values"][-1], {"layer": "env", "value": value})
+                self.assertNotIn("rig", [v["layer"] for v in s["values"]])
+        self.assertEqual(by["backends.x.model"]["source"], rig)
+        self.assertEqual(by["backends.y.url"]["source"], rig)
+        by = self.by_key(self.config_read())
+        for key in ("backends.x.url", "backends.x.auth", "backends.x.fold_system",
+                    "backends.y.model"):
+            with self.subTest(key=key, env=False):
+                self.assertEqual(by[key]["source"]["layer"], "default")
+                self.assertNotIn("rig", [v["layer"] for v in by[key]["values"]])
+        self.assertEqual(by["backends.x.model"]["values"][-1]["layer"], "rig")
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=1)

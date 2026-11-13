@@ -13,7 +13,7 @@
 - [x] act 1: R2-F1, a non-finite number at any depth of a value is its text (test_15).
 - [x] act 2: R2-F2, a backend name outside `[a-z0-9_-]` is left out with one warning (test_16).
 - [x] act 3: R2-F3, backends read from `AGENTROUTE_BACKENDS` print its launch line (test_17).
-- [ ] act 4: R2-F4, a field the router fills takes its feed's source and rows.
+- [x] act 4: R2-F4, a field the router fills takes its feed's source and rows (test_18); n11 lands with it.
 - [ ] act 5: review 2's NICE notes N1 to N10 as rows.
 - [ ] act 6: 1.7.1 alone, last under `plugin/`.
 - [ ] act 7: the gate, once.
@@ -22,9 +22,10 @@
 - R2-F1: `plain()` walks a copy of lists and mappings with a stack, not by recursion, so a value nested as deep as `json.loads` takes cannot fail the read.
 - R2-F2: the review's first option. The warning is reason `unknown`, key `backends.<name>` as written, `path` the file or null for the variable; no stderr line. A slug would make a key no file holds.
 - R2-F3: the review's fix. The condition is the variable set and not empty, as the router reads it, so a router-made default and an unparseable variable take the launch line too: the router reads no file in either case.
+- R2-F4: the review's fix, for every field the layer leaves out: url and model take `route.local_url`/`route.local_model`'s source and `values`; auth and fold_system, filled with a constant, take source default. That also lands n11, whose row leaves in act 5. `default` stays null for a declared backend's keys: on a bare machine the backend does not exist.
 
 ## Handover
 - None yet.
 
 ## Next act
-- Act 4.
+- Act 5.

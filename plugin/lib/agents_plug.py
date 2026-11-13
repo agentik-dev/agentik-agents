@@ -459,20 +459,29 @@ def read_backends(row, route, state):
             # the file, changes nothing here: the line is the variable's (review 2, R2-F3)
             change = {"kind": "launch", "command": "%s=VALUE agentik agents local" % var,
                       "path": None, "block": None, "note": ENV_BACKENDS_NOTE}
-        feeds ={"url": url, "model": model, "auth": auth}
+        feeds = {"url": url, "model": model, "auth": auth}
+        # the fields the file or the variable sets; the router fills the others as it loads
+        given = {"url": bool(b.get("url")), "model": "model" in b, "auth": "auth" in b,
+                 "fold_system": "fold_system" in b}
         for field, kind in BACKEND_FIELDS:
-            default = None
+            default, values = None, None
             if name == "default":
                 default = {"url": url["default"], "model": model["default"],
                            "fold_system": False}.get(field)
             if origins[name] == "router":
                 source = feeds[field]["source"] if field in feeds else DEFAULT
+            elif not given[field]:
+                # a field the router fills takes the source and the rows of what fills it:
+                # route.local_url or route.local_model, else what ships (review 2, R2-F4)
+                feed = feeds.get(field) if field in ("url", "model") else None
+                source = feed["source"] if feed else DEFAULT
+                values = [dict(v) for v in feed["values"]] if feed else None
             elif origins[name] == "rig":
                 source = {"layer": "rig", "path": path, "line": None}
             else:
                 source = ENV
             out.append(setting("backends.%s.%s" % (name, field), filled[field], default, kind,
-                               source, change))
+                               source, change, values))
     return out
 
 
