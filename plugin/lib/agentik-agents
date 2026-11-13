@@ -12,6 +12,8 @@
 # reports, it does not gate); 2 for usage, no verb or an unknown one. POSIX sh, no
 # interpreter but install-cli's. The API lane's verbs left with packet a-s17;
 # design/04-api-lane.md says what they were. The version is plugin.json's, the one pin.
+# fanout is a stub from packet al0 until the lane's rows land: it hands its args to the
+# claude-fanout on PATH, each --yes before a -- dropped, and is in no table.
 
 self=$(readlink -f -- "$0" 2>/dev/null) || self=$0
 here=$(CDPATH= cd -P -- "$(dirname -- "$self")" >/dev/null && pwd -P) || exit 2
@@ -116,6 +118,41 @@ doctor() {
 	exit 0
 }
 
+# The stub verb (packet al0): exec PATH's claude-fanout with the args, each --yes before a --
+# dropped; none, or one that resolves inside this folder, is exit 2. Its help alone runs nothing.
+fanout() {
+	t=$(command -v claude-fanout 2>/dev/null) || t=
+	case $#:${1-} in
+	1:--help | 1:-h)
+		echo "usage: agentik agents fanout [--yes] ARGS..."
+		echo "For now it hands ARGS to the claude-fanout on PATH, each --yes before a -- dropped."
+		echo "The API lane's own fan-out takes this name in a later version."
+		echo "claude-fanout on PATH: ${t:-none}"
+		exit 0
+		;;
+	esac
+	[ -n "$t" ] || {
+		echo "agentik agents fanout: the API lane is not in this version yet, and no claude-fanout is on PATH to hand the call to." >&2
+		exit 2
+	}
+	r=$(readlink -f -- "$t" 2>/dev/null) || r=$t
+	case $r in "$here"/*)
+		echo "agentik agents fanout: the claude-fanout on PATH is this tool's own forward, and the API lane is not in this version yet." >&2
+		exit 2
+		;;
+	esac
+	n=$# past=
+	while [ "$n" -gt 0 ]; do
+		a=$1 && shift && n=$((n - 1))
+		[ -n "$past" ] || case $a in
+		--yes) continue ;;
+		--) past=1 ;;
+		esac
+		set -- "$@" "$a"
+	done
+	exec "$t" "$@"
+}
+
 [ $# -gt 0 ] || usage
 verb=$1 && shift
 case $verb in
@@ -135,6 +172,7 @@ status) run claude-agents status "$@" ;;
 rig) run localrig "$@" ;;
 route) run agentroute "$@" ;;
 install-cli) install_cli "$@" ;;
+fanout) fanout "$@" ;;
 doctor)
 	[ $# -eq 0 ] || usage
 	doctor
