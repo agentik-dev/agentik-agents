@@ -11,8 +11,9 @@ later row adds lines and no function. A setting's default is read from the scrip
 at run time, by the form it is written in (`env("NAME", "default")` in agentroute,
 `${NAME:-default}` in the shell tools); none is typed here.
 
-Room for the API lane, the next design's: no key here opens `api.`, no layer is named `user` and
-no check is named `api`; those names are left to it.
+The API lane's rows (packet al6): a layer `user`, the lane's config file; its six `api.` keys,
+each default read from `apilane.config`; and, only while the file says on, five checks named
+`api ...`. The file is edited by hand, so each key's change names it and its block.
 
 Stdlib, 3.9. The describe and config reads open no socket and write nothing; `doctor --json` and
 `lane` make one loopback connect, and `doctor --json` runs `agentroute --check --json` only where
@@ -110,7 +111,13 @@ SUMMARIES = {
     "route.ping_after_s": "The seconds a silent stream waits before the router sends a ping.",
     "route.ping_every_s": "The seconds between the pings the router sends while a stream is silent.",
     "route.timeout_s": "The seconds the router waits on a backend before it gives up.",
-    "route.state_dir": "The folder the router keeps its state in.",
+    "route.state_dir": "The folder that holds the router's pid file and, by default, its request log.",
+    "api.enabled": "Whether the API lane is on: its fan-out of read-only agents billed to a key.",
+    "api.max_fanout_usd": "The most one fan-out may spend, in US dollars.",
+    "api.max_day_usd": "The most the lane's fan-outs may spend in one day, in US dollars.",
+    "api.console_limit_usd": "The spend limit set in the key's console, in US dollars, as you state it.",
+    "api.proxy": "The proxy each agent's requests go through, if any.",
+    "api.ca_file": "A certificate file each agent trusts beside the system's, if any.",
     "route.log": "The file the router writes one line a request to: sizes and names, never content.",
     "backends.*.url": "Where this backend answers.",
     "backends.*.model": "The model this backend serves when a request names none.",
@@ -485,7 +492,48 @@ def read_backends(row, route, state):
     return out
 
 
-def config(key=None):
+API_NOTE = "The file is edited by hand; no verb writes it, and a running fan-out keeps what it read."
+API_TYPES = {"enabled": "boolean", "proxy": "string", "ca_file": "path"}
+
+
+def api_roots(roots=None):
+    """The lane's places, or None where the account cannot be read under this HOME."""
+    if roots is not None:
+        return roots
+    try:
+        from apilane import paths
+        return paths.account()
+    except Exception:  # noqa: BLE001  home.none, home.differs, or no lane in this install
+        return None
+
+
+def api_lane(roots):
+    """The lane's values; the defaults where there are no places or the file is refused."""
+    from apilane import config as lane_config
+    if roots is None:
+        return lane_config.DEFAULTS
+    try:
+        return lane_config.lane(roots)
+    except Exception:  # noqa: BLE001  a refused file is off
+        return lane_config.DEFAULTS
+
+
+def api_settings(roots):
+    try:
+        from apilane import config as lane_config
+    except ImportError:
+        return []
+    lane, path = api_lane(roots), (roots.config if roots is not None else None)
+    change = {"kind": "file", "command": None, "path": path, "block": "api", "note": API_NOTE}
+    out = []
+    for k in lane_config.KEYS:
+        default, value = getattr(lane_config.DEFAULTS, k), getattr(lane, k)
+        source = {"layer": "user", "path": path, "line": None} if value != default else DEFAULT
+        out.append(setting("api." + k, value, default, API_TYPES.get(k, "number"), source, change))
+    return out
+
+
+def config(key=None, roots=None):
     state = {"warnings": [], "local_auth": os.environ.get("AGENTROUTE_LOCAL_AUTH", "")}
     settings, route, any_set = [], {}, False
     for row in SETTINGS:
@@ -502,9 +550,13 @@ def config(key=None):
         settings.extend(got)
     file = route["route.backends_file"]["value"]
     file = file if isinstance(file, str) else None
+    roots = api_roots(roots)
+    settings.extend(api_settings(roots))
+    user = roots.config if roots is not None else None
     layers = [{"name": "default", "path": None, "present": True, "travels": False},
               {"name": "rig", "path": file, "present": exists(file), "travels": False},
-              {"name": "env", "path": None, "present": any_set, "travels": False}]
+              {"name": "env", "path": None, "present": any_set, "travels": False},
+              {"name": "user", "path": user, "present": exists(user), "travels": False}]
     if key is not None:
         settings = [s for s in settings if s["key"] == key]
     return {"schema": "agentik.config/1", "ok": True, "tool": TOOL, "layers": layers,
@@ -593,10 +645,48 @@ def check_lane(c):
 KINDS = {"on_path": check_on_path, "python": check_python, "lane": check_lane}
 
 
-def doctor():
+def api_checks(lane=None, roots=None, parts=None):
+    """The lane's five checks, only while its file says on (packet al6, R5)."""
+    try:
+        from apilane import cli as lane_cli
+    except ImportError:
+        return []
+    roots = api_roots(roots)
+    lane = api_lane(roots) if lane is None else lane
+    if roots is None or not lane.enabled:
+        return []
+    parts = lane_cli.Parts() if parts is None else parts
+
+    def ask(fn):
+        try:
+            return fn()
+        except Exception:  # noqa: BLE001  doctor reports, it does not gate
+            return None
+
+    def row(name, ok, detail, remedy, missing="warn"):
+        return {"name": name, "status": "ok" if ok else missing, "detail": detail, "remedy": remedy}
+
+    key = ask(lambda: parts.key_present(roots))
+    probe = ask(lambda: parts.probe_read(roots)) or {}
+    wall = ask(parts.wall_backend)
+    gated = ask(lambda: lane_cli._gated(roots)[0])
+    limit = lane.console_limit_usd
+    return [
+        row("api key", key, "set" if key else "not set", "agentik agents api key set"),
+        row("api probe", probe.get("ok"), "passed for CLI %s" % probe.get("cli_version")
+            if probe.get("ok") else "not passed for the installed CLI", "agentik agents api probe"),
+        row("api limit", limit is not None, "stated: $%s" % limit if limit is not None
+            else "not stated in " + roots.config, "edit " + roots.config),
+        row("api wall", wall, "%s" % wall if wall else "no wall's wrapper here", None, "fail"),
+    ] + ([] if gated else [row("api gates", False, "%s is not on the gate list" % roots.config,
+                               None, "note")])
+
+
+def doctor(lane=None, roots=None, parts=None):
     checks = []
     for c in CHECKS:
         checks.extend(KINDS[c["kind"]](c))
+    checks.extend(api_checks(lane, roots, parts))
     return {"schema": "agentik.doctor/1", "ok": True, "tool": TOOL,
             "failed": sum(c["status"] == "fail" for c in checks),
             "warned": sum(c["status"] == "warn" for c in checks), "checks": checks}
