@@ -141,10 +141,9 @@ doctor() {
 	echo ""
 	echo "  Local lane:"
 	# no lane set up (no backends file, no AGENTROUTE_* variable, nothing on the router's
-	# address): one line, and nothing is asked of the upstream; a plug that cannot answer
-	# leaves the check as it was
-	plug lane >/dev/null 2>&1
-	if [ $? -eq 1 ]; then
+	# address): one line, and nothing is asked of the upstream; a plug that cannot answer, or
+	# dies (its exit 1 is no "no"), leaves the check as it was (review 1, N5)
+	if [ "$(plug lane 2>/dev/null)" = no ]; then
 		echo "    no local lane is set up here, so the router, the upstream and the backends were not asked"
 	else
 		"$here/agentroute" --check 2>&1 | sed 's/^/    /'

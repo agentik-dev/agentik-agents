@@ -2,8 +2,9 @@
 """agents_plug: what agentik-agents prints so that the suite's `config`, `doctor` and `status`
 can read it (packet ak7-plug-agents; the plug contract §3 to §5). The dispatcher runs it under
 install-cli's interpreter as `agents_plug.py VERSION ARGS...`, ARGS one of `describe --json`,
-`describe config --json [KEY]`, `doctor --json` or `lane` (exit 0 when a local lane is set up
-here, 1 when not: the text `doctor` asks it before it runs `agentroute --check`).
+`describe config --json [KEY]`, `doctor --json` or `lane` (`yes` and exit 0 when a local lane is
+set up here, `no` and exit 1 when not, exit 3 on a fault: the text `doctor` takes only `no` as
+none before it runs `agentroute --check`).
 
 The settings are one table (SETTINGS) and the checks one list (CHECKS), each row data, so a
 later row adds lines and no function. A setting's default is read from the script that owns it,
@@ -559,6 +560,7 @@ def main(argv=None, out=sys.stdout, err=sys.stderr):
             up = lane_set_up()
         except Exception:  # noqa: BLE001
             return 3
+        out.write("yes\n" if up else "no\n")
         return 0 if up else 1
     if args == ["describe", "--json"]:
         schema, read = "agentik.describe/1", lambda: describe(version)

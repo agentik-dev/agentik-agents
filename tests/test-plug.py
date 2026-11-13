@@ -491,6 +491,29 @@ class Plug(unittest.TestCase):
         self.assertEqual((run.returncode, run.stdout), (2, b""))
         self.assertIn(b"usage:", run.stderr)
 
+    # review 1, N5: a plug that dies is no answer, so the text doctor asks the router as at the
+    # pin; only the plug's own "no" is the one line
+    def test_12_doctor_text_dead_plug(self):
+        copy = self.tree()
+        script = os.path.join(copy, "lib", "agents_plug.py")
+        with open(script, encoding="utf-8") as handle:
+            body = handle.read()
+        with open(script, "w", encoding="utf-8") as handle:
+            handle.write('raise RuntimeError("made-up")\n' + body)
+        run = subprocess.run(SANDBOX + [os.path.join(copy, "lib", "agentik-agents"), "doctor"],
+                             cwd=self.t, env=self.env(AGENTROUTE_LISTEN="127.0.0.1:9"),
+                             capture_output=True, timeout=60)
+        self.assertEqual(run.returncode, 0, run.stderr)
+        out = run.stdout.decode()
+        self.assertNotIn("no local lane is set up here", out)
+        self.assertRegex(out, r"(?m)^      FAIL  router ")
+        plug = load_plug()
+        for up, word, code in ((True, "yes", 0), (False, "no", 1)):
+            out = io.StringIO()
+            with mock.patch.object(plug, "lane_set_up", return_value=up):
+                self.assertEqual(plug.main(["0.0.0-test", "lane"], out=out), code)
+            self.assertEqual(out.getvalue(), word + "\n")
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=1)
