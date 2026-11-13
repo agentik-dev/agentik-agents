@@ -7,7 +7,7 @@
 | pin | worktree `.claude/worktrees/ak7-plug-agents`, branch `ak7-plug-agents` at 6b17003, off main c0193bd |
 | window | builder, one sitting, spawned by a hq sitting of 2026-11-13 |
 | agents | none |
-| exit | in flight |
+| exit | done: R1-F1 to R1-F3 fixed, main merged, 1.7.0; gate 20261113-101007-1534 exit 0 on 71fc3cc; record handed to the hq |
 
 ## Done-ness
 - [x] act 1, 5563d4d: R1-F1, every fault a read can meet held to one object (N6 with it).
@@ -15,8 +15,8 @@
 - [x] act 3, 9676923: R1-F2, a derived key takes the env source of what feeds it (N1 with it).
 - [x] act 4, 30d04f2: R1-F3, `backends.default.*`'s line names a backend.
 - [x] act 5, 78977d4: NICE rows n10 to n14 (R1-F4, N2, N3, N4, N7); N1, N5, N6 fixed, so not filed.
-- [x] act 6: main merged at 4df9bab (main 2c18f11); al0's review notes n15 to n23; 1.7.0 next, alone.
-- [ ] act 7: the gate, once.
+- [x] act 6: main merged at 4df9bab (main 2c18f11); al0's review notes n15 to n23 at 9b1c321; 1.7.0 alone at 71fc3cc (plugin-version-check passes, no 1.7.1).
+- [x] act 7: gate 20261113-101007-1534 exit 0 in 2 min on 71fc3cc.
 
 ## Decided (reversible, logged)
 - A number JSON has no word for (nan, inf) is printed as its text; the answer is dumped with `allow_nan=False`.
@@ -28,7 +28,7 @@
 - The dispatcher prints §2's answer where the plug printed nothing and did not exit 2 (its usage).
 
 ## Handover
-- None yet.
+- None: review 2 reads 6b17003..71fc3cc.
 
 ## Next act
-- 1.7.0 alone, then act 7, the gate.
+- None in this row: review 2 over the fix and the merge.
