@@ -122,6 +122,30 @@ class ForwardTest(Temp):
         self.assertEqual(got.stdout, self.want)
         self.assertEqual(seen.decode().replace("\r\n", "\n"), NOTE + "\n")
 
+    def test_installed_tree(self):
+        # review 1, R1-F1: on a tree install-cli froze, no stand-in; the freeze leaves the
+        # dispatcher 0644, so the forward runs it by /bin/sh and reaches the lane (never 126)
+        import agents_install
+        prefix = os.path.join(self.roots.home, "P")
+        env = {"HOME": self.roots.home, "XDG_CACHE_HOME": os.path.join(self.t, "cache")}
+        with mock.patch.dict(os.environ, env):
+            rc = agents_install.main(["--prefix", prefix], out=io.StringIO(), err=io.StringIO(),
+                                     lane=True)
+        self.assertEqual(rc, 0)
+        fwd = os.path.join(prefix, "bin", "claude-fanout")
+        self.assertTrue(os.path.realpath(fwd).startswith(os.path.realpath(prefix) + os.sep))
+        env = {"HOME": self.roots.home, "PATH": "/usr/bin:/bin",
+               "XDG_CACHE_HOME": os.path.join(self.t, "cache")}
+        got = subprocess.run([fwd, "--help"], capture_output=True, text=True, env=env,
+                             stdin=subprocess.DEVNULL)
+        disp = os.path.join(os.path.dirname(os.path.realpath(fwd)), "agentik-agents")
+        want = subprocess.run(["/bin/sh", disp, "fanout", "--yes", "--help"], capture_output=True,
+                              text=True, env=env, stdin=subprocess.DEVNULL)
+        self.assertNotEqual(got.returncode, 126, got.stderr)
+        self.assertNotIn("cannot execute", got.stderr)
+        self.assertEqual((got.returncode, got.stdout, got.stderr),
+                         (want.returncode, want.stdout, want.stderr))
+        self.assertTrue(got.stdout or got.stderr)
 
     def test_status_names_an_old_one(self):
         self.assertEqual(cli.old_forward(path=self.bin), os.path.join(self.bin, "claude-fanout"))
