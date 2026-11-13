@@ -74,3 +74,7 @@ design/readme/source.md: renamed
 plugin/commands/install-cli.md: renamed
 # a-s18 names the sibling repos whose shape it follows.
 design/packets/a-s18-plugin.md: sibling
+# The API lane's sentences name the old tool it replaces, which the model must never start (al4).
+plugin/lib/apilane/*: renamed
+# al4's packet quotes the owner naming that old tool.
+design/packets/al4-report.md: renamed
