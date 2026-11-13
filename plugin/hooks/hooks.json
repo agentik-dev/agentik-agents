@@ -5,6 +5,16 @@
         "matcher": "Agent|Task",
         "hooks": [{"type": "command", "command": "/bin/sh", "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/local-guard"]}]
       }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [{"type": "command", "command": "/bin/sh", "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/api-lane", "SessionStart"], "timeout": 5}]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [{"type": "command", "command": "/bin/sh", "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/api-lane", "UserPromptSubmit"], "timeout": 5}]
+      }
     ]
   }
 }
