@@ -145,6 +145,9 @@ CHECKS = [{"name": t, "kind": "on_path", "missing": "note", "remedy": REMEDY} fo
 NO_LANE = "no local lane is set up here, so the router, the upstream and the backends were not asked"
 ROUTER_STATES = {"ok": "ok", "warn": "warn", "FAIL": "fail"}
 OURS = ("AGENTROUTE_", "CLAUDE_LOCAL_", "LOCALRIG_")
+# The variables a default may be computed from that are a setting, not this machine's folders:
+# a default is computed with none of them set (review 1, R1-F2 and N1).
+FEEDS = OURS + ("AGENTIK_",)
 
 
 def set_(name):
@@ -153,7 +156,7 @@ def set_(name):
 
 
 def bare_environ():
-    return {k: v for k, v in os.environ.items() if not k.startswith(OURS)}
+    return {k: v for k, v in os.environ.items() if not k.startswith(FEEDS)}
 
 
 def plain(value):
@@ -208,7 +211,9 @@ def exists(path):
 def read_python(row):
     """agentroute's `env`/`env_num` reads: each module-level assignment that holds one is run
     twice, from the script's own text, with the functions it defines: once as the router runs it,
-    once with every `env` giving its default. [(NAME, value, default)], in the script's order."""
+    once with every `env` giving its default. [(NAME, value, default, feeds)], in the script's
+    order; `feeds` are the variables, other than its own, that the value is computed from
+    through the assignments it reads (review 1, R1-F2: `LOG` from `STATE_DIR`)."""
     path = os.path.join(HERE, row["script"])
     with open(path, encoding="utf-8") as handle:
         tree = ast.parse(handle.read(), path)
@@ -235,6 +240,15 @@ def read_python(row):
                             and any(a.targets[0].id == sub.id for a, _ in assigns):
                         wanted.add(sub.id)
                         grew = True
+    reading = {n.targets[0].id: names for n, names in assigns}
+    refers = {n.targets[0].id: {s.id for s in ast.walk(n.value) if isinstance(s, ast.Name)}
+              & set(reading) for n, _ in assigns}
+
+    def feeds(target, seen):
+        out = set()
+        for other in refers.get(target, ()) - seen:
+            out |= set(reading[other]) | feeds(other, seen | {other})
+        return out
     flags = __future__.annotations.compiler_flag
 
     def run(bare):
@@ -258,7 +272,8 @@ def read_python(row):
         for name in names:
             if name in row.get("skip", ()):
                 continue
-            out.append((name, plain(live.get(target)), plain(bare.get(target))))
+            fed = sorted(row["prefix"] + n for n in feeds(target, {target}) - {name})
+            out.append((name, plain(live.get(target)), plain(bare.get(target)), fed))
     return out
 
 
@@ -299,7 +314,8 @@ def expand(text, environ):
 
 
 def read_shell(row):
-    """[(NAME less the prefix, value, default)], each variable once, in the script's order."""
+    """[(NAME less the prefix, value, default, feeds)], each variable once, in the script's order;
+    `feeds` are the settings' variables its default names (FEEDS), whose value moves it."""
     with open(os.path.join(HERE, row["script"]), encoding="utf-8") as handle:
         text = handle.read()
     bare, seen, out = bare_environ(), set(), []
@@ -309,13 +325,16 @@ def read_shell(row):
             continue
         seen.add(var)
         name = var[len(row["prefix"]):]
-        default = expand(shell_default(text, m.end()), bare) or None
+        alt = shell_default(text, m.end())
+        default = expand(alt, bare) or None
+        fed = sorted({n for n in re.findall(r"\$\{?([A-Za-z_][A-Za-z0-9_]*)", alt)
+                      if n.startswith(FEEDS) and n != var})
         raw = os.environ.get(var) or None
-        value = raw if raw is not None else default
+        value = raw if raw is not None else (expand(alt, os.environ) or None)
         if default is not None and DIGITS.fullmatch(default):
             default = int(default)
             value = int(value) if isinstance(value, str) and DIGITS.fullmatch(value) else value
-        out.append((name, value, default))
+        out.append((name, value, default, fed))
     return out
 
 
@@ -349,11 +368,12 @@ DEFAULT = {"layer": "default", "path": None, "line": None}
 
 def from_env(row, found):
     out = []
-    for name, value, default in found:
+    for name, value, default, fed in found:
         var = row["prefix"] + name
         key = "%s.%s" % (row["group"], name.lower())
         kind = "secret" if secret(key) else type_of(default if default is not None else value, name)
-        out.append(setting(key, value, default, kind, ENV if set_(var) else DEFAULT,
+        moved = set_(var) or any(set_(f) for f in fed)
+        out.append(setting(key, value, default, kind, ENV if moved else DEFAULT,
                            launch(row, var, name)))
     return out
 
@@ -432,7 +452,8 @@ def config(key=None):
         else:
             found = read_python(row) if row["read"] == "python" else read_shell(row)
             got = from_env(row, found)
-            any_set = any_set or any(set_(row["prefix"] + n) for n, _, _ in found)
+            any_set = any_set or any(set_(row["prefix"] + f[0]) or any(set_(v) for v in f[3])
+                                     for f in found)
         if row["group"] == "route":
             route = {s["key"]: s for s in got}
         settings.extend(got)
@@ -463,7 +484,7 @@ def lane_set_up():
     route = {}
     for row in SETTINGS:
         if row["read"] == "python":
-            route = {"%s.%s" % (row["group"], n.lower()): v for n, v, _ in read_python(row)}
+            route = {"%s.%s" % (row["group"], f[0].lower()): f[1] for f in read_python(row)}
             break
     if os.path.exists(str(route.get("route.backends_file", ""))):
         return True

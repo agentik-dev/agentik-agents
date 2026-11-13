@@ -11,8 +11,8 @@
 
 ## Done-ness
 - [x] act 1, 5563d4d: R1-F1, every fault a read can meet held to one object (N6 with it).
-- [x] act 2: N5, the text `doctor` reads a dead plug as a lane, not as none.
-- [ ] act 3: R1-F2, a derived key takes the env source of what feeds it.
+- [x] act 2, 691630e: N5, the text `doctor` reads a dead plug as a lane, not as none.
+- [x] act 3: R1-F2, a derived key takes the env source of what feeds it (N1 with it).
 - [ ] act 4: R1-F3, `backends.default.*`'s line names a backend.
 - [ ] act 5: NICE rows R1-F4, N1 to N4, N7.
 - [ ] act 6: main merged after al0, al0's notes filed, 1.7.0 last under `plugin/`.
@@ -22,10 +22,11 @@
 - A number JSON has no word for (nan, inf) is printed as its text; the answer is dumped with `allow_nan=False`.
 - Any fault inside a read is the contract's §2 answer, code `unreadable`, exit 2; `lane` exits 3 on a fault.
 - `lane` prints `yes` or `no`; the text `doctor` takes only `no` as no lane.
+- A feed is a variable of the tool's three prefixes or `AGENTIK_*`; `HOME` and `XDG_*` are this machine's, so a default is computed with them.
 - The dispatcher prints §2's answer where the plug printed nothing and did not exit 2 (its usage).
 
 ## Handover
 - None yet.
 
 ## Next act
-- Act 3.
+- Act 4.

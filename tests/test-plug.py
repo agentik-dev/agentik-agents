@@ -514,6 +514,46 @@ class Plug(unittest.TestCase):
                 self.assertEqual(plug.main(["0.0.0-test", "lane"], out=out), code)
             self.assertEqual(out.getvalue(), word + "\n")
 
+    # review 1, R1-F2: a key whose value moves with a variable, its own or one its value is
+    # computed from, reads source env with an env row last; its default never moves
+    def test_13_derived(self):
+        before = self.snapshot()
+        base = self.by_key(self.config_read())
+        names = set(re.findall(r'\benv(?:_num)?\("([A-Z0-9_]+)"', read("agentroute"))) - {"BACKENDS"}
+        names = {"AGENTROUTE_" + n for n in names}
+        for script in ("claude-local", "localrig"):
+            names |= set(re.findall(r"\$\{((?:CLAUDE_LOCAL|LOCALRIG|AGENTIK)_[A-Z0-9_]+)",
+                                    read(script)))
+        self.assertIn("AGENTIK_AGENTS_SECRETS", names)
+        moved = set()
+        for var in sorted(names):
+            plain = [s for k, s in base.items() if s["change"]["command"]
+                     and s["change"]["command"].startswith(var + "=")]
+            was = plain[0]["value"] if plain else None
+            value = ("off" if isinstance(was, bool) else "7" if isinstance(was, (int, float))
+                     else "/srv/made-up/v")
+            doc = self.config_read(**{var: value})
+            for key, s in self.by_key(doc).items():
+                if key not in base or s["value"] == base[key]["value"]:
+                    continue
+                with self.subTest(var=var, key=key):
+                    moved.add(key)
+                    self.assertEqual(s["source"], {"layer": "env", "path": None, "line": None})
+                    self.assertEqual(s["values"][-1], {"layer": "env", "value": s["value"]})
+                    self.assertEqual(s["default"], base[key]["default"])
+                    self.assertIs(doc["layers"][2]["present"], True)
+        self.assertTrue({"route.log", "rig.secrets_file", "backends.default.url"} <= moved, moved)
+        s = self.by_key(self.config_read("route.log", AGENTROUTE_STATE_DIR="/srv/made-up/state"))
+        s = s["route.log"]
+        self.assertEqual(s["value"], "/srv/made-up/state/requests.jsonl")
+        self.assertEqual([v["layer"] for v in s["values"]], ["default", "env"])
+        s = self.by_key(self.config_read("rig.secrets_file", AGENTIK_AGENTS_SECRETS="/srv/sec"))
+        s = s["rig.secrets_file"]
+        self.assertEqual(s["value"], "/srv/sec/local-backends.sops.yaml")
+        self.assertEqual(s["default"], os.path.join(self.config, "agentik", "agents", "secrets",
+                                                    "local-backends.sops.yaml"))
+        self.unchanged(before)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=1)
