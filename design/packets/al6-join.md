@@ -8,7 +8,7 @@ The hq's brief for row al6, in this repo's packet shape.
 | pin | main 23aab48, plugin 1.7.1 (al0's stub 1.6.4, ak7's plug); worktree `.claude/worktrees/al6-join`, branch `al6-join`; nothing linked |
 | merges | `al1-run` adaf541, `al2-wall` aa1d299, `al3-fanout` a7755c5, `al4-report` e2143b0 (its phase 2 merged this main) |
 | wall | this worktree; no push, `--amend`, rebase, install or landing; the four merges alone; no `claude`, no model, no key read, no network; `doctor` and `route --check` only under `sandbox-exec` with the network denied; no relay verb; `make` only through the gate queue |
-| may touch | every file the four slices add; `plugin/lib/agentik-agents`; `plugin/lib/claude-fanout` (new); `plugin/lib/agents_install.py`; `plugin/lib/agents_plug.py`; `tests/`; `Makefile`; `plugin/.claude-plugin/plugin.json`; `NICE_TO_HAVE.md`; `design/04-api-lane.md`; `.hygiene-allow`; this packet; a charter |
+| may touch | every file the four slices add; `plugin/lib/agentik-agents`; `plugin/lib/claude-fanout` (new); `plugin/lib/agents_install.py`; `plugin/lib/agents_plug.py`; `tests/`; `Makefile`; `plugin/.claude-plugin/plugin.json`; `NICE_TO_HAVE.md`; `design/04-api-lane.md`; `.hygiene-allow`; this packet and its table `design/packets/al6-join/cases.md`; a charter |
 | acceptance | section 6's lines 1 to 13 |
 | verify | `make check`, once, last, through `agentik session gate run`, then `gate wait --strict` |
 | budget | a commit each: packet, the four merges, the tests seen red, each mend, the forward and install, the plug, the lists, NICE and design/04, 1.8.0 alone |
@@ -29,7 +29,7 @@ The coordinator's word: the second computer runs `fanout --detach ... --profile 
 - R4, the forward: `plugin/lib/claude-fanout`, POSIX sh, runs the dispatcher beside its resolved path as `fanout --yes "$@"`; one note on a terminal, none in a pipe. `install-cli` links it only while the lane is on; off, four names and main's `linked ...` line byte for byte. `api status` and the lane's doctor block name a `claude-fanout` on PATH that is not this forward.
 - R5, the plug: a layer `user` (the lane's file, not travelling); the six `api.` keys, defaults from `apilane.config`, each change a hand edit of the file; the lane's five checks only while it is on.
 - R6, end to end: `tests/test_al6_join.py`, every real module, `tests/fake-claude` speaking to the loopback stub, fake `sops` and `age-keygen`; skips with one reason where no wall is proved.
-- R7, the old cases: one table, each case of the old suites (58, 26, 14, 46, 81 rows; the cost tool's 76 as one line) against its new test, or cut and why.
+- R7, the old cases: one table, each case of the old suites (58, 26, 14, 46, 81 rows; the cost tool's 76 as one line) against its new test, or cut and why. The table is [al6-join/cases.md](al6-join/cases.md), beside this packet (225 rows pass the ceiling; doclint reads a `design/packets/*.md` file as a packet).
 - R8, 1.8.0 alone in the last commit under `plugin/`; NICE rows; design/04's status. R9, `make check` once on that head.
 
 ## 3. Interfaces

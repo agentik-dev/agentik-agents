@@ -734,6 +734,10 @@ class SignalTest(Base):
     def test_sighup(self):
         self.stop_with(signal.SIGHUP)
 
+    def test_sigint(self):
+        # the old wrapper suite's SIGINT case (packet al6, R7's table)
+        self.stop_with(signal.SIGINT)
+
 
 if __name__ == "__main__":
     unittest.main()
