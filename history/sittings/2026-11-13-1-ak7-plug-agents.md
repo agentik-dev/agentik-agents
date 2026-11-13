@@ -15,7 +15,7 @@
 | 1. tests seen red (`tests/test-plug.py` 10 of 10, the usage line, the status keys) | done, 21e96c6 |
 | 2. `agents_plug.py`, the dispatcher's verbs, `--check --json`, the lane note, the status schema and prefix | done, 1342611; test-plug, dispatch, route, status, bare-machine, rig, readme green under `/usr/bin/python3` and 3.12.7 |
 | 3. NICE_TO_HAVE n7 to n9 | done |
-| 4. the version, 1.7.0, alone | open |
+| 4. the version, 1.7.0, alone | done |
 | 5. `make check` through the gate queue | open |
 
 ## Choices inside the rulings
@@ -27,4 +27,4 @@
 
 ## Handover
 
-- Next act: the version commit, then the gate.
+- Next act: the gate, `make check` through the queue.
