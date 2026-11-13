@@ -618,9 +618,40 @@ def collect(args, scanner: CostScan) -> dict:
             agents.extend(helpers_of(sid, files, now, since_s, args.all, meter, ledger, scanner))
         except Exception:                               # noqa: BLE001
             pass
+    try:
+        agents = with_api_rows(agents, api_rows())
+    except Exception:                                   # noqa: BLE001 -- the lane adds rows or nothing
+        pass
     agents = [sanitise(r) for r in agents]
     return {"generated": iso(now), "since_min": None if args.all else args.since, "agents": agents,
             "_now": now}
+
+
+def api_rows(roots=None, alive=None) -> list:
+    """The API lane's live shards (packet al4-report), from the apilane/ package beside this
+    file: [] where it is absent or holds no live record. Raises under a HOME that is not the
+    account's; collect() then adds nothing."""
+    lib = os.path.dirname(os.path.realpath(__file__))
+    if not os.path.isfile(os.path.join(lib, "apilane", "report.py")):
+        return []
+    if lib not in sys.path:
+        sys.path.insert(0, lib)
+    keep, sys.dont_write_bytecode = sys.dont_write_bytecode, True    # nothing written beside it
+    try:
+        from apilane import paths, report
+    finally:
+        sys.dont_write_bytecode = keep
+    return report.rows(paths.account() if roots is None else roots, alive=alive)
+
+
+def with_api_rows(agents: list, extra: list) -> list:
+    """Each api row after the last row of its session, else at the end."""
+    out = list(agents)
+    for r in extra:
+        at = max((i for i, a in enumerate(out) if a.get("session_id") == r.get("session_id")
+                  and r.get("session_id")), default=None)
+        out.insert(len(out) if at is None else at + 1, r)
+    return out
 
 
 def sanitise(r: dict) -> dict:

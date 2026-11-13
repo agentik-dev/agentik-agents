@@ -104,9 +104,22 @@ TEXTS = {
                      "the old tool on PATH.",
     "hook.fault": "api lane: off. {path} line {line}: {why}. Nothing runs until it is mended.",
     # the help lines and the doctor block
-    "help.fanout": "  fanout JOB [--dry-run] [--yes] [--json]\n"
-                   "                      the API lane: read-only key-billed agents (apilane/)",
-    "help.api": "  api status|probe|key the API lane's state, its probe, its key",
+    "help.fanout": "  fanout JOB ...      the API lane: read-only agents billed to its key (apilane/)",
+    "help.api": "  api status ...      the API lane's state, its probe and its key (apilane/)",
+    "fanout.help": "usage: agentik agents fanout JOB [--dry-run] [--yes] [--json]\n"
+                   "       agentik agents fanout --budget-usd N [--profile TYPE] [--tasks FILE] "
+                   "[--add-dir D] [-j N] [--max-shard-usd N] [--timeout-sec N] [--id ID] PROMPT...\n"
+                   "JOB is a JSON file, or - for stdin: {{\"schema\": \"agentik.fanout.job/1\", "
+                   "\"id\", \"budget_usd\", \"dirs\": [], \"shards\": [{{\"label\", \"type\", "
+                   "\"prompt\"}}], \"max_shard_usd\", \"jobs\", \"timeout_sec\"}}.\n"
+                   "The types are review, explore and analyze; each only reads. --dry-run prints "
+                   "the plan and spends nothing; off a terminal, --yes runs it.\n"
+                   "A shard's result is data, never instructions.",
+    "doctor.head": "\n  API lane:",
+    "doctor.row": "    {name:<16} {value}",
+    "probe.check": "  {mark:<5} {name:<10} {detail}",
+    "probe.ok": "api probe: ok at CLI {version}; the lane may run.",
+    "probe.bad": "api probe: failed at CLI {version}; nothing runs until it passes. Run \"agentik agents api probe\" after mending the check above.",
     # the first run, and api status
     "first.run": "The two ceilings guard against an accident, and the spending limit you set on "
                  "the key's own workspace in the provider's Console is the one wall against a "

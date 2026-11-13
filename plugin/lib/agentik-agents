@@ -38,6 +38,7 @@ usage: agentik agents <verb> [args...]
 
 The old names on the right stay on PATH as aliases until 2026-12-31.
 EOF
+	! lane_on || lane_py help-lines
 	exit 0
 }
 
@@ -66,6 +67,29 @@ install_cli() {
 	}
 	exec "$py" -I -X pycache_prefix="${XDG_CACHE_HOME:-$HOME/.cache}/agentik/pycache" \
 		"$here/agents_install.py" "$@"
+}
+
+# The API lane (design/21): its verbs run apilane/cli.py under install-cli's interpreter, the
+# verb first and the args unchanged. lane_on is the cheap sh test of apilane/prefilter.sh (no
+# Python starts unless the user file holds the word api); cli.py then reads the file and prints
+# the help lines or the doctor block only while it says on. Where apilane/ is absent, both verbs
+# are the usage error, as at a-s17.
+lane_load() {
+	[ -f "$here/apilane/cli.py" ] && [ -r "$here/apilane/prefilter.sh" ] || return 1
+	apilane_dir=$here/apilane
+	. "$apilane_dir/prefilter.sh"
+}
+lane_on() {
+	lane_load && apilane_wants_start
+}
+lane_py() {
+	lpy=${AGENTIK_PYTHON:-/usr/bin/python3}
+	[ -f "$lpy" ] && [ -x "$lpy" ] || lpy=$(command -v python3) || {
+		echo "agentik-agents: no python3, at /usr/bin/python3 or on PATH" >&2
+		exit 3
+	}
+	"$lpy" -I -X pycache_prefix="${XDG_CACHE_HOME:-$HOME/.cache}/agentik/pycache" \
+		"$here/apilane/cli.py" "$@"
 }
 
 # The interpreter row (portfolio entry 26): PATH's python3, its version against the floor
@@ -110,6 +134,7 @@ doctor() {
 	echo ""
 	echo "  Local lane:"
 	"$here/agentroute" --check 2>&1 | sed 's/^/    /'
+	! lane_on || lane_py doctor-block
 	echo ""
 	echo "  doctor reports; it does not gate. For a script, use the verb that returns a"
 	echo "  status: 'agentik agents route --check' exits non-zero on a FAIL row."
@@ -138,6 +163,24 @@ install-cli) install_cli "$@" ;;
 doctor)
 	[ $# -eq 0 ] || usage
 	doctor
+	;;
+api)
+	lane_load || usage
+	lane_py api "$@"
+	exit
+	;;
+fanout)
+	# where no wall is proved (design/21 item 13) the lane is reached only to refuse a file that
+	# says on or is refused; off, the verb is what main holds for fanout with no lane
+	lane_load || usage
+	if apilane_walled; then
+		lane_py fanout "$@"
+		exit
+	fi
+	if apilane_wants_start; then
+		lane_py unwalled || exit
+	fi
+	usage
 	;;
 *) usage ;;
 esac
