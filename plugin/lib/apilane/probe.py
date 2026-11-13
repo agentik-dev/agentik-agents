@@ -143,18 +143,19 @@ def _attempt(*, claude, roots, build_argv, build_env, wrap, job, run_dir, reads,
                           run_dir=run_dir, restricted=restricted)
         env = build_env(key=key, run_dir=run_dir, home=roots.home, path=PATH, base_url=url)
         cmd = wrap(argv, read=[job], write=[run_dir], net="loopback", home=roots.home)
-        rc, output = _spawn(cmd, env, job)
+        rc, output = _spawn(cmd, env, job, shard.prompt)
     finally:
         stub.stop()
     return {"key": key, "rc": rc, "output": output, "requests": list(stub.requests)}
 
 
-def _spawn(cmd, env, cwd):
-    proc = subprocess.Popen(cmd, env=env, cwd=cwd, stdin=subprocess.DEVNULL,
+def _spawn(cmd, env, cwd, prompt):
+    """Run it with the prompt on stdin, as a shard is run: the argv carries no prompt."""
+    proc = subprocess.Popen(cmd, env=env, cwd=cwd, stdin=subprocess.PIPE,
                             stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                             start_new_session=True)
     try:
-        out, err = proc.communicate(timeout=TIMEOUT)
+        out, err = proc.communicate(input=prompt.encode(), timeout=TIMEOUT)
         rc = proc.returncode
     except subprocess.TimeoutExpired:
         try:

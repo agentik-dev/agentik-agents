@@ -236,5 +236,230 @@ class PlugTest(Temp):
         self.assertEqual(names, ["api key", "api probe", "api limit", "api wall", "api gates"])
 
 
+# -- the money lines: real modules, the fake CLI, the loopback stub (packet al6, R6) ------------
+
+FAKE = os.path.join(REPO, "tests", "fake-claude")
+SESSION = "sess-e2e"
+SOPS = r"""#!/usr/bin/python3
+import sys
+args = sys.argv[1:]
+if args[:1] == ["encrypt"]:
+    name, _, value = sys.stdin.read().strip().partition(": ")
+    value = value[1:-1].replace("''", "'")
+    sys.stdout.write("%s: ENC[AES256_GCM,data:%s,type:str]\nsops:\n    version: fake\n"
+                     % (name, value.encode().hex()))
+    sys.exit(0)
+if args[:1] == ["decrypt"]:
+    with open(args[-1]) as handle:
+        text = handle.read()
+    print(bytes.fromhex(text.split("data:")[1].split(",")[0]).decode())
+    sys.exit(0)
+sys.exit(3)
+"""
+AGE_KEYGEN = "#!/bin/sh\necho age1madeuprecipient%s\n" % ("q" * 40)
+CHILD = r"""
+import sys
+sys.dont_write_bytecode = True
+sys.path.insert(0, sys.argv[1])
+from apilane import cli, paths
+roots = paths.Roots(*sys.argv[2:6])
+sys.exit(cli.main(["fanout", sys.argv[6], "--yes"], roots=roots))
+"""
+
+
+def made_up(name):
+    """A made-up value, new each run, shaped like no real key."""
+    import secrets
+    return "made-up-%s-%s" % (name, secrets.token_hex(6))
+
+
+def wait_for(cond, limit=60.0):
+    import time
+    end = time.time() + limit
+    while time.time() < end:
+        got = cond()
+        if got:
+            return got
+        time.sleep(0.05)
+    return cond()
+
+
+class Lane(Temp):
+    """A temp home with the lane on, its key stored by a fake sops, the fake CLI copied into a
+    PATH built from nothing, and a job dir outside the home."""
+
+    def setUp(self):
+        super().setUp()
+        if backend() is None:
+            self.skipTest("no wall is proved on this platform: the lane cannot run here")
+        from apilane import key
+        self.bin = os.path.join(self.t, "bin")
+        self.records = os.path.join(self.bin, "fake-records")
+        os.makedirs(self.records)
+        shutil.copy(FAKE, os.path.join(self.bin, "claude"))
+        for name, body in (("sops", SOPS), ("age-keygen", AGE_KEYGEN)):
+            with open(os.path.join(self.bin, name), "w") as fh:
+                fh.write(body)
+        for name in ("claude", "sops", "age-keygen"):
+            os.chmod(os.path.join(self.bin, name), 0o755)
+        self.work = os.path.join(self.t, "work")
+        os.makedirs(self.work)
+        with open(os.path.join(self.work, "a.py"), "w") as fh:
+            fh.write("x = 1\n")
+        self.release = os.path.join(self.records, "release")
+        self.addCleanup(self.let_go)
+        self.write_config("api:\n  enabled: true\n  console_limit_usd: 50\n  max_day_usd: 3\n")
+        self.key = made_up("lane-key")
+        self.env_secrets = {n: made_up(n.lower()) for n in (
+            "CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_AUTH_TOKEN", "GH_TOKEN",
+            "AWS_SECRET_ACCESS_KEY", "NPM_TOKEN", "OPENAI_API_KEY")}
+        self.prompt_secret = made_up("prompt-secret")
+        self.secrets = [self.key] + list(self.env_secrets.values()) + [self.prompt_secret]
+        self.env = dict(self.env_secrets, PATH=self.bin + os.pathsep + "/usr/bin:/bin",
+                        CLAUDE_CODE_SESSION_ID=SESSION,
+                        SOPS_AGE_KEY_FILE=os.path.join(self.t, "age", "keys.txt"))
+        with mock.patch.dict(os.environ, self.env):
+            key.store(self.key, roots=self.roots)
+
+    def let_go(self):
+        with open(self.release, "w"):
+            pass
+
+    def job(self, fid, budget, shards, stub=None):
+        path = os.path.join(self.t, fid + ".json")
+        items = []
+        for label, kind in shards:
+            prompt = "fake-mode: hold\nfake-record: %s\nfake-release: %s\n" % (
+                os.path.join(self.records, label + ".json"), self.release)
+            if stub is not None:
+                prompt += "fake-stub: %s\n" % stub
+            items.append({"label": label, "type": kind,
+                          "prompt": prompt + self.prompt_secret + "\nFind the reader of a.py.\n"})
+        with open(path, "w") as fh:
+            import json
+            json.dump({"id": fid, "budget_usd": budget, "dirs": [self.work], "jobs": 3,
+                       "shards": items}, fh)
+        return path
+
+    def log(self):
+        import json
+        try:
+            with open(os.path.join(self.roots.state, "usage.jsonl")) as fh:
+                return [json.loads(l) for l in fh if l.strip()]
+        except OSError:
+            return []
+
+    def record(self, name):
+        import json
+        with open(os.path.join(self.records, name)) as fh:
+            return json.load(fh)
+
+    def starts(self):
+        try:
+            with open(os.path.join(self.records, "starts.log")) as fh:
+                return fh.read().splitlines()
+        except OSError:
+            return []
+
+    def held(self, labels):
+        return all(os.path.exists(os.path.join(self.records, l + ".json")) for l in labels)
+
+    def hook(self):
+        import json
+        from apilane import hook
+        out = io.StringIO()
+        hook.main("UserPromptSubmit", json.dumps({"session_id": SESSION}), roots=self.roots,
+                  out=out)
+        text = out.getvalue()
+        return json.loads(text)["hookSpecificOutput"]["additionalContext"] if text else ""
+
+
+class EndToEndTest(Lane):
+    SHARDS = (("x1", "explore"), ("x2", "explore"), ("r1", "review"))
+
+    def test_end_to_end(self):
+        import threading
+        from apilane import probe, report, stubapi
+        log = self.log
+
+        class LogStub(stubapi.Stub):
+            seen = []
+
+            def record(self, headers, body, raw):
+                self.seen.append(log())
+                return super().record(headers, body, raw)
+
+        stub = LogStub(reads=[])
+        stub.start()
+        self.addCleanup(stub.stop)
+        job = self.job("e2e-1", 2, self.SHARDS, stub=stub.url)
+        out, err, box = io.StringIO(), io.StringIO(), {}
+
+        def run():
+            box["rc"] = cli.main(["fanout", job, "--yes"], roots=self.roots, stdout=out,
+                                 stderr=err)
+
+        with mock.patch.dict(os.environ, self.env):
+            th = threading.Thread(target=run)
+            th.start()
+            try:
+                held = wait_for(lambda: self.held(l for l, _ in self.SHARDS))
+                want = "api lane: 3 agents running (2 explore, 1 review), $0.00 of $2.00 spent"
+                mid = wait_for(lambda: report.line(SESSION, self.roots) == want and want
+                               ) or report.line(SESSION, self.roots)
+                rows = report.rows(self.roots)
+            finally:
+                self.let_go()
+                th.join(120)
+        self.assertTrue(held, err.getvalue())
+        self.assertFalse(th.is_alive())
+        self.assertEqual(box.get("rc"), 0, err.getvalue())
+        # the probe passed on the fake; its argv has a shard's flags, differing in the
+        # prompt and the ceiling (and the folder it is handed) alone
+        rec = probe.read(self.roots)
+        self.assertTrue(rec and rec["ok"], rec)
+        mine = [n for n in os.listdir(self.records) if n[0].isdigit()]
+        self.assertEqual(len(mine), 1, mine)
+        p, s = self.record(mine[0]), self.record("x1.json")
+        self.assertEqual(p["mode"], "stub")
+        flags = lambda argv: [a for a in argv if a.startswith("--")]
+        self.assertEqual(flags(p["argv"]), flags(s["argv"]))
+        differ = [p["argv"][i - 1] for i in range(len(p["argv"])) if p["argv"][i] != s["argv"][i]]
+        self.assertEqual(differ, ["--max-budget-usd", "--add-dir"])
+        self.assertEqual(p["stdin"], probe.PROMPT)
+        self.assertNotEqual(p["stdin"], s["stdin"])
+        # the fake's first start found the reservation in the log
+        self.assertTrue(stub.seen)
+        first = [l for l in stub.seen[0] if l.get("fanout") == "e2e-1"]
+        self.assertEqual([(l["kind"], l["budget_usd"]) for l in first], [("reserve", 2.0)])
+        # mid-run
+        self.assertEqual(mid, want)
+        self.assertEqual(sorted(r["what"] for r in rows),
+                         ["api explore: x1", "api explore: x2", "api review: r1"])
+        self.assertEqual({(r["parent"], r["lane"], r["state"]) for r in rows},
+                         {(SESSION, "api", "running")})
+        # at the end: three shard lines and one settle
+        kinds = [l["kind"] for l in self.log() if l.get("fanout") == "e2e-1"]
+        self.assertEqual((kinds.count("reserve"), kinds.count("shard"), kinds.count("settle")),
+                         (1, 3, 1), kinds)
+        first, second = self.hook(), self.hook()
+        self.assertEqual(first.count("fan-out e2e-1 ended: 3 ok, 0 failed"), 1, first)
+        self.assertEqual(second, "")
+        # eight planted secrets: in no file under the temp home, in no recorded argv
+        self.assertEqual(len(set(self.secrets)), 8)
+        for root, _dirs, files in os.walk(self.roots.home):
+            for name in files:
+                with open(os.path.join(root, name), "rb") as fh:
+                    body = fh.read()
+                for secret in self.secrets:
+                    self.assertNotIn(secret.encode(), body, os.path.join(root, name))
+        for name in os.listdir(self.records):
+            if name.endswith(".json"):
+                for a in self.record(name)["argv"]:
+                    for secret in self.secrets:
+                        self.assertNotIn(secret, a, name)
+
+
+
 if __name__ == "__main__":
     unittest.main()
