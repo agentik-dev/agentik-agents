@@ -367,7 +367,7 @@ class Plug(unittest.TestCase):
         lane = out.split("  Local lane:\n", 1)[1].split("\n\n", 1)[0]
         self.assertEqual(len(lane.splitlines()), 1, lane)
         self.assertIn("no local lane is set up here", lane)
-        self.assertNotIn("FAIL", out)
+        self.assertNotRegex(out, r"(?m)^ +FAIL ")
         self.write_backends(json.dumps({"tortoise": {"url": "http://127.0.0.1:9911"}}))
         out = self.run_a("doctor").stdout.decode()
         self.assertRegex(out, r"(?m)^      FAIL  router ")

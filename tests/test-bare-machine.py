@@ -106,7 +106,7 @@ class BareMachine(unittest.TestCase):
         self.assertRegex(out, r"(?m)^  python3 +/usr/bin/python3 3\.")
         # nothing set up (ak7 R7): one line under the lane, its check unrun, so no FAIL row
         self.assertRegex(out, r"  Local lane:\n    no local lane is set up here[^\n]*\n\n")
-        self.assertNotIn("FAIL", out)
+        self.assertNotRegex(out, r"(?m)^ +FAIL ")
 
     def test_4_version(self):
         self.assertEqual(self.ok(self.run_tool("--version")).stdout,

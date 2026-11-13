@@ -620,8 +620,10 @@ def _get(url: str, timeout: float = 5.0, method: str = "GET", headers: dict | No
         conn.close()
 
 
-def check() -> int:
-    """Preflight. A probe that fails is UNKNOWN and reported as a failure, never skipped."""
+def check(as_json: bool = False) -> int:
+    """Preflight. A probe that fails is UNKNOWN and reported as a failure, never skipped.
+    as_json: the same probes and exit, printed as one object {"ok", "rows": [{state, what,
+    detail}]} (packet ak7), the doctor read's source."""
     ok = True
     rows = []
 
@@ -690,6 +692,10 @@ def check() -> int:
                               f"concurrency={LOCAL_CONCURRENCY}; strip_reminder={'on' if LOCAL_STRIP_TOKEN_REMINDER else 'OFF'}; "
                               f"backends={', '.join(BACKENDS)}")
     row("ok", "ledger", str(LOG_PATH))
+    if as_json:
+        print(json.dumps({"ok": ok, "rows": [{"state": s, "what": w, "detail": d}
+                                             for s, w, d in rows]}))
+        return 0 if ok else 1
     for state, what, detail in rows:
         print(f"  {state:<5} {what:<16} {detail}")
     counts = {}
@@ -738,12 +744,15 @@ def main() -> int:
     g.add_argument("--serve", action="store_true", help="run the router (foreground)")
     g.add_argument("--check", action="store_true", help="preflight: router, upstream, local backend, model, policy")
     g.add_argument("--version", action="store_true")
+    ap.add_argument("--json", action="store_true", help="with --check: one JSON object")
     a = ap.parse_args()
     if a.version:
         print(VERSION)
         return 0
+    if a.json and not a.check:
+        ap.error("--json goes with --check")
     if a.check:
-        return check()
+        return check(a.json)
     if a.serve:
         return serve()
     ap.print_help()
