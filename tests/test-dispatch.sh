@@ -78,6 +78,11 @@ if "$A" nosuch 2>&1 >/dev/null | grep -q '^usage: agentik agents'; then
 else
   fail=$((fail + 1)); echo "FAIL usage line on stderr"
 fi
+if "$A" nosuch 2>&1 >/dev/null | grep -q -x 'verbs: local status rig route doctor describe install-cli help'; then
+  pass=$((pass + 1))
+else
+  fail=$((fail + 1)); echo "FAIL the usage's verbs line (describe among them, ak7)"
+fi
 # exit codes pass through
 printf '#!/bin/sh\nexit 7\n' > "$D/localrig"
 expect_exit "exit passes through" 7 "$A" rig status
