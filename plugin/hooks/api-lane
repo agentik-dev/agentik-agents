@@ -1,0 +1,22 @@
+#!/bin/sh
+# api-lane: the API lane's hook on SessionStart and UserPromptSubmit (design/21 items 16, 17, 22),
+# the event's name its one argument. Stdin is read whole on every path before the exit, as
+# local-guard does (review F1). Off, or on with no record of this session, it is one sh and no
+# output: the cheap tests in lib/apilane/prefilter.sh never fork, and only when one passes does
+# Python start, once and directly (AGENTIK_PYTHON, else /usr/bin/python3, else PATH's python3,
+# with -I) on lib/apilane/hook.py, which alone decides what to say. Exit 0 always.
+input=$(cat)
+event=${1-}
+apilane_dir=${CLAUDE_PLUGIN_ROOT:-}/lib/apilane
+[ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -r "$apilane_dir/prefilter.sh" ] || exit 0
+. "$apilane_dir/prefilter.sh"
+case $event in
+SessionStart) apilane_wants_start || exit 0 ;;
+UserPromptSubmit) apilane_wants_prompt "$input" || exit 0 ;;
+*) exit 0 ;;
+esac
+py=${AGENTIK_PYTHON:-}
+[ -n "$py" ] && [ -f "$py" ] && [ -x "$py" ] || py=/usr/bin/python3
+[ -f "$py" ] && [ -x "$py" ] || py=$(command -v python3) || exit 0
+printf '%s' "$input" | "$py" -I "$apilane_dir/hook.py" "$event" 2>/dev/null
+exit 0
