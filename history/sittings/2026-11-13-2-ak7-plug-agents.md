@@ -14,8 +14,8 @@
 - [x] act 2, 691630e: N5, the text `doctor` reads a dead plug as a lane, not as none.
 - [x] act 3, 9676923: R1-F2, a derived key takes the env source of what feeds it (N1 with it).
 - [x] act 4, 30d04f2: R1-F3, `backends.default.*`'s line names a backend.
-- [x] act 5: NICE rows n10 to n14 (R1-F4, N2, N3, N4, N7); N1, N5, N6 fixed, so not filed.
-- [ ] act 6: main merged after al0, al0's notes filed, 1.7.0 last under `plugin/`.
+- [x] act 5, 78977d4: NICE rows n10 to n14 (R1-F4, N2, N3, N4, N7); N1, N5, N6 fixed, so not filed.
+- [x] act 6: main merged at 4df9bab (main 2c18f11); al0's review notes n15 to n23; 1.7.0 next, alone.
 - [ ] act 7: the gate, once.
 
 ## Decided (reversible, logged)
@@ -24,10 +24,11 @@
 - `lane` prints `yes` or `no`; the text `doctor` takes only `no` as no lane.
 - A feed is a variable of the tool's three prefixes or `AGENTIK_*`; `HOME` and `XDG_*` are this machine's, so a default is computed with them.
 - R1-F3 keeps kind `command`, spelled with `BACKEND`, the note saying it takes a backend's name: `fixed` would say it cannot be changed, and it can.
+- The merge's byte compare moves its reference from c0193bd to 78977d4, ak7's last commit before the merge: ak7 adds table lines.
 - The dispatcher prints §2's answer where the plug printed nothing and did not exit 2 (its usage).
 
 ## Handover
 - None yet.
 
 ## Next act
-- Act 6: wait for `Merge al0-fanout-stub` on main, then merge.
+- 1.7.0 alone, then act 7, the gate.
