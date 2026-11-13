@@ -161,17 +161,34 @@ def bare_environ():
     return {k: v for k, v in os.environ.items() if not k.startswith(FEEDS)}
 
 
-def plain(value):
-    """A value as JSON holds it: a number JSON has no word for (nan, inf) is its text."""
+def plain_one(value):
     if isinstance(value, float) and not math.isfinite(value):
         return repr(value)
     if isinstance(value, pathlib.PurePath):
         return str(value)
     if isinstance(value, (set, frozenset)):
         return sorted(value)
-    if isinstance(value, tuple):
+    if isinstance(value, (tuple, list)):
         return list(value)
+    if isinstance(value, dict):
+        return dict(value)
     return value
+
+
+def plain(value):
+    """A value as JSON holds it: a number JSON has no word for (nan, inf) is its text, at any
+    depth of a list or a mapping (review 2, R2-F1). It walks a copy with a stack, never by
+    recursion, so a value nested as deep as json.loads takes cannot fail the read."""
+    top = plain_one(value)
+    stack = [top]
+    while stack:
+        here = stack.pop()
+        if not isinstance(here, (list, dict)):
+            continue
+        for at in (range(len(here)) if isinstance(here, list) else list(here)):
+            here[at] = plain_one(here[at])
+            stack.append(here[at])
+    return top
 
 
 def type_of(value, name):

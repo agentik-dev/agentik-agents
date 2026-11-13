@@ -575,6 +575,29 @@ class Plug(unittest.TestCase):
         self.assertEqual(by["backends.default.model"]["value"], "slowpoke")
         self.assertEqual(by["backends.default.url"]["source"]["layer"], "rig")
 
+    # review 2, R2-F1: a non-finite number at any depth of a field is its text, and the read
+    # stays one strict object, ok true
+    def test_15_nested_non_finite(self):
+        deep = "[" * 900 + "NaN" + "]" * 900
+        self.write_backends('{"x":{"url":"http://127.0.0.1:9","model":[NaN, 1],"auth":"%s",'
+                            '"fold_system":%s}}' % (WORD, deep))
+        before = self.snapshot()
+        run = self.run_a("describe", "config", "--json")
+        doc = self.strict(run)
+        self.assertIs(doc["ok"], True)
+        self.assertEqual(doc["warnings"], [])
+        by = self.by_key(doc)
+        self.assertEqual(by["backends.x.model"]["value"], ["nan", 1])
+        self.assertEqual(by["backends.x.url"]["value"], "http://127.0.0.1:9")
+        self.assertNotIn(WORD.encode(), run.stdout + run.stderr)
+        run = self.run_a("describe", "config", "--json", "backends.x.model",
+                         AGENTROUTE_BACKENDS='{"x":{"model":{"a":Infinity,"b":[-Infinity]}}}')
+        doc = self.strict(run)
+        self.assertEqual(doc["settings"][0]["value"], {"a": "inf", "b": ["-inf"]})
+        plug = load_plug()
+        self.assertEqual(plug.plain((float("nan"), {"k": [float("inf")]})), ["nan", {"k": ["inf"]}])
+        self.unchanged(before)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=1)
