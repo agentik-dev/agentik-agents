@@ -129,6 +129,8 @@ TEXTS = {
     "step.gates": "  - Add {config} as a line of {gates}: a guard against a casual edit.",
     "step.key": "  - At a terminal: agentik agents api key set",
     "step.probe": "  - agentik agents api probe",
+    "step.old": "  - rm {path}   (a claude-fanout on PATH that is not this tool's forward)",
+    "doctor.old": "{path}, not this tool's forward: rm {path}",
     "status.head": "api lane: on, {running} agent{s} running",
     "limit.stated": "Console limit: {limit} by your word in the file",
     "limit.none": "Console limit: none stated, and no fan-out runs until \"console_limit_usd\" "

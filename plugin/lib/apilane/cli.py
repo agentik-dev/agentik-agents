@@ -297,6 +297,9 @@ def status(roots, lane, parts, *, as_json=False):
         steps.append(messages.say("step.key"))
     if not probe_ok:
         steps.append(messages.say("step.probe"))
+    old = old_forward()
+    if old:
+        steps.append(messages.say("step.old", path=old))
     if as_json:
         return json.dumps({"schema": "agentik.api.status/1", "enabled": lane.enabled,
                            "config": roots.config, "state": roots.state, "store": roots.store,
@@ -337,6 +340,17 @@ def status(roots, lane, parts, *, as_json=False):
     return "\n".join(out)
 
 
+def old_forward(path=None):
+    """A claude-fanout on PATH that is not this tool's forward (packet al6, R4), or None."""
+    import shutil
+    found = shutil.which("claude-fanout", path=path)
+    if not found:
+        return None
+    mine = os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(__file__))),
+                        "claude-fanout")
+    return None if os.path.realpath(found) == os.path.realpath(mine) else found
+
+
 def doctor_block(roots, lane, parts):
     """The lane's block in `doctor`, while the file says on. It reads files and PATH only."""
     from apilane import messages
@@ -369,7 +383,9 @@ def doctor_block(roots, lane, parts):
         row("key", lambda: "set" if parts.key_present(roots) else "not set: agentik agents api key set"),
         row("probe", probe),
         messages.say("doctor.row", name="limit", value=limit),
-    ])
+    ] + ([messages.say("doctor.row", name="old name",
+                       value=messages.say("doctor.old", path=old_forward()))]
+         if old_forward() else []))
 
 
 if __name__ == "__main__":

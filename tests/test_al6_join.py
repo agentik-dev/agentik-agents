@@ -108,14 +108,10 @@ class ForwardTest(Temp):
         try:
             got = subprocess.run(self.argv, stdout=subprocess.PIPE, stderr=slave, text=True,
                                  stdin=subprocess.DEVNULL)
-            os.close(slave)
-            slave = None
+            import select
             seen = b""
-            while True:
-                try:
-                    chunk = os.read(master, 4096)
-                except OSError:
-                    break
+            while select.select([master], [], [], 1.0)[0]:
+                chunk = os.read(master, 4096)
                 if not chunk:
                     break
                 seen += chunk
@@ -125,6 +121,14 @@ class ForwardTest(Temp):
             os.close(master)
         self.assertEqual(got.stdout, self.want)
         self.assertEqual(seen.decode().replace("\r\n", "\n"), NOTE + "\n")
+
+
+    def test_status_names_an_old_one(self):
+        self.assertEqual(cli.old_forward(path=self.bin), os.path.join(self.bin, "claude-fanout"))
+        os.unlink(os.path.join(self.bin, "claude-fanout"))
+        os.symlink(os.path.join(LIB, "claude-fanout"), os.path.join(self.bin, "claude-fanout"))
+        self.assertIsNone(cli.old_forward(path=self.bin))
+        self.assertIsNone(cli.old_forward(path=os.path.join(self.t, "none")))
 
 
 class InstallTest(Temp):
