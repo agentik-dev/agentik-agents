@@ -78,3 +78,5 @@ design/packets/a-s18-plugin.md: sibling
 plugin/lib/apilane/*: renamed
 # al4's packet quotes the owner naming that old tool.
 design/packets/al4-report.md: renamed
+# ak7's first packet commit names the ledger file and the README renderer plugin.
+design/packets/ak7-plug-agents.md: sibling

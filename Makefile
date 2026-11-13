@@ -117,11 +117,11 @@ test: ## Run every test suite (stub-driven, they spend nothing), then the 3.9 fl
 	for t in tests/test-dispatch.sh tests/test-rig.sh tests/test-readme.sh; do \
 	  printf '=== %s ===\n' "$$t"; bash "$$t" || fail=1; \
 	done; \
-	for t in tests/test-route.py tests/test-status.py tests/test-hygiene.py tests/test-bare-machine.py tests/test-descriptions.py; do \
+	for t in tests/test-route.py tests/test-status.py tests/test-plug.py tests/test-hygiene.py tests/test-bare-machine.py tests/test-descriptions.py; do \
 	  printf '=== %s ===\n' "$$t"; $(PY) "$$t" || fail=1; \
 	done; \
 	if $(FLOOR) -c '' 2>/dev/null; then \
-	  for t in tests/test-route.py tests/test-status.py; do \
+	  for t in tests/test-route.py tests/test-status.py tests/test-plug.py; do \
 	    printf '=== %s (the 3.9 floor) ===\n' "$$t"; $(FLOOR) "$$t" || fail=1; \
 	  done; \
 	  printf '=== %s (the 3.9 floor) ===\n' tests/test-rig.sh; \

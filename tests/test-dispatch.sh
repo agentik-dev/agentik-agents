@@ -6,7 +6,9 @@
 set -u
 REPO="$(cd "$(dirname "$0")/.." && pwd -P)"
 D="$(mktemp -d)"
-trap 'rm -r "${D:?}"' EXIT
+# F holds the fanout cases' PATH folders, outside the dispatcher's own folder D (packet al0)
+F="$(mktemp -d)"
+trap 'rm -r "${D:?}" "${F:?}"' EXIT
 cp "$REPO/plugin/lib/agentik-agents" "$D/"
 # the version is plugin.json's, the one pin: a frozen tree holds a copy beside the dispatcher (a-s18)
 cp "$REPO/plugin/.claude-plugin/plugin.json" "$D/plugin.json"
@@ -101,6 +103,83 @@ if "$A" nosuch 2>&1 >/dev/null | grep -q '^usage: agentik agents'; then
   pass=$((pass + 1))
 else
   fail=$((fail + 1)); echo "FAIL usage line on stderr"
+fi
+if "$A" nosuch 2>&1 >/dev/null | grep -q -x 'verbs: local status rig route doctor describe install-cli help'; then
+  pass=$((pass + 1))
+else
+  fail=$((fail + 1)); echo "FAIL the usage's verbs line (describe among them, ak7)"
+fi
+
+# fanout (packet al0): a stub verb that hands the call to the claude-fanout on PATH, unchanged
+# but for each --yes before a --; with none on PATH, or one that resolves inside the dispatcher's
+# own folder, exit 2 and nothing run; its help alone, as the only argument, runs nothing
+mkdir "$F/stub" "$F/none" "$F/own"
+printf '#!/bin/sh\necho "argc=$#"; for a; do printf "[%%s]\\n" "$a"; done\nexit 7\n' > "$F/stub/claude-fanout"
+chmod +x "$F/stub/claude-fanout"
+printf '#!/bin/sh\n: > "%s/ran"\nexit 9\n' "$F" > "$D/own-forward"
+chmod +x "$D/own-forward"
+ln -s "$D/own-forward" "$F/own/claude-fanout"
+NO_TOOL='agentik agents fanout: the API lane is not in this version yet, and no claude-fanout is on PATH to hand the call to.'
+OWN='agentik agents fanout: the claude-fanout on PATH is this tool'"'"'s own forward, and the API lane is not in this version yet.'
+fan_help() {
+  printf '%s\n' 'usage: agentik agents fanout [--yes] ARGS...' \
+    'For now it hands ARGS to the claude-fanout on PATH, each --yes before a -- dropped.' \
+    "The API lane's own fan-out takes this name in a later version." \
+    "claude-fanout on PATH: $1"
+}
+# fan NAME OUT ERR CODE DIR ARGS...: `A fanout ARGS` with DIR first on PATH prints exactly OUT on
+# stdout and ERR on stderr, and exits CODE
+fan() {
+  local name=$1 wout=$2 werr=$3 wcode=$4 dir=$5 out err code
+  shift 5
+  out="$(PATH="$dir:/usr/bin:/bin" "$A" fanout "$@" 2>"$F/err")"; code=$?
+  err="$(cat "$F/err")"
+  if [ "$out" = "$wout" ] && [ "$err" = "$werr" ] && [ "$code" = "$wcode" ]; then
+    pass=$((pass + 1))
+  else
+    fail=$((fail + 1))
+    printf 'FAIL fanout %s: exit %s stdout [%s] stderr [%s], want exit %s [%s] [%s]\n' \
+      "$name" "$code" "$out" "$err" "$wcode" "$wout" "$werr"
+  fi
+}
+fan "args as given" "$(printf 'argc=5\n[--budget-usd]\n[2]\n[a b]\n[]\n[-x]')" "" 7 "$F/stub" \
+  --budget-usd 2 'a b' '' -x
+fan "--yes before --" "$(printf 'argc=5\n[--budget-usd]\n[2]\n[p]\n[--]\n[--yes]')" "" 7 "$F/stub" \
+  --yes --budget-usd 2 p --yes -- --yes
+fan "--yes alone" "argc=0" "" 7 "$F/stub" --yes
+fan "no args" "argc=0" "" 7 "$F/stub"
+fan "--yes= kept" "$(printf 'argc=2\n[--yes=1]\n[-yes]')" "" 7 "$F/stub" --yes=1 -yes
+fan "--help not alone" "$(printf 'argc=2\n[--help]\n[x]')" "" 7 "$F/stub" --help x
+fan "none on PATH" "" "$NO_TOOL" 2 "$F/none" x
+fan "own forward" "" "$OWN" 2 "$F/own" x
+if [ ! -e "$F/ran" ]; then pass=$((pass + 1)); else fail=$((fail + 1)); echo "FAIL fanout: the own forward ran"; fi
+fan "--help" "$(fan_help "$F/stub/claude-fanout")" "" 0 "$F/stub" --help
+fan "-h" "$(fan_help "$F/stub/claude-fanout")" "" 0 "$F/stub" -h
+fan "--help, none on PATH" "$(fan_help none)" "" 0 "$F/none" --help
+# R6: the table and every usage line stay byte for byte what they were at the pin, stdout,
+# stderr and exit; skipped where the pin's object is not in this clone. The pin was c0193bd; it
+# moved, by ak7-plug-agents's merge of main, to that row's last commit before the merge, whose
+# table holds its `doctor [--json]` and `describe` lines and whose verbs line names `describe`
+PIN=78977d4
+if git -C "$REPO" cat-file -e "$PIN:plugin/lib/agentik-agents" 2>/dev/null; then
+  mkdir "$F/pin" && git -C "$REPO" show "$PIN:plugin/lib/agentik-agents" > "$F/pin/agentik-agents"
+  chmod +x "$F/pin/agentik-agents"
+  for c in --help help "" nosuchverb fanout; do
+    set -- "$c"; [ -n "$c" ] || set --
+    for w in pin now; do
+      if [ "$w" = pin ]; then x="$F/pin/agentik-agents"; else x="$A"; fi
+      PATH="$F/none:/usr/bin:/bin" "$x" "$@" > "$F/$w.out" 2> "$F/$w.err"; echo "$?" > "$F/$w.code"
+    done
+    # `fanout` alone is the verb now: only its exit code and empty stdout are the pin's
+    if [ "$c" = fanout ]; then
+      cmp -s "$F/pin.code" "$F/now.code" && [ ! -s "$F/now.out" ] && ok=1 || ok=
+    else
+      cmp -s "$F/pin.out" "$F/now.out" && cmp -s "$F/pin.err" "$F/now.err" && cmp -s "$F/pin.code" "$F/now.code" && ok=1 || ok=
+    fi
+    if [ -n "$ok" ]; then pass=$((pass + 1)); else fail=$((fail + 1)); printf 'FAIL [%s] differs from %s\n' "$c" "$PIN"; fi
+  done
+else
+  echo "skip: R6's byte compare, $PIN is not in this clone"
 fi
 # exit codes pass through
 printf '#!/bin/sh\nexit 7\n' > "$D/localrig"
