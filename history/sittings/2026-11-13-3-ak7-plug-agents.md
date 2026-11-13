@@ -11,7 +11,7 @@
 
 ## Done-ness
 - [x] act 1: R2-F1, a non-finite number at any depth of a value is its text (test_15).
-- [ ] act 2: R2-F2, a backend name outside `[a-z0-9_-]` is left out with one warning.
+- [x] act 2: R2-F2, a backend name outside `[a-z0-9_-]` is left out with one warning (test_16).
 - [ ] act 3: R2-F3, backends read from `AGENTROUTE_BACKENDS` print its launch line.
 - [ ] act 4: R2-F4, a field the router fills takes its feed's source and rows.
 - [ ] act 5: review 2's NICE notes N1 to N10 as rows.
@@ -20,9 +20,10 @@
 
 ## Decided (reversible, logged)
 - R2-F1: `plain()` walks a copy of lists and mappings with a stack, not by recursion, so a value nested as deep as `json.loads` takes cannot fail the read.
+- R2-F2: the review's first option. The warning is reason `unknown`, key `backends.<name>` as written, `path` the file or null for the variable; no stderr line. A slug would make a key no file holds.
 
 ## Handover
 - None yet.
 
 ## Next act
-- Act 2.
+- Act 3.

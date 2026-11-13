@@ -220,6 +220,7 @@ def secret(key):
 
 # --------------------------------------------------------------------------- the readers
 DIGITS = re.compile(r"[0-9]+")   # what sh takes as a number: str.isdigit also takes "\u00b2"
+SEGMENT = re.compile(r"[a-z0-9_-]+\Z")   # one segment of a key (the contract's \u00a74)
 
 
 def exists(path):
@@ -431,6 +432,12 @@ def read_backends(row, route, state):
         origins["default"] = "router"
     for name in list(found):
         if not isinstance(found[name], dict):
+            del found[name]
+        elif not SEGMENT.match(name):
+            # a key is [a-z0-9_-] segments (the contract's §4), so the read leaves out a backend
+            # whose name is not one, and says so once; the router still takes it (review 2, R2-F2)
+            state["warnings"].append({"key": "backends.%s" % name, "reason": "unknown",
+                                      "value": None, "path": path, "line": None})
             del found[name]
     if "default" not in found:
         found["default"] = {"url": url["value"], "model": model["value"], "auth": ""}

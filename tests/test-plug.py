@@ -598,6 +598,30 @@ class Plug(unittest.TestCase):
         self.assertEqual(plug.plain((float("nan"), {"k": [float("inf")]})), ["nan", {"k": ["inf"]}])
         self.unchanged(before)
 
+    # review 2, R2-F2: every key is a dotted path of [a-z0-9_-] segments; a backend whose name
+    # is not is left out with one warning that names it
+    def test_16_backend_name_alphabet(self):
+        segment = re.compile(r"[a-z0-9_-]+\Z")
+        names = {"Big Name": {}, "": {}, "a.b": {}, "ok-1_x": {}}
+        for where in ("file", "env"):
+            with self.subTest(where=where):
+                extra = {}
+                if where == "file":
+                    self.write_backends(json.dumps(names))
+                else:
+                    extra = {"AGENTROUTE_BACKENDS": json.dumps(names)}
+                doc = self.config_read(**extra)
+                for s in doc["settings"]:
+                    self.assertTrue(all(segment.match(p) for p in s["key"].split(".")), s["key"])
+                by = self.by_key(doc)
+                self.assertIn("backends.ok-1_x.url", by)
+                warned = sorted(w["key"] for w in doc["warnings"])
+                self.assertEqual(warned, ["backends.", "backends.Big Name", "backends.a.b"])
+                for w in doc["warnings"]:
+                    self.assertEqual(w["reason"], "unknown")
+                    self.assertEqual(w["path"], self.backends if where == "file" else None)
+                    self.assertIsNone(w["line"])
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=1)
