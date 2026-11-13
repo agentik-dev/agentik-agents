@@ -10,7 +10,7 @@
 
 ## Done-ness
 - [x] act 0: this packet and this charter (the scan reads no old name under `design/`, so no allow row).
-- [ ] act 1: the failing tests (dispatch and bare machine), red at the pin.
+- [x] act 1: the failing tests, red at the pin: test-dispatch 50 passed, 11 failed (every fanout case); bare machine test_13 red (exit 2, the usage lines), test_14 (R8) green, as the pin holds.
 - [ ] act 2: the verb, the head comment, plugin 1.6.4.
 - [ ] act 3: `make check` once through the gate queue.
 
@@ -19,6 +19,6 @@
 ## Handover
 
 ## Next act
-act 1.
+act 2.
 
 ## Exit

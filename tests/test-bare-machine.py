@@ -60,17 +60,17 @@ class BareMachine(unittest.TestCase):
         cls.sessions = os.path.join(cls.t, ".local", "state", "agentik-session", "sessions")
 
     @classmethod
-    def env(cls, home=None):
-        return {"HOME": home or cls.t, "PATH": "/usr/bin:/bin", "CLAUDE_PLUGIN_ROOT": cls.plugin,
+    def env(cls, home=None, path="/usr/bin:/bin"):
+        return {"HOME": home or cls.t, "PATH": path, "CLAUDE_PLUGIN_ROOT": cls.plugin,
                 "CLAUDE_PLUGIN_DATA": cls.data}
 
-    def run_tool(self, *argv, exe=None, home=None, net=False):
+    def run_tool(self, *argv, exe=None, home=None, net=False, path="/usr/bin:/bin"):
         cmd = [exe or os.path.join(self.plugin, "bin", "agentik-agents"), *argv]
         if net:
             if not self.sandboxed:
                 self.skipTest("sandbox-exec cannot deny the network here; the probe stays unrun")
             cmd = SANDBOX + cmd
-        run = subprocess.run(cmd, cwd=self.cwd, env=self.env(home), capture_output=True,
+        run = subprocess.run(cmd, cwd=self.cwd, env=self.env(home, path), capture_output=True,
                              text=True, timeout=120)
         self.assertNotIn("decoy", run.stdout + run.stderr)
         return run
@@ -300,6 +300,76 @@ class BareMachine(unittest.TestCase):
         launcher = os.path.join(a, "bin", "agentik-agents")
         self.assertEqual(self.ok(self.run_tool("--version", exe=launcher, home=home)).stdout,
                          "agentik-agents %s\n" % self.version)
+
+    def test_13_fanout_through_the_installed_launcher(self):
+        # packet al0: the verb hands the call to the claude-fanout on PATH, each --yes before a --
+        # dropped; none on PATH, or one inside the frozen tree, is exit 2 with nothing run
+        home = os.path.join(self.t, "home-fanout")
+        prefix = os.path.join(home, "P")
+        os.makedirs(home)
+        self.ok(self.run_tool("install-cli", "--prefix", prefix, home=home))
+        launcher = os.path.join(prefix, "bin", "agentik-agents")
+        share = os.path.join(prefix, "share", "agentik-agents")
+        trees = [n for n in os.listdir(share) if not n.startswith(".")]
+        self.assertEqual(len(trees), 1, trees)
+        stub, none, own = (os.path.join(home, n) for n in ("stub", "none", "own"))
+        for folder in (stub, none, own):
+            os.makedirs(folder)
+        ran = os.path.join(home, "ran")
+        forward = os.path.join(share, trees[0], "own-forward")
+        for path, text in ((os.path.join(stub, "claude-fanout"),
+                            '#!/bin/sh\necho "argc=$#"; for a; do printf "[%s]\\n" "$a"; done\n'
+                            'exit 7\n'),
+                           (forward, '#!/bin/sh\n: > "%s"\nexit 9\n' % ran)):
+            with open(path, "w", encoding="utf-8") as handle:
+                handle.write(text)
+            os.chmod(path, 0o755)
+        os.symlink(forward, os.path.join(own, "claude-fanout"))
+
+        def fan(folder, *argv):
+            run = self.run_tool("fanout", *argv, exe=launcher, home=home,
+                                path=folder + ":/usr/bin:/bin")
+            return run.returncode, run.stdout, run.stderr
+
+        def helped(found):
+            return ("usage: agentik agents fanout [--yes] ARGS...\n"
+                    "For now it hands ARGS to the claude-fanout on PATH, each --yes before a -- "
+                    "dropped.\nThe API lane's own fan-out takes this name in a later version.\n"
+                    "claude-fanout on PATH: %s\n" % found)
+
+        self.assertEqual(fan(stub, "--budget-usd", "2", "a b", "", "-x"),
+                         (7, "argc=5\n[--budget-usd]\n[2]\n[a b]\n[]\n[-x]\n", ""))
+        self.assertEqual(fan(stub, "--yes", "--budget-usd", "2", "p", "--yes", "--", "--yes"),
+                         (7, "argc=5\n[--budget-usd]\n[2]\n[p]\n[--]\n[--yes]\n", ""))
+        self.assertEqual(fan(none, "x"), (2, "", "agentik agents fanout: the API lane is not in "
+                                          "this version yet, and no claude-fanout is on PATH to "
+                                          "hand the call to.\n"))
+        self.assertEqual(fan(own, "x"), (2, "", "agentik agents fanout: the claude-fanout on PATH "
+                                         "is this tool's own forward, and the API lane is not in "
+                                         "this version yet.\n"))
+        self.assertFalse(os.path.exists(ran))
+        found = os.path.join(stub, "claude-fanout")
+        self.assertEqual(fan(stub, "--help"), (0, helped(found), ""))
+        self.assertEqual(fan(stub, "-h"), (0, helped(found), ""))
+        self.assertEqual(fan(none, "--help"), (0, helped("none"), ""))
+
+    def test_14_install_cli_keeps_a_claude_fanout_link(self):
+        # packet al0 R8: install-cli leaves PREFIX/bin/claude-fanout, a link to a file outside the
+        # tree, where it points
+        home = os.path.join(self.t, "home-fanout-link")
+        prefix = os.path.join(home, "P")
+        bindir = os.path.join(prefix, "bin")
+        os.makedirs(bindir)
+        os.makedirs(os.path.join(home, "elsewhere"))
+        target = os.path.join(home, "elsewhere", "claude-fanout")
+        with open(target, "w", encoding="utf-8") as handle:
+            handle.write("#!/bin/sh\nexit 7\n")
+        os.chmod(target, 0o755)
+        link = os.path.join(bindir, "claude-fanout")
+        os.symlink(target, link)
+        self.ok(self.run_tool("install-cli", "--prefix", prefix, home=home))
+        self.assertTrue(os.path.islink(link), link)
+        self.assertEqual(os.readlink(link), target)
 
 
 if __name__ == "__main__":
