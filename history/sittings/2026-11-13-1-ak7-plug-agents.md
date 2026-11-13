@@ -7,6 +7,7 @@
 | pin | worktree `.claude/worktrees/ak7-plug-agents`, branch `ak7-plug-agents`, off main c0193bd (plugin 1.6.3) |
 | window | builder, one sitting, spawned by a hq sitting of 2026-11-13 |
 | agents | none |
+| exit | done: every ruling built; gate 20261113-090602-1513 exit 0 on 66385fb; record handed to the hq |
 
 ## Done-ness
 - [x] act 0, 252d505: the packet; this charter.
@@ -15,7 +16,7 @@
 - [x] act 3, efc795c: NICE_TO_HAVE n7 to n9.
 - [x] act 4, 52ad9a9: plugin 1.7.0, alone.
 - [x] act 5: gate 20261113-084919-1503 exit 2 in 1 min on 52ad9a9, red at `doclint` only: the packet over 9 KB and out of shape, this charter out of shape.
-- [ ] act 6: the packet cut to the ceiling in the repo's six sections, this charter in shape; the gate again.
+- [x] act 6, 66385fb: the packet cut to the ceiling in the repo's six sections, this charter in shape; gate 20261113-090602-1513 exit 0 in 1 min.
 
 ## Decided (reversible, logged)
 - Computed defaults are computed from agentroute's own assignments (`env` giving its default); shell defaults expand `$HOME` and nested `${...:-...}`; an empty one is null.
@@ -27,4 +28,4 @@
 - `tests/test-bare-machine.py` `test_3_doctor` changed: R7 removes the `FAIL router` row it pinned.
 
 ## Next act
-- The gate on the act 6 commit; then the hq record.
+- None in this row: review by the hq, then its landing (1.7.0).
