@@ -722,8 +722,10 @@ def render_text(table: dict, args) -> str:
 
 
 def render_json(table: dict, indent) -> str:
-    return json.dumps({k: v for k, v in table.items() if not k.startswith("_")}, indent=indent,
-                      allow_nan=False)
+    # the plug contract §6 (packet ak7): the schema and ok first, every other key as it was
+    doc = {"schema": "agentik.agents.sessions/1", "ok": True}
+    doc.update((k, v) for k, v in table.items() if not k.startswith("_"))
+    return json.dumps(doc, indent=indent, allow_nan=False)
 
 
 def positive_int(s: str, top: int = 10 ** 9) -> int:

@@ -20,7 +20,7 @@ here=$(CDPATH= cd -P -- "$(dirname -- "$self")" >/dev/null && pwd -P) || exit 2
 
 usage() {
 	echo "usage: agentik agents <verb> [args...] | agentik agents --help | --version" >&2
-	echo "verbs: local status rig route doctor install-cli help" >&2
+	echo "verbs: local status rig route doctor describe install-cli help" >&2
 	exit 2
 }
 
@@ -33,7 +33,10 @@ usage: agentik agents <verb> [args...]
   status ...          claude-agents status ...
   rig ...             localrig ...
   route ...           agentroute ...
-  doctor              each tool on PATH, python3, the local lane's check
+  doctor [--json]     each tool on PATH, python3, the local lane's check
+  describe --json     this tool, its verbs and its reads, as JSON (agents_plug.py)
+  describe config --json [KEY]
+                      its settings, or KEY's, with each one's value, default and source
   install-cli [--prefix P]
                       freeze this lib/, write the launcher, the agentik door and
                       the old names' links (agents_install.py, under python3)
@@ -58,16 +61,44 @@ version() {
 	echo 0.0.0-unknown
 }
 
-# install-cli under the launchers' interpreter: AGENTIK_PYTHON, else /usr/bin/python3, else
-# PATH's python3; none is exit 3 (GUIDE section 10).
-install_cli() {
+# The launchers' interpreter, for install-cli and the plug: AGENTIK_PYTHON, else
+# /usr/bin/python3, else PATH's python3; none is exit 3 (GUIDE section 10).
+pick_py() {
 	py=${AGENTIK_PYTHON:-/usr/bin/python3}
 	[ -f "$py" ] && [ -x "$py" ] || py=$(command -v python3) || {
 		echo "agentik-agents: no python3, at /usr/bin/python3 or on PATH" >&2
-		exit 3
+		return 3
 	}
+}
+
+install_cli() {
+	pick_py || exit 3
 	exec "$py" -I -X pycache_prefix="${XDG_CACHE_HOME:-$HOME/.cache}/agentik/pycache" \
 		"$here/agents_install.py" "$@"
+}
+
+# The plug's reads (packet ak7): describe --json, the config read, doctor --json, and `lane`,
+# the one function that says whether a local lane is set up here (exit 0 yes, 1 no). The
+# version goes first; the verb's own words follow it unchanged.
+plug() {
+	[ -r "$here/agents_plug.py" ] || return 3
+	pick_py || return 3
+	"$py" -I -X pycache_prefix="${XDG_CACHE_HOME:-$HOME/.cache}/agentik/pycache" \
+		"$here/agents_plug.py" "$(version)" "$@"
+}
+
+# A read through the plug: its one line, or, where it printed nothing (the script gone, no
+# python3, a fault before its own guard), the contract's section 2 answer and exit 2 (review 1,
+# R1-F1 and N6). Exit 2 with nothing printed is the plug's usage, left as it is.
+plug_read() {
+	schema=$1 && shift
+	answer=$(plug "$@") && rc=0 || rc=$?
+	if [ -n "$answer" ] || [ "$rc" -eq 2 ]; then
+		[ -z "$answer" ] || printf '%s\n' "$answer"
+		exit "$rc"
+	fi
+	printf '{"schema": "agentik.%s/1", "ok": false, "tool": "agents", "error": {"code": "unreadable", "message": "agents_plug.py gave no answer (exit %s): it is missing, or no python3 runs it", "remedy": "/agents:install-cli"}}\n' "$schema" "$rc"
+	exit 2
 }
 
 # The interpreter row (portfolio entry 26): PATH's python3, its version against the floor
@@ -111,7 +142,14 @@ doctor() {
 	printf '  %-18s %s\n' python3 "$(python_row)"
 	echo ""
 	echo "  Local lane:"
-	"$here/agentroute" --check 2>&1 | sed 's/^/    /'
+	# no lane set up (no backends file, no AGENTROUTE_* variable, nothing on the router's
+	# address): one line, and nothing is asked of the upstream; a plug that cannot answer, or
+	# dies (its exit 1 is no "no"), leaves the check as it was (review 1, N5)
+	if [ "$(plug lane 2>/dev/null)" = no ]; then
+		echo "    no local lane is set up here, so the router, the upstream and the backends were not asked"
+	else
+		"$here/agentroute" --check 2>&1 | sed 's/^/    /'
+	fi
 	echo ""
 	echo "  doctor reports; it does not gate. For a script, use the verb that returns a"
 	echo "  status: 'agentik agents route --check' exits non-zero on a FAIL row."
@@ -168,14 +206,31 @@ help | -h | --help)
 	exit 0
 	;;
 local) run claude-local "$@" ;;
-status) run claude-agents status "$@" ;;
+status)
+	# a read writes nothing outside the cache folder: Apple's python3 would put its bytecode
+	# under ~/Library/Caches (ak7 R8)
+	[ -n "${PYTHONPYCACHEPREFIX:-}" ] || {
+		PYTHONPYCACHEPREFIX="${XDG_CACHE_HOME:-$HOME/.cache}/agentik/pycache"
+		export PYTHONPYCACHEPREFIX
+	}
+	run claude-agents status "$@"
+	;;
+describe)
+	case ${1-} in
+	config) plug_read config describe "$@" ;;
+	*) plug_read describe describe "$@" ;;
+	esac
+	;;
 rig) run localrig "$@" ;;
 route) run agentroute "$@" ;;
 install-cli) install_cli "$@" ;;
 fanout) fanout "$@" ;;
 doctor)
-	[ $# -eq 0 ] || usage
-	doctor
+	case $#:${1-} in
+	0:) doctor ;;
+	1:--json) plug_read doctor doctor --json ;;
+	*) usage ;;
+	esac
 	;;
 *) usage ;;
 esac

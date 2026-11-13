@@ -104,9 +104,9 @@ class BareMachine(unittest.TestCase):
         self.assertRegex(out, r"(?m)^  claude +NOT ON PATH \(the local lane runs it\)$")
         self.assertIn("/agents:install-cli", out)
         self.assertRegex(out, r"(?m)^  python3 +/usr/bin/python3 3\.")
-        self.assertIn("  Local lane:", out)
-        self.assertRegex(out, r"(?m)^      FAIL  router ")
-        self.assertRegex(out, r"(?m)^      FAIL  backend default ")
+        # nothing set up (ak7 R7): one line under the lane, its check unrun, so no FAIL row
+        self.assertRegex(out, r"  Local lane:\n    no local lane is set up here[^\n]*\n\n")
+        self.assertNotRegex(out, r"(?m)^ +FAIL ")
 
     def test_4_version(self):
         self.assertEqual(self.ok(self.run_tool("--version")).stdout,

@@ -80,6 +80,11 @@ if "$A" nosuch 2>&1 >/dev/null | grep -q '^usage: agentik agents'; then
 else
   fail=$((fail + 1)); echo "FAIL usage line on stderr"
 fi
+if "$A" nosuch 2>&1 >/dev/null | grep -q -x 'verbs: local status rig route doctor describe install-cli help'; then
+  pass=$((pass + 1))
+else
+  fail=$((fail + 1)); echo "FAIL the usage's verbs line (describe among them, ak7)"
+fi
 
 # fanout (packet al0): a stub verb that hands the call to the claude-fanout on PATH, unchanged
 # but for each --yes before a --; with none on PATH, or one that resolves inside the dispatcher's
@@ -127,9 +132,11 @@ if [ ! -e "$F/ran" ]; then pass=$((pass + 1)); else fail=$((fail + 1)); echo "FA
 fan "--help" "$(fan_help "$F/stub/claude-fanout")" "" 0 "$F/stub" --help
 fan "-h" "$(fan_help "$F/stub/claude-fanout")" "" 0 "$F/stub" -h
 fan "--help, none on PATH" "$(fan_help none)" "" 0 "$F/none" --help
-# R6: the table and every usage line stay byte for byte what they were at the pin (c0193bd),
-# stdout, stderr and exit; skipped where the pin's object is not in this clone
-PIN=c0193bd
+# R6: the table and every usage line stay byte for byte what they were at the pin, stdout,
+# stderr and exit; skipped where the pin's object is not in this clone. The pin was c0193bd; it
+# moved, by ak7-plug-agents's merge of main, to that row's last commit before the merge, whose
+# table holds its `doctor [--json]` and `describe` lines and whose verbs line names `describe`
+PIN=78977d4
 if git -C "$REPO" cat-file -e "$PIN:plugin/lib/agentik-agents" 2>/dev/null; then
   mkdir "$F/pin" && git -C "$REPO" show "$PIN:plugin/lib/agentik-agents" > "$F/pin/agentik-agents"
   chmod +x "$F/pin/agentik-agents"

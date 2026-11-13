@@ -731,7 +731,7 @@ def main() -> int:
         check(pj.returncode == 0 and doc is not None, "status --json exits 0 with one JSON document",
               f"rc={pj.returncode} err={pj.stderr[-300:]}")
         doc = doc or {"agents": []}
-        check(set(doc) == {"generated", "since_min", "agents"}, "top-level keys are the contract",
+        check(set(doc) == {"schema", "ok", "generated", "since_min", "agents"}, "top-level keys are the contract",
               str(sorted(doc)))
         check(doc.get("since_min") == 30, "the default window is 30 min", str(doc.get("since_min")))
         bad = [sorted(set(a) ^ FIELDS) for a in doc["agents"] if set(a) != FIELDS]
