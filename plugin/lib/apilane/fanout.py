@@ -23,7 +23,7 @@ from apilane import pool as pools
 LIVE_SCHEMA = "agentik.api.live/1"
 BEAT_SEC = 10
 STOP_GRACE_SEC = 2
-SESSION_RE = re.compile(r"^[A-Za-z0-9-]{1,128}$")
+SESSION_RE = re.compile(r"^[A-Za-z0-9-]{1,128}\Z")
 STOP_SIGNALS = ("SIGINT", "SIGTERM", "SIGHUP")
 
 FanoutResult = collections.namedtuple("FanoutResult", "id rc spent_usd budget_usd shards")

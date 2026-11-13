@@ -17,7 +17,7 @@ DEFAULT_JOBS = 4
 DEFAULT_TIMEOUT_SEC = 900
 DEFAULT_PROFILE = "review"
 LABEL_MAX = 80
-ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9-]{0,63}$")
+ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9-]{0,63}\Z")
 KEYS = ("schema", "id", "budget_usd", "dirs", "shards", "max_shard_usd", "jobs",
         "timeout_sec")
 SHARD_KEYS = ("label", "type", "prompt")

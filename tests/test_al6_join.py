@@ -355,6 +355,22 @@ class MoneyLedgerTest(Temp):
         self.assertEqual(run._cost({"total_cost_usd": 1}), 1.0)
 
 
+class IdTest(unittest.TestCase):
+    # review 1, R1-F5: `$` matches before a final newline; an id that ends in one is refused
+    def test_job_id(self):
+        from apilane import job
+        obj = dict(MoneyJobTest.BASE, id="run1\n")
+        with self.assertRaises(job.JobError) as cm:
+            job.from_obj(obj, types=("review",))
+        self.assertEqual(cm.exception.code, "job.id")
+        self.assertEqual(job.from_obj(dict(obj, id="run1"), types=("review",)).id, "run1")
+
+    def test_session(self):
+        from apilane import fanout
+        self.assertEqual(fanout.session_name("sess-1\n"), "none")
+        self.assertEqual(fanout.session_name("sess-1"), "sess-1")
+
+
 class MoneyJobTest(unittest.TestCase):
     BASE = {"id": "run1", "budget_usd": 1, "shards": [{"label": "a", "type": "review",
                                                        "prompt": "p"}]}
