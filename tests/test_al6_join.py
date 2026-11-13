@@ -207,11 +207,20 @@ class PlugTest(Temp):
         for k in config.KEYS:
             self.assertEqual(api["api." + k]["value"], getattr(config.DEFAULTS, k), k)
             self.assertIn("by hand", api["api." + k]["change"]["note"], k)
-        self.write_config("api:\n  enabled: true\n  max_day_usd: 4\n")
+        self.write_config("api:\n  enabled: true\n  max_day_usd: 4\n  max_fanout_usd: 2\n")
         doc = self.plug().config(roots=self.roots)
         api = {s["key"]: s for s in doc["settings"] if s["key"].startswith("api.")}
         self.assertEqual(api["api.max_day_usd"]["value"], 4.0)
         self.assertEqual(api["api.max_day_usd"]["source"]["layer"], "user")
+        # a key the file sets reads `user` even where its value is the default's
+        self.assertEqual(api["api.max_fanout_usd"]["value"], config.DEFAULTS.max_fanout_usd)
+        self.assertEqual(api["api.max_fanout_usd"]["source"],
+                         {"layer": "user", "path": self.roots.config, "line": 4})
+        self.assertNotEqual(api["api.console_limit_usd"]["source"]["layer"], "user")
+        self.write_config("api:\n  enabled: maybe\n")
+        doc = self.plug().config(roots=self.roots)
+        self.assertEqual([s["key"] for s in doc["settings"]
+                          if s["source"].get("layer") == "user"], [])
         self.assertTrue([l for l in doc["layers"] if l["name"] == "user"][0]["present"])
 
     def test_rider(self):

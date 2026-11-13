@@ -518,17 +518,35 @@ def api_lane(roots):
         return lane_config.DEFAULTS
 
 
+def api_lines(roots):
+    """Each `api.` key the user's file sets, by its line; none where there is no file or the
+    lane refuses it."""
+    from apilane import config as lane_config
+    if roots is None:
+        return {}
+    try:
+        lane_config.lane(roots)
+        if not os.path.isfile(roots.config):
+            return {}
+        with open(roots.config, encoding="utf-8") as fh:
+            return lane_config.parse(fh.read())[1]
+    except Exception:  # noqa: BLE001  a refused file sets nothing
+        return {}
+
+
 def api_settings(roots):
     try:
         from apilane import config as lane_config
     except ImportError:
         return []
     lane, path = api_lane(roots), (roots.config if roots is not None else None)
+    lines = api_lines(roots)
     change = {"kind": "file", "command": None, "path": path, "block": "api", "note": API_NOTE}
     out = []
     for k in lane_config.KEYS:
         default, value = getattr(lane_config.DEFAULTS, k), getattr(lane, k)
-        source = {"layer": "user", "path": path, "line": None} if value != default else DEFAULT
+        line = lines.get("api." + k)
+        source = {"layer": "user", "path": path, "line": line} if line is not None else DEFAULT
         out.append(setting("api." + k, value, default, API_TYPES.get(k, "number"), source, change))
     return out
 
