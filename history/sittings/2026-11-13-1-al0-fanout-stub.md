@@ -12,7 +12,7 @@
 - [x] act 0: this packet and this charter (the scan reads no old name under `design/`, so no allow row).
 - [x] act 1: the failing tests, red at the pin: test-dispatch 50 passed, 11 failed (every fanout case); bare machine test_13 red (exit 2, the usage lines), test_14 (R8) green, as the pin holds.
 - [x] act 2: the verb, the head comment, plugin 1.6.4; test-dispatch 61 passed, 0 failed; the acceptance lines by hand through `plugin/bin/agentik-agents` as the brief reads them.
-- [ ] act 3: `make check` once through the gate queue.
+- [x] act 3: gate 20261113-085844-1510 exit 0 in 1 min, on 17ca453 (test-dispatch 61/0, bare machine 14 OK, hygiene 0 hits, plugin-version-check 1.6.4).
 
 ## Decided (reversible, logged)
 - The help is read before the `--yes` drop: `fanout --yes --help` hands both on (R5's "the only argument" taken as the caller's).
@@ -20,8 +20,10 @@
 - R6's byte compare reads c0193bd's dispatcher from git and skips where the object is absent; the retired-verb list loses `fanout`, now a verb.
 
 ## Handover
+- The landing and the install are hq's; nothing waits on the owner.
 
 ## Next act
-act 3, the gate.
+none: the landing is hq's.
 
 ## Exit
+done 2026-11-13: acts 0 to 3 committed; gate 20261113-085844-1510 exit 0
