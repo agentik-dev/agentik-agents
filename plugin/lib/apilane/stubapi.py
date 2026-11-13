@@ -6,7 +6,7 @@ streamed or whole as the request asks, with a script: one turn a path of `reads`
 one `Read` of it, then a closing text. The turn is the number of assistant messages the request
 carries, so a resent conversation gets the same answer. For each request it records the header
 names that carried a credential and their values, the tools offered, the tool results sent
-back, and the body, all in memory. It serves nothing else and binds no other address.
+back, its turn and its body, all in memory. It serves nothing else and binds no other address.
 """
 
 import http.server
@@ -74,13 +74,13 @@ class Stub:
                     results.append({"tool_use_id": block.get("tool_use_id"),
                                     "text": _text_of(block.get("content")),
                                     "is_error": bool(block.get("is_error"))})
+        turn = sum(1 for m in messages if isinstance(m, dict) and m.get("role") == "assistant")
         rec = {"credentials": {k.lower(): v for k, v in headers.items() if _credential(k)},
                "tools": [t.get("name") for t in body.get("tools") or [] if isinstance(t, dict)],
-               "tool_results": results, "body": raw}
+               "tool_results": results, "turn": turn, "body": raw}
         with self._lock:
             self.requests.append(rec)
             number = len(self.requests)
-        turn = sum(1 for m in messages if isinstance(m, dict) and m.get("role") == "assistant")
         return number, turn
 
     def reply(self, number, turn, model):

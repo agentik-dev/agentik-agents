@@ -636,7 +636,8 @@ class ProbeTest(ProbeCase):
         self.assertEqual([c["name"] for c in disk["checks"]], CHECKS)
         self.assertEqual(stat.S_IMODE(os.stat(path).st_mode), 0o600)
         self.assertEqual(os.listdir(self.roots.state), ["probe.json"])
-        self.assertEqual(set(os.listdir(tempfile.gettempdir())) - left, set())
+        new = set(os.listdir(tempfile.gettempdir())) - left    # others write there too
+        self.assertEqual({n for n in new if n.startswith("agentik-probe-")}, set())
 
     def test_a_bearer_token_fails_key(self):
         rec = self.run_probe("bearer")
