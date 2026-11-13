@@ -460,6 +460,48 @@ class EndToEndTest(Lane):
                         self.assertNotIn(secret, a, name)
 
 
+class KillTest(Lane):
+    SHARDS = (("k1", "explore"), ("k2", "explore"), ("k3", "review"))
+
+    def test_kill_9(self):
+        import signal
+        from apilane import ledger
+        job = self.job("kill-1", 2, self.SHARDS)
+        env = dict(self.env, HOME=self.roots.home)
+        child = subprocess.Popen([sys.executable, "-I", "-c", CHILD, LIB] + list(self.roots)
+                                 + [job], env=env, stdin=subprocess.DEVNULL,
+                                 stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+        try:
+            reserved = wait_for(lambda: [l for l in self.log() if l.get("kind") == "reserve"]
+                                and self.held(l for l, _ in self.SHARDS))
+        finally:
+            if child.poll() is None:
+                os.kill(child.pid, signal.SIGKILL)
+            child.wait(30)
+        self.assertTrue(reserved, child.stderr.read().decode())
+        child.stderr.close()
+        self.assertEqual(child.returncode, -signal.SIGKILL)
+        self.let_go()
+        day = ledger.day(self.roots)
+        self.assertEqual(day["sum_usd"], 2.0)
+        self.assertEqual([u["fanout"] for u in day["unsettled"]], ["kill-1"])
+        # a second fan-out that would pass the day's ceiling is refused and starts no fake
+        before, lines = len(self.starts()), len(self.log())
+        out, err = io.StringIO(), io.StringIO()
+        with mock.patch.dict(os.environ, self.env):
+            rc = cli.main(["fanout", self.job("kill-2", 2, (("m1", "explore"),)), "--yes"],
+                          roots=self.roots, stdout=out, stderr=err)
+        self.assertEqual(rc, 2, err.getvalue())
+        self.assertIn("$2.00", err.getvalue())
+        self.assertEqual(len(self.starts()), before)
+        self.assertFalse(os.path.exists(os.path.join(self.records, "m1.json")))
+        self.assertEqual(len(self.log()), lines)
+        # the hook's next prompt: the stopped line with the budget, once
+        first, second = self.hook(), self.hook()
+        stopped = "fan-out kill-1 stopped without a close: its whole $2.00 counts against today"
+        self.assertEqual(first.count(stopped), 1, first)
+        self.assertEqual(second, "")
+
 
 if __name__ == "__main__":
     unittest.main()
