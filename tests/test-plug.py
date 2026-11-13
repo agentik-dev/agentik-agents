@@ -622,6 +622,27 @@ class Plug(unittest.TestCase):
                     self.assertEqual(w["path"], self.backends if where == "file" else None)
                     self.assertIsNone(w["line"])
 
+    # review 2, R2-F3: while AGENTROUTE_BACKENDS is set the rig's file is not read, so every
+    # backends.* key's line is that variable's launch line, the rig's line nowhere
+    def test_17_backends_from_env_launch_line(self):
+        self.write_backends(json.dumps({"x": {"url": "http://127.0.0.1:7", "model": "mx"}}))
+        line = "AGENTROUTE_BACKENDS=VALUE agentik agents local"
+        for value in ('{"default":{"url":"http://127.0.0.1:3"},"hare":{}}', '{"hare":{}}', "["):
+            with self.subTest(value=value):
+                doc = self.config_read(AGENTROUTE_BACKENDS=value)
+                keys = [s for s in doc["settings"] if s["key"].startswith("backends.")]
+                self.assertIn("backends.default.url", [s["key"] for s in keys])
+                self.assertNotIn("backends.x.url", [s["key"] for s in keys])
+                for s in keys:
+                    self.assertEqual(s["change"]["kind"], "launch", s["key"])
+                    self.assertEqual(s["change"]["command"], line, s["key"])
+                    self.assertIsNone(s["change"]["path"])
+                    self.assertIsNone(s["change"]["block"])
+        by = self.by_key(self.config_read())
+        self.assertEqual(by["backends.default.url"]["change"]["command"],
+                         "agentik agents rig default BACKEND")
+        self.assertEqual(by["backends.x.url"]["change"]["command"], "agentik agents rig up x")
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=1)

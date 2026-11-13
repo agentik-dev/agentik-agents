@@ -82,6 +82,8 @@ SETTINGS = [
 ]
 DEFAULT_NOTE = ("It takes a declared backend's name, never a value, and copies that backend's "
                 "fields to default.")
+ENV_BACKENDS_NOTE = ("It holds every backend as one JSON object, and the rig's file is not read "
+                     "while it is set.")
 # The rig's backend a LOCALRIG_ variable belongs to, by its first word; else llama.
 RIG_BACKEND = {"LLAMA": "llama", "Q8": "llama", "FLASH": "flash", "UNSLOTH": "unsloth",
                "MLX": "mlx", "OLLAMA": "mlx"}
@@ -452,7 +454,12 @@ def read_backends(row, route, state):
                          else ("agentik agents rig up %s" % name, row["note"]))
         change = {"kind": "command", "command": command, "path": None, "block": None,
                   "note": note}
-        feeds = {"url": url, "model": model, "auth": auth}
+        if set_(var):
+            # while the variable is set the router reads no file, so a rig line, which writes
+            # the file, changes nothing here: the line is the variable's (review 2, R2-F3)
+            change = {"kind": "launch", "command": "%s=VALUE agentik agents local" % var,
+                      "path": None, "block": None, "note": ENV_BACKENDS_NOTE}
+        feeds ={"url": url, "model": model, "auth": auth}
         for field, kind in BACKEND_FIELDS:
             default = None
             if name == "default":
