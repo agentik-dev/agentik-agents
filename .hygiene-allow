@@ -76,3 +76,5 @@ plugin/commands/install-cli.md: renamed
 design/packets/a-s18-plugin.md: sibling
 # ak7's first packet commit names the ledger file and the README renderer plugin.
 design/packets/ak7-plug-agents.md: sibling
+# al6's packet quotes the old tool's name, which the join forwards and keeps where no wall is proved.
+design/packets/al6-join.md: renamed
