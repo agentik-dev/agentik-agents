@@ -690,6 +690,9 @@ class KillTest(Lane):
                           roots=self.roots, stdout=out, stderr=err)
         self.assertEqual(rc, 2, err.getvalue())
         self.assertIn("$2.00", err.getvalue())
+        # review 1, N5: the day refusal's own words, which no line naming the job's budget has
+        self.assertIn("agentik agents: a budget of $2.00 on today's $2.00 passes the day's "
+                      "ceiling of $3.00. Nothing ran.\n", err.getvalue())
         self.assertEqual(len(self.starts()), before)
         self.assertFalse(os.path.exists(os.path.join(self.records, "m1.json")))
         self.assertEqual(len(self.log()), lines)
