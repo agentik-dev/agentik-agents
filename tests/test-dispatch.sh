@@ -112,13 +112,20 @@ fi
 
 # fanout (packet al0): a stub verb that hands the call to the claude-fanout on PATH, unchanged
 # but for each --yes before a --; with none on PATH, or one that resolves inside the dispatcher's
-# own folder, exit 2 and nothing run; its help alone, as the only argument, runs nothing
-mkdir "$F/stub" "$F/none" "$F/own"
+# own folder, exit 2 and nothing run; its help alone, as the only argument, runs nothing. From
+# al6 the stub is the verb only where no wall is proved, so these cases run on N, a copy beside
+# apilane/ whose walled.sh says no wall, under HOME at a temp folder with no file; one runs once
+# more on A, which has no apilane/
+N="$F/nowall"
+mkdir -p "$N" "$F/home" "$F/stub" "$F/none" "$F/own"
+cp "$REPO/plugin/lib/agentik-agents" "$N/"
+cp -R "$REPO/plugin/lib/apilane" "$N/apilane"
+echo 'apilane_walled() { return 1; }' > "$N/apilane/walled.sh"
 printf '#!/bin/sh\necho "argc=$#"; for a; do printf "[%%s]\\n" "$a"; done\nexit 7\n' > "$F/stub/claude-fanout"
 chmod +x "$F/stub/claude-fanout"
-printf '#!/bin/sh\n: > "%s/ran"\nexit 9\n' "$F" > "$D/own-forward"
-chmod +x "$D/own-forward"
-ln -s "$D/own-forward" "$F/own/claude-fanout"
+printf '#!/bin/sh\n: > "%s/ran"\nexit 9\n' "$F" > "$N/own-forward"
+chmod +x "$N/own-forward"
+ln -s "$N/own-forward" "$F/own/claude-fanout"
 NO_TOOL='agentik agents fanout: the API lane is not in this version yet, and no claude-fanout is on PATH to hand the call to.'
 OWN='agentik agents fanout: the claude-fanout on PATH is this tool'"'"'s own forward, and the API lane is not in this version yet.'
 fan_help() {
@@ -132,7 +139,7 @@ fan_help() {
 fan() {
   local name=$1 wout=$2 werr=$3 wcode=$4 dir=$5 out err code
   shift 5
-  out="$(PATH="$dir:/usr/bin:/bin" "$A" fanout "$@" 2>"$F/err")"; code=$?
+  out="$(HOME="$F/home" PATH="$dir:/usr/bin:/bin" "${EXE:-$N/agentik-agents}" fanout "$@" 2>"$F/err")"; code=$?
   err="$(cat "$F/err")"
   if [ "$out" = "$wout" ] && [ "$err" = "$werr" ] && [ "$code" = "$wcode" ]; then
     pass=$((pass + 1))
@@ -156,6 +163,22 @@ if [ ! -e "$F/ran" ]; then pass=$((pass + 1)); else fail=$((fail + 1)); echo "FA
 fan "--help" "$(fan_help "$F/stub/claude-fanout")" "" 0 "$F/stub" --help
 fan "-h" "$(fan_help "$F/stub/claude-fanout")" "" 0 "$F/stub" -h
 fan "--help, none on PATH" "$(fan_help none)" "" 0 "$F/none" --help
+EXE="$A" fan "args as given, no apilane/" "$(printf 'argc=5\n[--budget-usd]\n[2]\n[a b]\n[]\n[-x]')" "" 7 \
+  "$F/stub" --budget-usd 2 'a b' '' -x
+# in the no-wall copy, a file that says on: one line, exit 2, and the old tool is not run (under a
+# temp HOME the lane names HOME first; the platform's own line is test_al4_report's PlatformTest)
+mkdir -p "$F/home/.config/agentik/agents" "$F/mark"
+printf 'api:\n  enabled: true\n' > "$F/home/.config/agentik/agents/config.yaml"
+printf '#!/bin/sh\n: > "%s/mark/ran"\n' "$F" > "$F/mark/claude-fanout"
+chmod +x "$F/mark/claude-fanout"
+err="$(HOME="$F/home" XDG_CACHE_HOME="$F/cache" PATH="$F/mark:/usr/bin:/bin" "$N/agentik-agents" fanout x 2>&1 >/dev/null)"; code=$?
+if [ "$code" = 2 ] && [ "$(printf '%s\n' "$err" | wc -l | tr -d ' ')" = 1 ] && [ ! -e "$F/mark/ran" ] \
+   && ! printf '%s\n' "$err" | grep -q '^usage:'; then
+  pass=$((pass + 1))
+else
+  fail=$((fail + 1)); printf 'FAIL fanout, no wall, file on: exit %s [%s]\n' "$code" "$err"
+fi
+rm -f "$F/home/.config/agentik/agents/config.yaml"
 # R6: the table and every usage line stay byte for byte what they were at the pin, stdout,
 # stderr and exit; skipped where the pin's object is not in this clone. The pin was c0193bd; it
 # moved, by ak7-plug-agents's merge of main, to that row's last commit before the merge, whose

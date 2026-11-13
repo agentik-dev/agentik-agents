@@ -312,6 +312,9 @@ class BareMachine(unittest.TestCase):
         share = os.path.join(prefix, "share", "agentik-agents")
         trees = [n for n in os.listdir(share) if not n.startswith(".")]
         self.assertEqual(len(trees), 1, trees)
+        # al6: the stub is the verb only where no wall is proved, so the frozen tree says so
+        with open(os.path.join(share, trees[0], "apilane", "walled.sh"), "w") as handle:
+            handle.write("apilane_walled() { return 1; }\n")
         stub, none, own = (os.path.join(home, n) for n in ("stub", "none", "own"))
         for folder in (stub, none, own):
             os.makedirs(folder)
