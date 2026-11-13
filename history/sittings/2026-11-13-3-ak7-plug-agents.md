@@ -14,7 +14,7 @@
 - [x] act 2: R2-F2, a backend name outside `[a-z0-9_-]` is left out with one warning (test_16).
 - [x] act 3: R2-F3, backends read from `AGENTROUTE_BACKENDS` print its launch line (test_17).
 - [x] act 4: R2-F4, a field the router fills takes its feed's source and rows (test_18); n11 lands with it.
-- [ ] act 5: review 2's NICE notes N1 to N10 as rows.
+- [x] act 5: review 2's NICE notes as n24 to n31 (N1, N3, N4, N6 to N10); N5 landed with R2-F3 and N2 is n19, so neither is a row; n7 (R2-F2) and n11 (R2-F4) left as landed.
 - [ ] act 6: 1.7.1 alone, last under `plugin/`.
 - [ ] act 7: the gate, once.
 
@@ -28,4 +28,4 @@
 - None yet.
 
 ## Next act
-- Act 5.
+- Act 6.
