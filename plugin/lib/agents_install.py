@@ -24,9 +24,13 @@ FORWARD = "claude-fanout"
 
 
 def lane_on(err):
-    """Whether the API lane's file says on. A refusal is off; a refused file is one line on stderr."""
+    """Whether the API lane is on: a wall proved here and the lane's file says on. No wall is off,
+    saying nothing (review 1, R1-F2), so an old claude-fanout link stays where it points. A
+    refusal is off; a refused file is one line on stderr."""
     try:
-        from apilane import config, paths
+        from apilane import config, paths, wall
+        if wall.backend() is None:
+            return False
         return bool(config.lane(paths.account()).enabled)
     except ImportError:
         return False

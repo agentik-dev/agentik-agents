@@ -193,6 +193,22 @@ class InstallTest(Temp):
         for n in self.OLD:
             self.assertTrue(os.path.islink(os.path.join(bin_dir, n)), n)
 
+    def test_on_in_file_no_wall(self):
+        # review 1, R1-F2: where no wall is proved the lane cannot be on, whatever the file says
+        from apilane import wall
+        path, outside = self.plant("link")
+        self.write_config("api:\n  enabled: true\n")
+        with mock.patch.object(wall, "backend", lambda: None), \
+                mock.patch.object(paths, "account", lambda: self.roots):
+            rc, out, err, bin_dir = self.install(None)
+        self.assertEqual((rc, err), (0, ""))
+        self.assertIn("linked %s in %s -> the tree (the old names, until 2026-12-31)\n"
+                      % (", ".join(self.OLD), bin_dir), out)
+        self.assertNotIn("claude-fanout", out)
+        self.assertEqual(os.readlink(path), outside)
+        for n in self.OLD:
+            self.assertTrue(os.path.islink(os.path.join(bin_dir, n)), n)
+
     def test_on(self):
         path, _ = self.plant("link")
         rc, out, err, bin_dir = self.install(True)
