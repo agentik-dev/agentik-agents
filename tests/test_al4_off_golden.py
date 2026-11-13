@@ -129,6 +129,8 @@ class OffGolden(unittest.TestCase):
         text = text.replace(self.trees[tree], "<PLUGIN>").replace(self.t, "<T>")
         text = re.sub(r"<T>/prefix-%s-" % re.escape(tree), "<T>/prefix-", text)
         text = re.sub(r"\b[0-9a-f]{40}\b", "<HASH>", text)
+        # al6: a version bump is no change of surface; install-cli names the version in brackets
+        text = re.sub(r"\(\d+\.\d+\.\d+\)", "(<VERSION>)", text)
         text = re.sub(r'"generated": "[^"]*"', '"generated": "<GENERATED>"', text)
         return re.sub(r'"elapsed_s": \d+', '"elapsed_s": <ELAPSED>', text)
 
