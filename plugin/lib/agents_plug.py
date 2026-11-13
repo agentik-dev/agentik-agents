@@ -80,6 +80,8 @@ SETTINGS = [
      "pattern": r"\$\{(LOCALRIG_[A-Z0-9_]+):-", "verb": "agentik agents rig up {backend}",
      "note": "The rig reads it when it starts; a shell profile keeps it."},
 ]
+DEFAULT_NOTE = ("It takes a declared backend's name, never a value, and copies that backend's "
+                "fields to default.")
 # The rig's backend a LOCALRIG_ variable belongs to, by its first word; else llama.
 RIG_BACKEND = {"LLAMA": "llama", "Q8": "llama", "FLASH": "flash", "UNSLOTH": "unsloth",
                "MLX": "mlx", "OLLAMA": "mlx"}
@@ -421,10 +423,11 @@ def read_backends(row, route, state):
         filled = {"url": str(b.get("url") or url["value"]).rstrip("/"),
                   "model": b.get("model", model["value"]), "auth": b.get("auth", ""),
                   "fold_system": b.get("fold_system", False)}
-        command = ("agentik agents rig default VALUE" if name == "default"
-                   else "agentik agents rig up %s" % name)
+        # default is set by naming a backend the rig declares, never by a value (review 1, R1-F3)
+        command, note = (("agentik agents rig default BACKEND", DEFAULT_NOTE) if name == "default"
+                         else ("agentik agents rig up %s" % name, row["note"]))
         change = {"kind": "command", "command": command, "path": None, "block": None,
-                  "note": row["note"]}
+                  "note": note}
         feeds = {"url": url, "model": model, "auth": auth}
         for field, kind in BACKEND_FIELDS:
             default = None

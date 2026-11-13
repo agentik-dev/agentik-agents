@@ -554,6 +554,27 @@ class Plug(unittest.TestCase):
                                                     "local-backends.sops.yaml"))
         self.unchanged(before)
 
+    # review 1, R1-F3: backends.default.*'s line names a backend, and the line runs as printed
+    def test_14_default_line_runs(self):
+        self.write_backends(json.dumps({"tortoise": {"url": "http://127.0.0.1:9911",
+                                                     "model": "slowpoke"}}))
+        by = self.by_key(self.config_read())
+        lines = {by["backends.default.%s" % f]["change"]["command"]
+                 for f in ("url", "model", "auth", "fold_system")}
+        self.assertEqual(lines, {"agentik agents rig default BACKEND"})
+        change = by["backends.default.url"]["change"]
+        self.assertEqual(change["kind"], "command")
+        self.assertIn("backend's name", change["note"])
+        self.assertNotIn("VALUE", change["command"])
+        words = change["command"].replace("BACKEND", "tortoise").split()
+        self.assertEqual(words[:2], ["agentik", "agents"])
+        run = self.run_a(*words[2:])
+        self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
+        by = self.by_key(self.config_read())
+        self.assertEqual(by["backends.default.url"]["value"], "http://127.0.0.1:9911")
+        self.assertEqual(by["backends.default.model"]["value"], "slowpoke")
+        self.assertEqual(by["backends.default.url"]["source"]["layer"], "rig")
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=1)
