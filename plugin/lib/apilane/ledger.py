@@ -72,6 +72,8 @@ def _good(obj):
                     return False
             except OverflowError:   # an int too large for a float (review 1, R1-F4)
                 return False
+            if v < 0:   # the day's sum never falls (review 1, N3)
+                return False
     for k in ("fanout", "day", "at"):
         if k in obj and not isinstance(obj[k], str):
             return False

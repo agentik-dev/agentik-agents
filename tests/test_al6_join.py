@@ -348,7 +348,7 @@ class MoneyConfigTest(Temp):
 class MoneyLedgerTest(Temp):
     def lines(self, *objs):
         from apilane import ledger
-        os.makedirs(self.roots.state, mode=0o700)
+        os.makedirs(self.roots.state, mode=0o700, exist_ok=True)
         with open(os.path.join(self.roots.state, ledger.LOG), "w") as fh:
             for obj in objs:
                 fh.write(obj + "\n")
@@ -369,6 +369,11 @@ class MoneyLedgerTest(Temp):
 
     def test_huge(self):
         self.bad(HUGE_INT)
+
+    def test_negative(self):
+        # review 1, N3: the day's sum never falls; a hand-written settle of -5 is a bad line
+        self.bad("-5")
+        self.bad("-0.01")
 
     def test_cost(self):
         from apilane import run
