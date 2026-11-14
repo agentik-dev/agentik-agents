@@ -1,7 +1,8 @@
 """A process's start time, so a recycled pid is never read as alive.
 
 One implementation on every platform: `ps -o lstart= -p <pid>`, which macOS and Linux
-both answer, in the C locale so the text compares. The time is to the second.
+both answer, in the C locale and under TZ=UTC so the text compares whatever zone the caller or
+the machine is in (packet al7, R6). The time is to the second.
 """
 import os
 import subprocess
@@ -20,7 +21,7 @@ def started(pid):
     try:
         out = subprocess.run([_PS, "-o", "lstart=", "-p", str(pid)],
                              stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-                             env={"PATH": "/bin:/usr/bin", "LC_ALL": "C"},
+                             env={"PATH": "/bin:/usr/bin", "LC_ALL": "C", "TZ": "UTC"},
                              universal_newlines=True, timeout=10)
     except (OSError, subprocess.SubprocessError):
         return None

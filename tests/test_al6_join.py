@@ -696,7 +696,10 @@ class KillTest(Lane):
         self.assertEqual(len(self.starts()), before)
         self.assertFalse(os.path.exists(os.path.join(self.records, "m1.json")))
         self.assertEqual(len(self.log()), lines)
-        # the hook's next prompt: the stopped line with the budget, once
+        # the hook's next prompt: the stopped line with the budget, once, after its shards end,
+        # since a record is live while any run of it lives (packet al7, R6)
+        from apilane import report
+        self.assertTrue(wait_for(lambda: not report.rows(self.roots)))
         first, second = self.hook(), self.hook()
         stopped = "fan-out kill-1 stopped without a close: its whole $2.00 counts against today"
         self.assertEqual(first.count(stopped), 1, first)

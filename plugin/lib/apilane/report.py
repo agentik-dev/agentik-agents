@@ -1,8 +1,9 @@
 """The API lane's report (design/21 items 18 to 21): one line for a session, and the status rows.
 
 Reads `live/<session>/<fanout>.json` and `runs/<run>/run.json` under `roots.state`. A run counts
-while its pid lives with its recorded start time (`alive`, al1's `proc.alive`); a fan-out whose
-pid no longer matches and that left no close is lost. Every copy of the line is drawn here.
+while its pid lives with its recorded start time (`alive`, al1's `proc.alive`). A record is live
+while its fan-out or any run of it lives (packet al7, R6); one whose fan-out is gone and no run of
+which lives, and that left no close, is lost. Every copy of the line is drawn here.
 """
 import calendar
 import json
@@ -108,7 +109,7 @@ def line(session, roots, *, consume=False, alive=None, now=None):
     if not isinstance(session, str) or not SESSION.match(session):
         return None
     now = time.time() if now is None else now
-    live, closed = [], []
+    live, closed, gone = [], [], []
     for path, rec in _records(os.path.join(roots.state, "live", session)):
         ended = rec.get("ended")
         if ended:
@@ -122,6 +123,9 @@ def line(session, roots, *, consume=False, alive=None, now=None):
         alive = _alive(alive)
         if alive(rec.get("pid"), rec.get("pid_started")):
             live.append(rec)
+        elif _running(roots, rec, alive):
+            live.append(rec)
+            gone.append(rec)
         else:
             closed.append((path, rec, "lost"))
     out = []
@@ -131,13 +135,16 @@ def line(session, roots, *, consume=False, alive=None, now=None):
         text = "api lane: %d agent%s running" % (n, "" if n == 1 else "s")
         if n:
             text += " (%s)" % _types(names)
-        queued = sum(_count(rec.get("queued")) for rec in live)
+        queued = sum(_count(rec.get("queued")) for rec in live if not any(rec is g for g in gone))
         if queued:
             text += ", %d queued" % queued
         text += ", %s of %s spent" % (_money(sum(_usd(r.get("spent_usd")) for r in live)),
                                       _money(sum(_usd(r.get("budget_usd")) for r in live)))
         if len(live) > 1:
             text += " in %d fan-outs" % len(live)
+        for rec in gone:
+            text += "; fan-out %s is gone: agentik agents fanout stop %s" % (
+                rec.get("fanout"), rec.get("fanout"))
         out.append(text)
     head = "api lane: " if live else "api lane: 0 agents running; "
     for path, rec, kind in sorted(closed, key=lambda c: str(c[1].get("fanout"))):

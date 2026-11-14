@@ -581,11 +581,27 @@ def config(key=None, roots=None):
             "settings": settings, "warnings": state["warnings"]}
 
 
-def describe(version):
+# the lane's run read (packet al7, R4), only while its file says on, by api_checks' seam
+FANOUT_READ = {"kind": "status", "name": "fanout", "argv": ["fanout", "status", "--all", "--json"]}
+
+
+def api_reads(lane=None, roots=None):
+    try:
+        from apilane import cli as _lane_cli  # noqa: F401
+    except ImportError:
+        return []
+    roots = api_roots(roots)
+    lane = api_lane(roots) if lane is None else lane
+    if roots is None or not lane.enabled:
+        return []
+    return [FANOUT_READ]
+
+
+def describe(version, lane=None, roots=None):
     return {"schema": "agentik.describe/1", "ok": True, "tool": TOOL, "version": version,
             "summary": SUMMARY, "repo": REPO, "plugin": PLUGIN, "needs": NEEDS,
             "verbs": [{"name": n, "summary": s, "top": False} for n, s in VERBS],
-            "reads": READS}
+            "reads": READS + api_reads(lane, roots)}
 
 
 # --------------------------------------------------------------------------- the doctor
