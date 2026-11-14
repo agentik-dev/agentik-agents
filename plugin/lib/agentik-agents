@@ -164,9 +164,13 @@ doctor() {
 	echo "  Local lane:"
 	# no lane set up (no backends file, no AGENTROUTE_* variable, nothing on the router's
 	# address): one line, and nothing is asked of the upstream; a plug that cannot answer, or
-	# dies (its exit 1 is no "no"), leaves the check as it was (review 1, N5)
+	# dies (its exit 1 is no "no"), leaves the check as it was (review 1, N5). A lane set up
+	# whose router is not started: the plug's lane block, that row one line as the note above
+	# is and out of the count (row ak7b-router-note); a plug that cannot give it, as at the pin
 	if [ "$(plug lane 2>/dev/null)" = no ]; then
 		echo "    no local lane is set up here, so the router, the upstream and the backends were not asked"
+	elif block=$(plug lane text 2>/dev/null); then
+		printf '%s\n' "$block" | sed 's/^/    /'
 	else
 		"$here/agentroute" --check 2>&1 | sed 's/^/    /'
 	fi

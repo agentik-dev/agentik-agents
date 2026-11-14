@@ -369,7 +369,8 @@ class LineTest(Home):
         self.live("s3", "fd", spent_usd=0.4, running=[r("fd-01", 41), r("fd-02", 42, "review")])
         self.assertEqual(report.line("s3", self.roots, alive=alive_of(100, 31, 32, 33, 41, 42)),
                          "api lane: 5 agents running (3 explore, 2 review), $0.90 of $4.00 spent in 2 fan-outs")
-        self.live("s4", "rv-auth", ok=4, failed=1, spent_usd=0.84, ended="2026-11-13T10:05:00Z")
+        ended = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() - 60))
+        self.live("s4", "rv-auth", ok=4, failed=1, spent_usd=0.84, ended=ended)
         self.assertEqual(report.line("s4", self.roots, alive=alive_of()),
                          "api lane: 0 agents running; fan-out rv-auth ended: 4 ok, 1 failed, $0.84 of $2.00 spent")
         self.live("s5", "rv-auth", pid=555)
@@ -382,7 +383,7 @@ class LineTest(Home):
                       report.line("s6", self.roots, alive=alive_of(100, 61, 62, 63, 64, 65)))
         self.assertIsNone(report.line("s-none", self.roots, alive=alive_of()))
         self.live("s7", "fg", running=[r("fg-01", 71)])
-        self.live("s7", "rv-auth", ok=1, spent_usd=0.2, ended="2026-11-13T10:05:00Z")
+        self.live("s7", "rv-auth", ok=1, spent_usd=0.2, ended=ended)
         got = report.line("s7", self.roots, alive=alive_of(100, 71)).split("\n")
         self.assertEqual(len(got), 2)
         self.assertEqual(got[0], "api lane: 1 agent running (explore), $0.00 of $2.00 spent")
