@@ -285,8 +285,8 @@ def row(roots, run, alive):
     else:
         ok, failed = report._count(live.get("ok")), report._count(live.get("failed"))
         spent = _money(live.get("spent_usd"))
-    return {"id": run["id"], "state": st, "tag": start.get("tag", end.get("tag")),
-            "session": _session(run), "pid": start.get("pid"), "started": start.get("at"),
+    return {"id": run["id"], "state": "ended" if st == "never" else st,
+            "tag": start.get("tag", end.get("tag")), "session": _session(run), "pid": start.get("pid"), "started": start.get("at"),
             "ended": end.get("ended"), "rc": end.get("rc"),
             "budget_usd": _money(start.get("budget_usd", end.get("budget_usd"))),
             "spent_usd": spent,
@@ -340,8 +340,9 @@ def status(roots, word, *, every_run=False, session, alive=None):
 
 def wait(roots, word, *, session, timeout=WAIT_SEC, alive=None, clock=time.monotonic,
          sleep=time.sleep):
-    """{kind, run, row}: kind `ended`, `lost` (no settle), `gone` (a settle, no record) or
-    `running` (past the timeout). It writes, signals and removes nothing."""
+    """{kind, run, row}: kind `ended`, `never` (it never started, R1-F4), `lost` (no settle),
+    `gone` (a settle, no record) or `running` (past the timeout). It writes, signals and removes
+    nothing."""
     alive = _alive(alive)
     run = resolve(roots, word, session, alive, "wait")
     fid = run["id"]
@@ -351,6 +352,8 @@ def wait(roots, word, *, session, timeout=WAIT_SEC, alive=None, clock=time.monot
         if run["end"]:
             return {"kind": "ended", "run": run, "row": row(roots, run, alive)}
         start = run["start"]
+        if not start and state(run, alive) == "never":
+            return {"kind": "never", "run": run, "row": row(roots, run, alive)}
         if start and not alive(start.get("pid"), start.get("pid_started")):
             run = read(roots, fid) or run
             if run["end"]:
@@ -411,6 +414,8 @@ def stop(roots, word, *, session, alive=None, kill=os.kill, killpg=os.killpg, wa
     if run["end"]:
         return {"kind": "ended", "run": run, "row": row(roots, run, alive), "sent": None}
     start = run["start"]
+    if not start and state(run, alive) == "never":
+        return {"kind": "never", "run": run, "row": row(roots, run, alive), "sent": None}
     if not start:
         raise RunError("run.starting", id=fid)
     pid, at = start.get("pid"), start.get("pid_started")

@@ -17,7 +17,6 @@ import math
 import os
 import platform
 import re
-import shutil
 import signal
 import subprocess
 import sys
@@ -315,9 +314,14 @@ def detach_run(job, roots, stdout, err, as_json, child=None, started=None):
                                start_new_session=True, close_fds=True)
     except OSError:
         os.close(fd)
-        shutil.rmtree(path, True)
+        runs.drop(roots, job.id, made)
         raise
     os.close(fd)
+    try:
+        runs.write(roots, job.id, "child.json", {"pid": kid.pid,
+                                                "pid_started": (started or proc.started)(kid.pid)})
+    except runs.RunError:
+        pass
     try:
         kid.stdin.write(json.dumps(job_obj(job)).encode())
         kid.stdin.close()
@@ -488,6 +492,10 @@ def show(verb, res, as_json, timeout, stdout, err):
                              queued_text=", %d queued" % row["queued"] if row["queued"] else "",
                              spent_usd=row["spent_usd"], budget_usd=row["budget_usd"]))
             rc = 124
+        elif kind == "never":
+            err(messages.say("run.never", id=fid,
+                             log_text="; its log: %s" % run["log"] if run["log"] else ""))
+            rc = 1
         elif kind == "deaf":
             err(messages.say("run.deaf", id=fid, after=runs.secs(runs.STOP_SEC), groups=groups,
                              s="" if groups == 1 else "s"))
@@ -497,7 +505,7 @@ def show(verb, res, as_json, timeout, stdout, err):
                              budget_usd=row["budget_usd"]))
             rc = 0
     stdout.flush()
-    if verb == "stop" and kind in ("ended", "lost", "gone"):
+    if verb == "stop" and kind in ("ended", "never", "lost", "gone"):
         rc = 0
     return rc
 

@@ -992,6 +992,68 @@ class StaleTest(Det):
         self.assertTrue(wait_for(lambda: sleeper.poll() is not None, 5))
 
 
+class NeverTest(Det):
+    """Review 1, R1-F4: a run left `starting` with no live process past its start window reads as
+    ended, never started; `wait`, `stop` and a new `--detach` get past it."""
+
+    def age(self, fid, sec):
+        t = time.time() - sec
+        for root, _dirs, files in os.walk(self.fdir(fid)):
+            for f in files:
+                os.utime(os.path.join(root, f), (t, t))
+        os.utime(self.fdir(fid), (t, t))
+
+    def never(self, fid):
+        rc, out, err = self.verb("status", "--all")
+        self.assertIn("%s ended" % fid, out, err)
+        rc, out, err = self.verb("wait", fid, "--timeout", "2")
+        self.assertEqual((rc, out), (1, fid + "\n"), err)
+        self.assertIn("fan-out %s: never started" % fid, err)
+        rc, out, err = self.verb("stop", fid)
+        self.assertEqual(rc, 0, err)
+        self.assertIn("fan-out %s: never started" % fid, err)
+        self.assertNotIn("stop sent", err)
+
+    def test_planted(self):
+        self.plant("cut", start=False)
+        with open(os.path.join(self.fdir("cut"), "log.txt"), "w") as fh:
+            fh.write("x\n")
+        self.age("cut", 200)
+        self.never("cut")
+        pid, st = me()
+        self.plant("cut2", start=False)
+        with open(os.path.join(self.fdir("cut2"), "child.json"), "w") as fh:
+            json.dump({"pid": pid, "pid_started": st}, fh)
+        self.age("cut2", 200)
+        rc, out, err = self.verb("status", "cut2")
+        self.assertEqual(out.split()[:2], ["cut2", "starting"], err)
+        self.assertEqual(self.verb("stop", "cut2")[0], 124)
+        path = self.mkjob("cut", 0.2, (("v1", "explore", "cost"),))
+        rc, out, err = self.detach(path, "--yes")
+        self.assertEqual((rc, out), (0, "cut\n"), err)
+        self.assertTrue(self.ended("cut"))
+        self.assertEqual(self.verb("wait", "cut")[0], 0)
+
+    def test_cut_in_its_window(self):
+        path = self.mkjob("cut3", 0.2, (("v2", "explore", "cost"),))
+        parent = subprocess.Popen(self.prefix("plain", slowed(self.prefix(), 30))
+                                  + ["fanout", path, "--detach", "--yes"], env=self.cenv,
+                                  stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                                  stderr=subprocess.PIPE, start_new_session=True)
+        self.addCleanup(lambda: parent.poll() is None and os.killpg(parent.pid, signal.SIGKILL))
+        kid = wait_for(lambda: self.rec("cut3", "child.json"), 20)
+        self.assertTrue(kid, "no child.json")
+        os.killpg(parent.pid, signal.SIGKILL)
+        parent.communicate()
+        os.killpg(kid["pid"], signal.SIGKILL)
+        self.assertTrue(wait_for(lambda: not proc.alive(kid["pid"], kid["pid_started"]), 10))
+        self.age("cut3", 200)
+        self.never("cut3")
+        rc, out, err = self.detach(path, "--yes")
+        self.assertEqual((rc, out), (0, "cut3\n"), err)
+        self.assertTrue(self.ended("cut3"))
+
+
 class SentenceTest(unittest.TestCase):
     def test_sentences(self):
         self.assertEqual(messages.say("hook.on"), HOOK)
