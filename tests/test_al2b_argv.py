@@ -304,8 +304,8 @@ class LauncherTest(unittest.TestCase):
             "py": al2.FAKE_PY, "mode": mode, "record": record, "version": al2.VERSION}, 0o755)
 
     def launch(self, cli_argv, reads, out, env, stdin=""):
-        cmd = [probe._launch_python(), "-I", "-c", probe._LAUNCH, LIB, out] + reads + ["--"] \
-            + cli_argv
+        cmd = [probe._launch_python(), "-I", "-c", probe._LAUNCH, LIB, out, ",".join(env)] \
+            + reads + ["--"] + cli_argv
         return subprocess.run(cmd, env=env, input=stdin, capture_output=True, text=True,
                               timeout=60, cwd=self.home.root)
 
@@ -314,7 +314,9 @@ class LauncherTest(unittest.TestCase):
         cli = self.home.write("tools/stdin-cli", STDIN_CLI % {"py": al2.FAKE_PY,
                                                               "record": record}, 0o755)
         out = self.home.path("requests.json")
-        env = {"PATH": "/usr/bin:/bin", "HOME": self.home.root, "ANTHROPIC_API_KEY": "made-up-1",
+        # LANG set, so the fake's own interpreter coerces no locale into its environment
+        env = {"PATH": "/usr/bin:/bin", "HOME": self.home.root, "LANG": "en_US.UTF-8",
+               "ANTHROPIC_API_KEY": "made-up-1",
                "ANTHROPIC_BASE_URL": "http://127.0.0.1:%d" % free_port()}
         run = self.launch([cli, "-p", "a b"], ["/x/one"], out, env, stdin="the prompt")
         self.assertEqual(run.returncode, 7, run.stderr)
@@ -378,7 +380,8 @@ class LauncherTest(unittest.TestCase):
         job, run_dir = argv_kw["dirs"][0], argv_kw["run_dir"]
         self.assertEqual(wrap_kw["net"], "loopback")
         self.assertEqual(wrap_kw["home"], self.roots.home)
-        self.assertEqual(wrap_kw["read"][:2], [job, os.path.realpath(LIB)])
+        self.assertEqual(wrap_kw["read"][:3], [job, os.path.realpath(LIB),
+                                               os.path.dirname(os.path.realpath(claude))])
         self.assertEqual(wrap_kw["write"][0], run_dir)
         self.assertEqual(len(wrap_kw["write"]), 2)
         stub_dir = wrap_kw["write"][1]
@@ -386,7 +389,8 @@ class LauncherTest(unittest.TestCase):
         self.assertEqual(wrapped[:5], [probe._launch_python(), "-I", "-c", probe._LAUNCH,
                                        os.path.realpath(LIB)])
         self.assertTrue(within(wrapped[5], stub_dir), wrapped[5])
-        self.assertEqual(len(wrapped[6:at]), 3)
+        self.assertEqual(wrapped[6], ",".join(sorted(env_out)))
+        self.assertEqual(len(wrapped[7:at]), 3)
         self.assertEqual(wrapped[at + 1:], argv_out)
         self.assertTrue(env_kw["base_url"].startswith("http://127.0.0.1:"))
         self.assertFalse(env_kw["key"].startswith("sk-"))

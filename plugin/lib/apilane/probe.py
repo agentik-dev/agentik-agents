@@ -11,6 +11,11 @@ read was refused and its text came back in no request), `restricted` (whether th
 canary stayed out; recorded, never deciding `ok`) and `read` (the job file's text came back).
 A CLI that refuses `--restricted` beside `--bare` is run once more without it, and `restricted`
 is null. The record is `<roots.state>/probe.json`; a pass holds for one CLI version.
+
+Where the wall gives the command a network namespace of its own (bwrap), a stub outside cannot be
+reached from inside, so the stub starts inside the wall: `run` picks a port, hands the builders
+the base URL on it, and wraps one launcher, `launch`, that starts the stub there, runs the CLI
+with its own environment and stdin, and writes the stub's requests to a file the probe reads back.
 """
 
 import json
@@ -18,10 +23,13 @@ import os
 import secrets
 import shutil
 import signal
+import socket
 import subprocess
+import sys
 import tempfile
 import time
 import types
+import urllib.parse
 
 from apilane import stubapi
 
@@ -32,6 +40,11 @@ CEILING_USD = 0.05
 TIMEOUT = 60
 PATH = "/usr/bin:/bin:/usr/sbin:/sbin"
 PROMPT = "Read each file you are asked to read, then answer in one line."
+LAUNCH_PY = "/usr/bin/python3"
+LIB = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+# The launcher's body, run as `<python> -I -c _LAUNCH <lib> <out> <names> <reads...> -- <argv...>`.
+_LAUNCH = ("import sys; sys.path.insert(0, sys.argv[1]); from apilane import probe; "
+           "sys.exit(probe.launch(sys.argv[2:]))")
 
 
 class ProbeError(Exception):
@@ -77,7 +90,7 @@ def passed(roots, version):
     return _passes(read(roots), version)
 
 
-def ensure(*, claude, roots, build_argv=None, build_env=None, wrap=None, emit=None):
+def ensure(*, claude, roots, build_argv=None, build_env=None, wrap=None, emit=None, inside=None):
     """The probe's record for the installed CLI: the one on disk when it passes, else a run."""
     version = cli_version(claude)
     rec = read(roots)
@@ -85,21 +98,25 @@ def ensure(*, claude, roots, build_argv=None, build_env=None, wrap=None, emit=No
         return rec
     if emit is not None:
         emit("probe.start", cli_version=version)
-    rec = run(claude=claude, roots=roots, build_argv=build_argv, build_env=build_env, wrap=wrap)
+    rec = run(claude=claude, roots=roots, build_argv=build_argv, build_env=build_env, wrap=wrap,
+              inside=inside)
     if not rec["ok"]:
         bad = [c for c in rec["checks"] if c["name"] != "restricted" and c["ok"] is not True]
         raise ProbeError("probe.fail", check=bad[0]["name"], detail=bad[0]["detail"])
     return rec
 
 
-def run(*, claude, roots, build_argv=None, build_env=None, wrap=None):
-    """Run the CLI once behind the wall; write and return the record. A fail is ok false."""
+def run(*, claude, roots, build_argv=None, build_env=None, wrap=None, inside=None):
+    """Run the CLI once behind the wall; write and return the record. A fail is ok false.
+    `inside` puts the stub inside the wall; None is `_stub_inside(wrap)`."""
     if build_argv is None:
         from apilane.argv import build as build_argv
     if build_env is None:
         from apilane.env import build as build_env
     if wrap is None:
         from apilane.wall import wrap
+    if inside is None:
+        inside = _stub_inside(wrap)
     version = cli_version(claude)
     _private_dir(roots.state)
     base = os.path.join(roots.state, "probe")
@@ -110,6 +127,7 @@ def run(*, claude, roots, build_argv=None, build_env=None, wrap=None):
         job = _private_dir(os.path.join(base, "job"))
         run_dir = _private_dir(os.path.join(base, "run"))
         walled = _private_dir(os.path.join(base, "walled"))
+        stub_dir = _private_dir(os.path.join(base, "stub")) if inside else None
         texts, files = {}, {}
         for name, folder, leaf in (("read", job, "notes.txt"), ("walled", walled, "canary.txt"),
                                    ("outside", outside, "canary.txt")):
@@ -118,7 +136,7 @@ def run(*, claude, roots, build_argv=None, build_env=None, wrap=None):
             with open(files[name], "w", encoding="utf-8") as handle:
                 handle.write(texts[name] + "\n")
         step = dict(claude=claude, roots=roots, build_argv=build_argv, build_env=build_env,
-                    wrap=wrap, job=job, run_dir=run_dir,
+                    wrap=wrap, job=job, run_dir=run_dir, stub_dir=stub_dir,
                     reads=[files["read"], files["walled"], files["outside"]])
         got = _attempt(restricted=True, **step)
         flag = True
@@ -133,7 +151,34 @@ def run(*, claude, roots, build_argv=None, build_env=None, wrap=None):
     return rec
 
 
-def _attempt(*, claude, roots, build_argv, build_env, wrap, job, run_dir, reads, restricted):
+def _stub_inside(wrap):
+    """The stub must start inside the wall: the real wall is handed in, and it is bwrap's."""
+    try:
+        from apilane import wall
+    except ImportError:
+        return False
+    return wrap is wall.wrap and wall.backend() == "bwrap"
+
+
+def _launch_python():
+    """The launcher's interpreter, by its real path: the system's, else this one."""
+    if os.path.isfile(LAUNCH_PY) and os.access(LAUNCH_PY, os.X_OK):
+        return os.path.realpath(LAUNCH_PY)
+    return os.path.realpath(sys.executable)
+
+
+def _free_port():
+    with socket.socket() as s:
+        s.bind((stubapi.HOST, 0))
+        return s.getsockname()[1]
+
+
+def _attempt(*, claude, roots, build_argv, build_env, wrap, job, run_dir, stub_dir, reads,
+             restricted):
+    if stub_dir is not None:
+        return _attempt_inside(claude=claude, roots=roots, build_argv=build_argv,
+                               build_env=build_env, wrap=wrap, job=job, run_dir=run_dir,
+                               stub_dir=stub_dir, reads=reads, restricted=restricted)
     key = "agentik-probe-%s" % secrets.token_hex(16)
     stub = stubapi.Stub(reads=reads)
     url = stub.start()
@@ -147,6 +192,65 @@ def _attempt(*, claude, roots, build_argv, build_env, wrap, job, run_dir, reads,
     finally:
         stub.stop()
     return {"key": key, "rc": rc, "output": output, "requests": list(stub.requests)}
+
+
+def _attempt_inside(*, claude, roots, build_argv, build_env, wrap, job, run_dir, stub_dir,
+                    reads, restricted):
+    key = "agentik-probe-%s" % secrets.token_hex(16)
+    url = "http://%s:%d" % (stubapi.HOST, _free_port())
+    out = os.path.join(stub_dir, "requests.json")
+    if os.path.exists(out):
+        os.unlink(out)
+    shard = types.SimpleNamespace(label="probe", type="explore", prompt=PROMPT)
+    argv = build_argv(shard, claude=claude, dirs=[job], ceiling_usd=CEILING_USD,
+                      run_dir=run_dir, restricted=restricted)
+    env = build_env(key=key, run_dir=run_dir, home=roots.home, path=PATH, base_url=url)
+    python = _launch_python()
+    launcher = ([python, "-I", "-c", _LAUNCH, LIB, out, ",".join(sorted(env))] + list(reads)
+                + ["--"] + list(argv))
+    # the wall binds the launcher's own folder; the CLI's, and the launcher's code, are read
+    read = [job, LIB, os.path.dirname(os.path.realpath(argv[0]))]
+    if python != os.path.realpath(LAUNCH_PY):
+        read.append(os.path.realpath(sys.base_prefix))
+    cmd = wrap(launcher, read=read, write=[run_dir, stub_dir], net="loopback", home=roots.home)
+    rc, output = _spawn(cmd, env, job, shard.prompt)
+    return {"key": key, "rc": rc, "output": output, "requests": _requests(out)}
+
+
+def _requests(path):
+    """The requests the launcher's stub wrote, each of the stub's shape; none when unreadable."""
+    try:
+        with open(path, encoding="utf-8") as handle:
+            got = json.load(handle)
+    except (OSError, ValueError):
+        return []
+    if not isinstance(got, list):
+        return []
+    return [r for r in got if isinstance(r, dict) and isinstance(r.get("credentials"), dict)
+            and isinstance(r.get("tools"), list) and isinstance(r.get("turn"), int)
+            and isinstance(r.get("body"), str)]
+
+
+def launch(args):
+    """The launcher, inside the wall: `<out> <names> <reads...> -- <argv...>`. The stub on the
+    base URL's port, then the CLI on stdin and the environment's `<names>` (comma-joined) alone,
+    so what an interpreter adds at its start never reaches it; the stub's requests to `<out>`;
+    the CLI's exit (127 where it cannot start)."""
+    out, names, at = args[0], args[1].split(","), args.index("--")
+    reads, argv = args[2:at], args[at + 1:]
+    env = {k: os.environ[k] for k in names if k in os.environ}
+    stub = stubapi.Stub(reads=reads)
+    rc = 127
+    try:
+        stub.start(port=urllib.parse.urlsplit(os.environ.get("ANTHROPIC_BASE_URL", "")).port or 0)
+        try:
+            rc = subprocess.call(argv, env=env)
+        except OSError:
+            rc = 127
+    finally:
+        stub.stop()
+        _write_private(out, list(stub.requests))
+    return rc if rc >= 0 else 128 - rc
 
 
 def _spawn(cmd, env, cwd, prompt):
