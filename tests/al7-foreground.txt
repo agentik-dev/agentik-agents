@@ -1,0 +1,19 @@
+exit 0
+--stdout
+ok          $0.04    <T>/home/.local/state/agentik-agents/api/runs/fg-01/result.json  f1
+ok          $0.04    <T>/home/.local/state/agentik-agents/api/runs/fg-02/result.json  f2
+--stderr
+fan-out fg: 2 shards, budget $1.00, worst case $1.00; today $0.00 of $3.00 spent
+  01 explore  claude-sonnet-5-5        grant $0.50, ceiling $0.37  f1
+  02 review   claude-sonnet-5-5        grant $0.50, ceiling $0.37  f2
+  reads <T>/work
+fan-out fg: $1.00 reserved; today $1.00 before it
+fan-out fg: 2 ok, 0 failed, $0.08 of $1.00 spent
+exit 2
+--stdout
+--stderr
+fan-out fg: 2 shards, budget $1.00, worst case $1.00; today $0.08 of $3.00 spent
+  01 explore  claude-sonnet-5-5        grant $0.50, ceiling $0.37  f1
+  02 review   claude-sonnet-5-5        grant $0.50, ceiling $0.37  f2
+  reads <T>/work
+agentik agents: the fan-out id fg is already in the log for <DAY>. Nothing ran; give another id.
