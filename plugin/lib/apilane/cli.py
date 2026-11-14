@@ -1,23 +1,34 @@
 """The API lane's verbs (design/21 items 10 to 17), behind `agentik agents fanout` and `api`.
 
-    fanout JOB | <the short form> [--dry-run] [--yes] [--json]
+    fanout JOB | <the short form> [--dry-run] [--yes] [--detach] [--json]
+    fanout wait [ID] [--timeout SEC] [--json] | fanout status [ID | --all] [--json] | fanout stop [ID]
     api status [--json] | api probe | api key set [--recipient R] | api key remove
 
 and three the dispatcher alone calls: `unwalled` (exit 2 with one line where the file says on or
 is refused, 0 in silence where it says off), `help-lines` and `doctor-block` (printed only while
 the file says on). Off, every verb prints one line on stderr and exits 2; where no wall is proved
-every verb refuses with the platform's line. Every other row is reached through one `parts`
+every verb refuses with the platform's line. `wait`, `status` and `stop` (packet al7) are answered
+before the file is read, since they spend and start nothing. Every other row is reached through one `parts`
 object, imported here when none is handed in.
 """
 import getpass
 import json
+import math
 import os
 import platform
 import re
+import signal
+import subprocess
 import sys
+import threading
+import time
+import types
 
 SESSION = re.compile(r"[A-Za-z0-9-]{1,128}\Z")
 VERB_FLAGS = ("--dry-run", "--yes", "--json")
+DETACH = "--detach"
+RUN_VERBS = ("wait", "status", "stop")
+RUNS_SCHEMA = "agentik.agents.fanout/1"
 PARTS = {
     "parse": ("job", "parse"), "plan": ("fanout", "plan"), "run": ("fanout", "run"),
     "day": ("ledger", "day"), "find_claude": ("argv", "find_claude"), "build_argv": ("argv", "build"),
@@ -62,7 +73,7 @@ def verb_words(argv):
     return " ".join(words)
 
 
-def main(argv, *, roots=None, parts=None, stdin=None, stdout=None, stderr=None):
+def main(argv, *, roots=None, parts=None, stdin=None, stdout=None, stderr=None, child=None):
     stdin = sys.stdin if stdin is None else stdin
     stdout = sys.stdout if stdout is None else stdout
     stderr = sys.stderr if stderr is None else stderr
@@ -84,6 +95,13 @@ def main(argv, *, roots=None, parts=None, stdin=None, stdout=None, stderr=None):
             if quiet:
                 return 0
             err(messages.say(e.code, **e.fields))
+            return 2
+    picked = run_verb(argv[1:]) if verb == "fanout" else None
+    if picked is not None:
+        try:
+            return run_verbs(picked, roots, Parts() if parts is None else parts, stdout, err)
+        except Usage:
+            err(messages.say("lane.usage"))
             return 2
     try:
         lane = config.lane(roots)
@@ -116,7 +134,7 @@ def main(argv, *, roots=None, parts=None, stdin=None, stdout=None, stderr=None):
             err(messages.say("wall.platform", platform=platform.system()))
             return 2
         if verb == "fanout":
-            return fanout(argv[1:], roots, lane, parts, stdin, stdout, err)
+            return fanout(argv[1:], roots, lane, parts, stdin, stdout, err, child)
         return api(argv[1:], roots, lane, parts, stdin, stdout, err)
     except Usage:
         err(messages.say("lane.usage"))
@@ -141,17 +159,27 @@ def _as_dict(r):
     return dict(r._asdict()) if hasattr(r, "_asdict") else dict(vars(r))
 
 
-def fanout(rest, roots, lane, parts, stdin, stdout, err):
-    from apilane import messages, report
+def _stamp():
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+
+def fanout(rest, roots, lane, parts, stdin, stdout, err, child=None):
+    from apilane import messages, report, runs
     if rest[:1] in (["--help"], ["-h"]):
         stdout.write(messages.say("fanout.help") + "\n")
         return 0
     dry, yes, as_json = (f in rest for f in VERB_FLAGS)
-    args = [a for a in rest if a not in VERB_FLAGS]
+    detach = DETACH in rest
+    args = [a for a in rest if a not in VERB_FLAGS and a != DETACH]
     if not args:
         raise Usage()
     job = parts.parse(args, stdin=stdin)
     plan = parts.plan(job, lane=lane, roots=roots)
+    ends = None
+    if detach:
+        rounds, sec = runs.check_bound(job)
+        ends = messages.say("ends.by", id=job.id, rounds=rounds, timeout=runs.secs(job.timeout_sec),
+                            at=time.strftime("%Y-%m-%d %H:%M UTC", time.gmtime(time.time() + sec)))
     if as_json:
         if dry or not yes:
             stdout.write(json.dumps({"schema": "agentik.fanout/1", "plan": plan}) + "\n")
@@ -159,6 +187,11 @@ def fanout(rest, roots, lane, parts, stdin, stdout, err):
         stdout.write(messages.plan(plan, lane) + "\n")
     else:                       # running: stdout is one line a shard, the plan is progress
         err(messages.plan(plan, lane))
+    if ends is not None:
+        if as_json or (yes and not dry):
+            err(ends)
+        else:
+            stdout.write(ends + "\n")
     stdout.flush()
     if dry:
         return 0
@@ -170,17 +203,44 @@ def fanout(rest, roots, lane, parts, stdin, stdout, err):
         if stdin.readline().strip().lower() not in ("y", "yes"):
             err(messages.say("no.answer"))
             return 1
+    if detach:
+        return detach_run(job, roots, stdout, err, as_json, child, parts.started)
+    runs.sweep(roots, alive=parts.alive)
+    # the run's folder by one exclusive mkdir, as --detach takes it, unless this is the detached
+    # child of the folder's maker (its stdout is the folder's log.txt): one run a folder (R1-F2, F3)
+    made = None
+    if not runs.adopted(roots, job.id, stdout):
+        made = runs.make(roots, job.id, alive=parts.alive)[1]
+    try:
+        runs.claim(roots, job.id, os.getpid(), parts.started)   # seen before it spends (R2-F1)
+        return _foreground(job, roots, lane, parts, stdout, err, as_json)
+    finally:
+        if made is not None:
+            runs.drop(roots, job.id, made)
+
+
+def _foreground(job, roots, lane, parts, stdout, err, as_json):
+    from apilane import messages, report, runs
     session = session_id()
+    held = {}
     claude = parts.find_claude()
 
     def emit(event, **fields):
         if event == "reserved":
+            pid = os.getpid()
+            runs.write(roots, job.id, "start.json", {
+                "schema": runs.START_SCHEMA, "id": job.id, "pid": pid,
+                "pid_started": parts.started(pid), "session": session if session else "none",
+                "tag": getattr(job, "tag", None), "budget_usd": job.budget_usd, "at": _stamp()})
             err(messages.say("reserved", **fields))
         elif event in ("shard.start", "shard.end"):
             line = report.line(session, roots, alive=parts.alive)
             if line:
                 err(line)
         elif event == "done":
+            # from the run's return to the write of fanout.json a settled run keeps its record
+            if threading.current_thread() is threading.main_thread():
+                held["term"] = signal.signal(signal.SIGTERM, signal.SIG_IGN)
             err(messages.say("done", **fields))
 
     def ensure_probe(path):
@@ -191,16 +251,264 @@ def fanout(rest, roots, lane, parts, stdin, stdout, err):
                        key=lambda: parts.key_load(roots), ensure_probe=ensure_probe,
                        started=parts.started, emit=emit)
     shards = list(result.shards or [])
+    obj = {"schema": "agentik.fanout/1", "id": result.id, "rc": result.rc,
+           "session": session, "spent_usd": result.spent_usd,
+           "budget_usd": result.budget_usd, "shards": [_as_dict(s) for s in shards]}
+    try:
+        runs.write(roots, result.id, "fanout.json", dict(obj, tag=getattr(job, "tag", None), ended=_stamp()))
+    except runs.RunError:
+        pass
+    finally:
+        if "term" in held:
+            signal.signal(signal.SIGTERM, held.pop("term"))
     if as_json:
-        stdout.write(json.dumps({"schema": "agentik.fanout/1", "id": result.id, "rc": result.rc,
-                                 "session": session, "spent_usd": result.spent_usd,
-                                 "budget_usd": result.budget_usd,
-                                 "shards": [_as_dict(s) for s in shards]}) + "\n")
+        stdout.write(json.dumps(obj) + "\n")
     else:
         for s in shards:
             stdout.write(messages.shard(s) + "\n")
     stdout.flush()
     return result.rc
+
+
+def default_child(env=None):
+    """The detached child's prefix: the interpreter and flags of the dispatcher's lane_py, with
+    this file's real path (R2)."""
+    env = os.environ if env is None else env
+    cache = env.get("XDG_CACHE_HOME") or (env.get("HOME", "") + "/.cache")
+    return [sys.executable, "-I", "-X", "pycache_prefix=%s/agentik/pycache" % cache,
+            os.path.realpath(__file__)]
+
+
+def job_obj(job):
+    """The parsed job as its JSON form, its id and tag fixed: the child's stdin."""
+    return {"schema": "agentik.fanout.job/1", "id": job.id, "tag": getattr(job, "tag", None),
+            "budget_usd": job.budget_usd, "dirs": list(job.dirs),
+            "shards": [{"label": s.label, "type": s.type, "prompt": s.prompt} for s in job.shards],
+            "max_shard_usd": job.max_shard_usd, "jobs": job.jobs, "timeout_sec": job.timeout_sec}
+
+
+def _text(path):
+    try:
+        with open(path, encoding="utf-8", errors="replace") as fh:
+            return fh.read()
+    except OSError:
+        return ""
+
+
+def detach_run(job, roots, stdout, err, as_json, child=None, started=None):
+    """--detach: start `fanout - --yes` in a session of its own, then poll, never signal, until
+    its start.json holds its pid (0), it is gone (1 reserved, else its own exit), or 120 s (124).
+    It records its child's pid and start time in child.json, and removes only the folder it made
+    while that holds no start.json (R1-F2, F4)."""
+    from apilane import messages, proc, runs
+    path, made = runs.make(roots, job.id)
+    err(messages.say("detach.starting", id=job.id))
+    log = os.path.join(path, "log.txt")
+    try:
+        fd = os.open(log, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_APPEND, 0o600)
+    except OSError:
+        runs.drop(roots, job.id, made)
+        raise
+    try:
+        kid = subprocess.Popen(list(child or default_child()) + ["fanout", "-", "--yes"],
+                               stdin=subprocess.PIPE, stdout=fd, stderr=fd,
+                               start_new_session=True, close_fds=True)
+    except OSError:
+        os.close(fd)
+        runs.drop(roots, job.id, made)
+        raise
+    os.close(fd)
+    try:
+        runs.write(roots, job.id, "child.json", {"pid": kid.pid,
+                                                "pid_started": (started or proc.started)(kid.pid)})
+    except runs.RunError:
+        pass
+    try:
+        kid.stdin.write(json.dumps(job_obj(job)).encode())
+        kid.stdin.close()
+    except OSError:
+        pass
+    deadline = time.monotonic() + runs.START_SEC
+    while True:
+        done = kid.poll() is not None
+        start = (runs.read(roots, job.id) or {}).get("start") or {}
+        if start.get("pid") == kid.pid:
+            if as_json:
+                stdout.write(json.dumps({"schema": "agentik.fanout/1", "id": job.id, "pid": kid.pid,
+                                         "session": start.get("session"), "tag": getattr(job, "tag", None),
+                                         "budget_usd": job.budget_usd}) + "\n")
+            else:
+                stdout.write(job.id + "\n")
+            stdout.flush()
+            err(messages.say("detach.done", id=job.id, pid=kid.pid, budget_usd=job.budget_usd))
+            return 0
+        if done:
+            text = _text(log).rstrip("\n")
+            if any(l.get("kind") == "reserve" and l.get("pid") == kid.pid
+                   for l in runs.usage(roots, job.id)):
+                err(messages.say("detach.lost", id=job.id, budget_usd=job.budget_usd))
+                if text:
+                    err(text)
+                return 1
+            if text:
+                err(text)
+            runs.drop(roots, job.id, made)
+            rc = kid.returncode
+            return 2 if rc == 0 else (rc if rc > 0 else 128 - rc)
+        if time.monotonic() >= deadline:
+            stdout.write(job.id + "\n")
+            stdout.flush()
+            return 124
+        time.sleep(0.05)
+
+
+def run_verb(rest):
+    """(verb, its words, --json) when the first word left once the verb's flags are dropped is
+    wait, status or stop; a job file of that name is ./wait."""
+    words = [a for a in rest if a not in VERB_FLAGS and a != DETACH]
+    if words and words[0] in RUN_VERBS:
+        return words[0], words[1:], "--json" in rest
+    return None
+
+
+def _types_text(names):
+    counts = {}
+    for n in names:
+        counts[n] = counts.get(n, 0) + 1
+    return ", ".join("%d %s" % (c, n) for n, c in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0])))
+
+
+def _running_text(row):
+    names = [x["type"] for x in row["running"]]
+    return "%d running" % len(names) + (" (%s)" % _types_text(names) if names else "")
+
+
+def status_line(row):
+    from apilane import messages
+    text = _running_text(row) + (", %d queued" % row["queued"] if row["queued"] else "")
+    return "%s %s  %s  %s of %s  session %s  tag %s" % (
+        row["id"], row["state"], text, messages.cents(row["spent_usd"]),
+        messages.cents(row["budget_usd"]), row["session"] or "-", row["tag"] or "-")
+
+
+def _shard(s):
+    return types.SimpleNamespace(state=s.get("state"), cost_usd=s.get("cost_usd"),
+                                 estimated=s.get("estimated"), result_path=s.get("result_path"),
+                                 label=s.get("label"))
+
+
+def run_verbs(picked, roots, parts, stdout, err):
+    """`fanout wait`, `status` and `stop` (R3 to R5), answered whatever the lane's file says."""
+    from apilane import messages, runs
+    verb, args, as_json = picked
+    word, timeout, every = None, float(runs.WAIT_SEC), False
+    i = 0
+    while i < len(args):
+        a = args[i]
+        i += 1
+        if verb == "wait" and (a == "--timeout" or a.startswith("--timeout=")):
+            if a == "--timeout":
+                if i >= len(args):
+                    raise Usage()
+                value, i = args[i], i + 1
+            else:
+                value = a.split("=", 1)[1]
+            try:
+                timeout = float(value)
+            except ValueError:
+                raise Usage()
+            if not math.isfinite(timeout) or timeout < 0:
+                raise Usage()
+        elif verb == "status" and a == "--all" and not every:
+            every = True
+        elif a.startswith("--") or word is not None:
+            raise Usage()
+        else:
+            word = a
+    if verb == "status" and every and word is not None:
+        raise Usage()
+    session = session_id()
+    try:
+        if verb == "status":
+            rows = runs.status(roots, word, every_run=every, session=session, alive=parts.alive)
+            if as_json:
+                stdout.write(json.dumps({"schema": RUNS_SCHEMA, "ok": True, "tool": "agents",
+                                         "running": sum(len(r["running"]) for r in rows),
+                                         "by_type": runs.by_type(rows), "runs": rows}) + "\n")
+            else:
+                for r in rows:
+                    stdout.write(status_line(r) + "\n")
+            stdout.flush()
+            return 0
+        if verb == "wait":
+            res = runs.wait(roots, word, session=session, timeout=timeout, alive=parts.alive)
+        else:
+            res = runs.stop(roots, word, session=session, alive=parts.alive)
+    except runs.RunError as e:
+        text = messages.say(e.code, **e.fields)
+        if verb == "status" and as_json:
+            stdout.write(json.dumps({"schema": RUNS_SCHEMA, "ok": False, "tool": "agents",
+                                     "error": {"code": e.code, "message": text,
+                                               "remedy": "agentik agents fanout status --all"}})
+                         + "\n")
+        else:
+            err(text)
+        return 124 if e.code == "run.starting" else 2
+    return show(verb, res, as_json, timeout, stdout, err)
+
+
+def show(verb, res, as_json, timeout, stdout, err):
+    """What `wait` and `stop` print: the id first, then the run's end or its state."""
+    from apilane import messages, runs
+    run, kind, row = res["run"], res["kind"], res["row"]
+    fid = run["id"]
+    if res.get("sent"):
+        err(messages.say("run.sent", id=fid, pid=res["sent"]))
+    if kind == "ended":
+        end = run["end"]
+        if as_json:
+            stdout.write(json.dumps(end) + "\n")
+        else:
+            stdout.write(fid + "\n")
+            for s in end.get("shards") or []:
+                if isinstance(s, dict):
+                    stdout.write(messages.shard(_shard(s)) + "\n")
+        err(messages.say("done", fanout=fid, ok=row["shards_ok"], failed=row["shards_failed"],
+                         spent_usd=end.get("spent_usd"), budget_usd=end.get("budget_usd")))
+        rc = end.get("rc") if end.get("rc") in (0, 1) else 1
+    else:
+        stdout.write((json.dumps(row) if as_json else fid) + "\n")
+        groups = res.get("groups", 0)
+        if kind == "lost":
+            err(messages.say("run.lost", id=fid, budget_usd=row["budget_usd"],
+                             log_text="; its log: %s" % run["log"] if run["log"] else ""))
+            rc = 1
+        elif kind == "gone":
+            err(messages.say("run.gone", id=fid, spent_usd=res.get("spent_usd"),
+                             budget_usd=row["budget_usd"]))
+            rc = 1
+        elif kind == "running":
+            err(messages.say("run.still", id=fid, after=runs.secs(timeout),
+                             running_text=_running_text(row),
+                             queued_text=", %d queued" % row["queued"] if row["queued"] else "",
+                             spent_usd=row["spent_usd"], budget_usd=row["budget_usd"]))
+            rc = 124
+        elif kind == "never":
+            err(messages.say("run.never", id=fid,
+                             log_text="; its log: %s" % run["log"] if run["log"] else ""))
+            rc = 1
+        elif kind == "deaf":
+            err(messages.say("run.deaf", id=fid, after=runs.secs(runs.STOP_SEC), groups=groups,
+                             s="" if groups == 1 else "s"))
+            rc = 124
+        else:
+            err(messages.say("run.orphans", id=fid, groups=groups, s="" if groups == 1 else "s",
+                             budget_usd=row["budget_usd"]))
+            rc = 0
+    stdout.flush()
+    if verb == "stop" and kind in ("ended", "never", "lost", "gone"):
+        rc = 0
+    return rc
 
 
 def api(rest, roots, lane, parts, stdin, stdout, err):

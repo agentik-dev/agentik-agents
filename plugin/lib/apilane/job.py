@@ -1,7 +1,8 @@
 """A fan-out's job: the JSON form, the short form, and the pick between them.
 
 design/21 item 10. Nothing here prints; a refusal is a JobError with a `code`
-and `fields` (seams section 2): job.shape, job.id, job.flag, job.type.
+and `fields` (seams section 2): job.shape, job.id, job.flag, job.type, job.tag. A tag (packet
+al7) has the id's pattern, which ends at the text's end, and may repeat across runs.
 """
 import binascii
 import collections
@@ -19,16 +20,16 @@ DEFAULT_PROFILE = "review"
 LABEL_MAX = 80
 ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9-]{0,63}\Z")
 KEYS = ("schema", "id", "budget_usd", "dirs", "shards", "max_shard_usd", "jobs",
-        "timeout_sec")
+        "timeout_sec", "tag")
 SHARD_KEYS = ("label", "type", "prompt")
 # The old fan-out's flags that the lane does not take, each refused by name.
 REFUSED = ("--model", "--out", "--claude-arg", "--phase", "--stagger-sec")
 VALUED = ("--budget-usd", "--profile", "--tasks", "--add-dir", "-j", "--jobs",
-          "--max-shard-usd", "--timeout-sec", "--id")
+          "--max-shard-usd", "--timeout-sec", "--id", "--tag")
 
 Shard = collections.namedtuple("Shard", "label type prompt")
 Job = collections.namedtuple(
-    "Job", "id budget_usd dirs shards max_shard_usd jobs timeout_sec")
+    "Job", "id budget_usd dirs shards max_shard_usd jobs timeout_sec tag", defaults=(None,))
 
 
 class JobError(Exception):
@@ -95,6 +96,9 @@ def from_obj(obj, *, types=None):
         raise _shape("id", "kind")
     elif not ID_RE.match(jid):
         raise JobError("job.id", id=jid)
+    tag = obj.get("tag")
+    if tag is not None and (not isinstance(tag, str) or not ID_RE.match(tag)):
+        raise JobError("job.tag", tag=tag)
     if obj.get("budget_usd") is None:
         raise _shape("budget_usd", "missing")
     budget = float(_positive(obj, "budget_usd", None))
@@ -139,7 +143,7 @@ def from_obj(obj, *, types=None):
     if isinstance(timeout, float) and timeout.is_integer():
         timeout = int(timeout)
     return Job(jid, budget, tuple(dirs), tuple(shards),
-               None if max_shard is None else float(max_shard), jobs, timeout)
+               None if max_shard is None else float(max_shard), jobs, timeout, tag)
 
 
 def _decode(text):
@@ -258,6 +262,8 @@ def from_argv(argv, *, types=None):
     obj["dirs"] = opts["--add-dir"]
     if "--id" in opts:
         obj["id"] = opts["--id"]
+    if "--tag" in opts:
+        obj["tag"] = opts["--tag"]
     if "--jobs" in opts:
         obj["jobs"] = _value("--jobs", opts["--jobs"], int)
     if "--max-shard-usd" in opts:
