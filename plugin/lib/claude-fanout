@@ -1,0 +1,10 @@
+#!/bin/sh
+# claude-fanout: the old name of `agentik agents fanout` (design/21 item 12, packet al6). It runs
+# the dispatcher beside its own resolved path by /bin/sh, since the freeze leaves that file 0644,
+# as `fanout --yes` and the args unchanged in number, order and bytes. install-cli links it only
+# while the API lane is on. On a terminal it prints one note on stderr; in a pipe, none. The name
+# ends on 2026-12-31. POSIX sh.
+self=$(readlink -f -- "$0" 2>/dev/null) || self=$0
+here=$(CDPATH= cd -P -- "$(dirname -- "$self")" >/dev/null && pwd -P) || exit 2
+[ ! -t 2 ] || echo "claude-fanout: the name is now agentik agents fanout; this one ends on 2026-12-31." >&2
+exec /bin/sh "$here/agentik-agents" fanout --yes "$@"

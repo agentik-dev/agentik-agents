@@ -42,3 +42,7 @@ git log d8ca583 -- bin/claude-api-agent bin/claude-fanout bin/claude-costs bin/q
 ```
 
 Its suites were `tests/test-arg-handling.sh`, `tests/test-run-path.sh`, `tests/test-flag-pinning.sh`, `tests/test-apirun.py`, `tests/test-fanout.py`, `tests/test-costs.py`, `tests/test-queue.py` and `tests/test-queue-http.py`. The packets that built it, `a-s5-status-api`, `a-s7-prices`, `a-s11-queue-floor` and `a-s13-apirun-race`, say why each piece reads as it did.
+
+## Status: the lane returned (packet al6, plugin 1.8.0)
+
+The lane is back as `plugin/lib/apilane/`, behind a switch in the account's config file that is off by default: `agentik agents fanout` and `agentik agents api` (status, probe, key), a walled shard per agent (al1, al2), a job, a pool and a day's log with a reservation (al3), and the report, the hook and the verbs (al4). Off, every surface but `fanout` is what it was; `fanout` names the file to edit. Where no wall is proved (off macOS) it stays the stub that hands the call to the old tool. `claude-fanout` returns as a forward to `fanout --yes`, linked only while the lane is on, until 2026-12-31. What stays cut: the single-run verb, the pass-through, the open argv, the cost tool and the queue.

@@ -1,0 +1,211 @@
+#!/usr/bin/python3
+"""fake-claude: a stand-in for the CLI in the API lane's suites (row al1, R10).
+
+It never makes a request. A suite puts it first on a PATH built from nothing (a link
+named `claude` to this file) and reads its scripted mode and its record path from the
+prompt on stdin, since the lane hands the child an allow-listed environment that carries
+no test variable. Two prompt lines steer it:
+
+    fake-mode: cost | nocost | empty | placeholder | abort | echo | sleep | garbage |
+               crash | error | nan | hold
+    fake-record: /absolute/path.json
+    fake-stub: http://127.0.0.1:<port>      (hold: one request to the stub at the start)
+    fake-release: /absolute/path            (hold: waits for this file, then answers as cost)
+
+With `--version` it prints a version and exits. Where its environment names
+`ANTHROPIC_BASE_URL`, which only the probe gives, it speaks to the lane's loopback stub
+as the CLI would (row al6): the key in `x-api-key`, the `--tools` offered, each `Read` the
+stub asks for done and sent back, refused outside the `--add-dir` folders under
+`--restricted`. Where a folder `fake-records` sits beside this file (a suite's copy of it),
+every start appends a line to `starts.log` there, and the stub mode's record, with no
+`fake-record` line, is `fake-records/<pid>.json`.
+
+It writes the record (its argv, its environment, its stdin, its cwd, pid and process
+group, and in `sleep` mode its grandchild's pid) before it answers, then prints a
+result envelope the way `--output-format json` does. With `--json-schema` in its argv it
+answers with a `structured_output`, citing the first file under its first `--add-dir`.
+"""
+import json
+import os
+import subprocess
+import sys
+import time
+import urllib.request
+
+COST = 0.0421
+BILLED_AT_ABORT = 0.0117
+
+
+def directive(text, name):
+    for line in text.splitlines():
+        if line.startswith(name + ":"):
+            return line.split(":", 1)[1].strip()
+    return None
+
+
+def first_file(argv):
+    for i, a in enumerate(argv):
+        if a == "--add-dir" and i + 1 < len(argv):
+            root = argv[i + 1]
+            for name in sorted(os.listdir(root)):
+                if os.path.isfile(os.path.join(root, name)):
+                    return name
+    return "missing.py"
+
+
+VERSION = "9.9.9"
+
+
+def flag_values(argv, flag):
+    return [argv[i + 1] for i, a in enumerate(argv[:-1]) if a == flag]
+
+
+def post(url, key, body):
+    req = urllib.request.Request(url.rstrip("/") + "/v1/messages", data=json.dumps(body).encode(),
+                                 headers={"content-type": "application/json", "x-api-key": key,
+                                          "anthropic-version": "2023-06-01"}, method="POST")
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        return json.loads(resp.read().decode())
+
+
+def inside(path, dirs):
+    real = os.path.realpath(path)
+    return any(real == d or real.startswith(d.rstrip("/") + "/")
+               for d in (os.path.realpath(x) for x in dirs))
+
+
+def speak(base, argv, prompt):
+    """The CLI's turns against the stub: answer each Read it asks for, end on its text."""
+    key = os.environ.get("ANTHROPIC_API_KEY", "")
+    tools = (flag_values(argv, "--tools") or [""])[0].split()
+    model = (flag_values(argv, "--model") or ["fake"])[0]
+    dirs, restricted = flag_values(argv, "--add-dir"), "--restricted" in argv
+    messages = [{"role": "user", "content": prompt or "(no prompt)"}]
+    text = ""
+    for _ in range(10):
+        reply = post(base, key, {"model": model, "max_tokens": 64, "messages": messages,
+                                 "tools": [{"name": t, "input_schema": {"type": "object"}}
+                                           for t in tools]})
+        messages.append({"role": "assistant", "content": reply["content"]})
+        results = []
+        for block in reply["content"]:
+            if block.get("type") == "text":
+                text = block["text"]
+            if block.get("type") != "tool_use":
+                continue
+            path = block["input"].get("file_path", "")
+            if restricted and not inside(path, dirs):
+                body, err = "outside the working directories", True
+            else:
+                try:
+                    with open(path) as f:
+                        body, err = f.read(), False
+                except OSError as e:
+                    body, err = "read failed: %s" % e.strerror, True
+            results.append({"type": "tool_result", "tool_use_id": block["id"],
+                            "content": body, "is_error": err})
+        if reply.get("stop_reason") != "tool_use":
+            break
+        messages.append({"role": "user", "content": results})
+    return text
+
+
+def hold(stdin):
+    stub, release = directive(stdin, "fake-stub"), directive(stdin, "fake-release")
+    if stub:
+        post(stub, "", {"model": "hold", "max_tokens": 1, "tools": [],
+                        "messages": [{"role": "user", "content": "start %d" % os.getpid()}]})
+    deadline = time.time() + 120
+    while release and not os.path.exists(release) and time.time() < deadline:
+        time.sleep(0.05)
+
+
+BESIDE = os.path.join(os.path.dirname(os.path.realpath(__file__)), "fake-records")
+
+
+def main():
+    argv = sys.argv[1:]
+    if os.path.isdir(BESIDE):
+        with open(os.path.join(BESIDE, "starts.log"), "a") as f:
+            f.write("%d %s\n" % (os.getpid(), " ".join(argv[:1])))
+    if argv[:1] == ["--version"]:
+        sys.stdout.write("%s (Fake Code)\n" % VERSION)
+        return 0
+    stdin = sys.stdin.read()
+    base = os.environ.get("ANTHROPIC_BASE_URL")
+    mode = "stub" if base else (directive(stdin, "fake-mode") or "cost")
+    record = directive(stdin, "fake-record")
+    if record is None and base and os.path.isdir(BESIDE):
+        record = os.path.join(BESIDE, "%d.json" % os.getpid())
+    structured = "--json-schema" in argv
+    rec = {"argv": sys.argv, "env": dict(os.environ), "stdin": stdin,
+           "cwd": os.getcwd(), "pid": os.getpid(), "pgid": os.getpgid(0),
+           "mode": mode, "grandchild": None}
+    if mode == "sleep":
+        child = subprocess.Popen(["/bin/sleep", "300"])
+        rec["grandchild"] = child.pid
+    if record:
+        with open(record, "w") as f:
+            json.dump(rec, f)
+    if mode == "sleep":
+        time.sleep(300)
+        return 0
+    if mode == "stub":
+        text = speak(base, argv, stdin)
+        sys.stdout.write(json.dumps({"type": "result", "subtype": "success", "is_error": False,
+                                     "terminal_reason": "completed", "result": text,
+                                     "total_cost_usd": 0.0, "num_turns": 1}) + "\n")
+        return 0
+    if mode == "hold":
+        hold(stdin)
+        mode = "cost"
+    if mode == "crash":
+        return 3
+    if mode == "garbage":
+        sys.stdout.write("not json at all\n")
+        return 7
+    env = {"type": "result", "subtype": "success", "is_error": False,
+           "terminal_reason": "completed", "session_id": "fake-session",
+           "total_cost_usd": COST, "num_turns": 3, "permission_denials": [],
+           "usage": {}, "modelUsage": {}}
+    rc = 0
+    if mode == "nocost":
+        del env["total_cost_usd"]
+    if mode in ("cost", "nocost"):
+        if structured:
+            env["structured_output"] = {
+                "summary": "One defect: the reader closes its file twice on the error path.",
+                "findings": [{"file": first_file(argv), "line": 1, "severity": "low",
+                              "issue": "the file handle is closed twice on the error path"}]}
+        else:
+            env["result"] = "The answer is in a.py at line 1, where the reader opens it."
+    elif mode == "empty":
+        env["result"] = ""
+    elif mode == "placeholder":
+        if structured:
+            env["structured_output"] = {"summary": "test", "findings": [
+                {"file": "a", "severity": "low", "issue": "test"}]}
+        else:
+            env["result"] = "test"
+    elif mode == "abort":
+        env.update(is_error=True, subtype="error_max_budget_usd",
+                   terminal_reason="budget_exhausted", result="",
+                   total_cost_usd=BILLED_AT_ABORT)
+        rc = 1
+    elif mode == "echo":
+        env["result"] = "Here is what I found: " + os.environ.get("ANTHROPIC_API_KEY", "")
+    elif mode == "error":
+        env.update(is_error=True, terminal_reason="api_error", result="Invalid API key")
+        rc = 1
+    if mode == "nan":
+        sys.stdout.write('{"total_cost_usd": NaN, "num_turns": 3, "is_error": false, '
+                         '"terminal_reason": "completed", "result": "A real answer, '
+                         'with a.py cited at line 1."}\n')
+        return 0
+    sys.stdout.write(json.dumps(env) + "\n")
+    sys.stderr.write("fake-claude: mode %s\n" % mode)
+    return rc
+
+
+if __name__ == "__main__":
+    sys.exit(main())

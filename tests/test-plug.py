@@ -177,8 +177,10 @@ class Plug(unittest.TestCase):
         doc = self.config_read()
         self.assertEqual((doc["schema"], doc["ok"], doc["tool"]), ("agentik.config/1", True, "agents"))
         names = [layer["name"] for layer in doc["layers"]]
-        self.assertEqual(names, ["default", "rig", "env"])
-        self.assertEqual([layer["present"] for layer in doc["layers"]], [True, False, False])
+        # al6: the API lane's file is a fourth layer, `user`; under this temp HOME the lane reads
+        # no account, so it has no path and its six keys show their defaults
+        self.assertEqual(names, ["default", "rig", "env", "user"])
+        self.assertEqual([layer["present"] for layer in doc["layers"]], [True, False, False, False])
         self.assertEqual(doc["layers"][1]["path"], self.backends)
         self.assertEqual(doc["warnings"], [])
         keys = [s["key"] for s in doc["settings"]]
@@ -186,7 +188,9 @@ class Plug(unittest.TestCase):
         for s in doc["settings"]:
             self.assertEqual(set(s), SETTING_KEYS, s["key"])
             self.assertRegex(s["key"], r"^[a-z0-9_-]+(\.[a-z0-9_-]+)+$")
-            self.assertFalse(s["key"].startswith("api."))
+            if s["key"].startswith("api."):
+                self.assertIn(s["key"][4:], ("enabled", "max_fanout_usd", "max_day_usd",
+                                             "console_limit_usd", "proxy", "ca_file"))
             self.assertIn(s["type"], TYPES, s["key"])
             self.assertEqual(s["source"], {"layer": "default", "path": None, "line": None}, s["key"])
             self.assertTrue(all(v["layer"] in names for v in s["values"]), s["key"])
@@ -284,7 +288,7 @@ class Plug(unittest.TestCase):
         before = self.snapshot()
         doc = self.config_read("route.listen")
         self.assertEqual([s["key"] for s in doc["settings"]], ["route.listen"])
-        self.assertEqual(len(doc["layers"]), 3)
+        self.assertEqual(len(doc["layers"]), 4)
         self.assertEqual(self.config_read("nosuch")["settings"], [])
         self.unchanged(before)
         self.write_backends("{not json")

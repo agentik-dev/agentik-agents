@@ -47,7 +47,7 @@ PFX_SH  = pfx="$$($(ABSPATH) "$$PREFIX")" || exit 2; bin="$$pfx/bin"; share="$$p
 TOOLS := agentroute claude-local localrig claude-agents
 # The API lane's tools, gone with packet a-s17: a link of theirs that still points into this
 # checkout would dangle, so install and uninstall remove it and touch no other file.
-RETIRED := claude-api-agent claude-fanout claude-costs queue-mvp
+RETIRED := claude-api-agent claude-costs queue-mvp
 # scripts/doclint is the session plugin's doc gate, copied byte for byte (conventions §6);
 # sync does not carry it, so `doclint` checks it against this pin first (a-s8).
 DOCLINT_SHA = 26eaf2c84aadb822f8d63a0257b063afcc0ba6d9bbcf1d2d856abe4c6388341f
@@ -117,11 +117,13 @@ test: ## Run every test suite (stub-driven, they spend nothing), then the 3.9 fl
 	for t in tests/test-dispatch.sh tests/test-rig.sh tests/test-readme.sh; do \
 	  printf '=== %s ===\n' "$$t"; bash "$$t" || fail=1; \
 	done; \
-	for t in tests/test-route.py tests/test-status.py tests/test-plug.py tests/test-hygiene.py tests/test-bare-machine.py tests/test-descriptions.py; do \
+	for t in tests/test-route.py tests/test-status.py tests/test-plug.py tests/test-hygiene.py tests/test-bare-machine.py tests/test-descriptions.py \
+	  tests/test_al1_run.py tests/test_al2_wall.py tests/test_al3_fanout.py tests/test_al4_report.py tests/test_al4_off_golden.py tests/test_al6_join.py; do \
 	  printf '=== %s ===\n' "$$t"; $(PY) "$$t" || fail=1; \
 	done; \
 	if $(FLOOR) -c '' 2>/dev/null; then \
-	  for t in tests/test-route.py tests/test-status.py tests/test-plug.py; do \
+	  for t in tests/test-route.py tests/test-status.py tests/test-plug.py \
+	    tests/test_al1_run.py tests/test_al2_wall.py tests/test_al3_fanout.py tests/test_al4_report.py tests/test_al4_off_golden.py tests/test_al6_join.py; do \
 	    printf '=== %s (the 3.9 floor) ===\n' "$$t"; $(FLOOR) "$$t" || fail=1; \
 	  done; \
 	  printf '=== %s (the 3.9 floor) ===\n' tests/test-rig.sh; \
@@ -147,10 +149,13 @@ check-unlocked: test lint doclint hygiene plugin-version-check descriptions vali
 
 lint: ## Syntax-check every tool (sh, bash, python)
 	@sh -n plugin/lib/agentik-agents && echo "  plugin/lib/agentik-agents: sh syntax OK"
+	@for f in plugin/hooks/api-lane plugin/lib/apilane/prefilter.sh plugin/lib/claude-fanout; do \
+	  sh -n "$$f" && echo "  $$f: sh syntax OK" || exit 1; done
 	@bash -n plugin/lib/claude-local && echo "  plugin/lib/claude-local: bash syntax OK"
 	@bash -n plugin/lib/localrig && echo "  plugin/lib/localrig: bash syntax OK"
 	@$(PY) -c "import ast,sys; [ast.parse(open(f).read()) for f in sys.argv[1:]]" \
 	  plugin/lib/agentroute plugin/lib/claude-agents plugin/lib/agentik-agents.py plugin/lib/agents_install.py \
+	  plugin/lib/agents_plug.py plugin/lib/apilane/*.py \
 	  && echo "  python tools: syntax OK"
 	@bash -n scripts/readme-render && echo "  scripts/readme-render: bash syntax OK"
 
