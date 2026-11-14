@@ -12,14 +12,14 @@
 - [x] act 0: this charter.
 - [x] act 1, R1 to R4: the router's check marks its row `not_started: true` where the connect is refused (absent on every other row, text and exit unchanged); the plug's lane read gives that row `note`, its detail naming the address and `agentik agents local`; the text doctor prints it as one line and out of the count, through the plug's `lane text`, and asks the router as at the pin when the plug cannot answer. Tests 19 to 23 in `tests/test-plug.py`; 19, 20 and 22 red at 2b81b47, all green.
 - [x] act 2, R5: plugin 1.9.1, alone in the last commit under `plugin/`.
-- [ ] act 3: the gate once on the head.
+- [x] act 3: the gate once on this commit, the branch's tip (its id in the coordinator's record).
 
 ## Handover
 - decide, owner: the coordinator: the new tests run under a sandbox that lets loopback through (to ports they bind and close, or their own listener), since a denied connect is no refused one; the router's address is a variable in them, as the router reads it from one only; consumer: the review.
 - decide, owner: the coordinator: the command the note names is `agentik agents local`, since the README says it starts the router when needed; consumer: the review.
 
 ## Next act
-The gate once on the head; then the coordinator's review and the landing.
+The coordinator's review and the landing.
 
 ## Exit
-(filled at the end)
+R1 to R5 built and committed, each behind a test; hygiene and the version check clean; the gate runs on this commit.
