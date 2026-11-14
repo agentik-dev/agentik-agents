@@ -182,14 +182,28 @@ def _read(path):
     return obj if isinstance(obj, dict) else None
 
 
+def _mtime(path):
+    try:
+        return os.stat(path).st_mtime_ns
+    except OSError:
+        return None
+
+
 def read(roots, fid):
-    """{id, folder, start, end, log} of a run, or None where it has no folder."""
+    """{id, folder, start, end, child, log} of a run, or None where it has no folder. An end older
+    than the start is an earlier run's and no end of this one (R1-F3)."""
     path = folder(roots, fid)
     if not os.path.isdir(path):
         return None
     log = os.path.join(path, "log.txt")
-    return {"id": fid, "folder": path, "start": _read(os.path.join(path, "start.json")),
-            "end": _read(os.path.join(path, "fanout.json")),
+    start_path, end_path = os.path.join(path, "start.json"), os.path.join(path, "fanout.json")
+    start, end = _read(start_path), _read(end_path)
+    if start is not None and end is not None:
+        began, ended = _mtime(start_path), _mtime(end_path)
+        if began is not None and ended is not None and ended < began:
+            end = None
+    return {"id": fid, "folder": path, "start": start, "end": end,
+            "child": _read(os.path.join(path, "child.json")),
             "log": log if os.path.exists(log) else None}
 
 

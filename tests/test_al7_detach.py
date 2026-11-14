@@ -952,6 +952,46 @@ class SameIdTest(Det):
             self.assertEqual((rc, out.split()[:2]), (0, [fid, "ended"]), err)
 
 
+class StaleTest(Det):
+    """Review 1, R1-F3: no run starts in a folder that holds an older run's record, and `stop` on a
+    live run signals it whatever stale end its folder holds."""
+
+    def test_old_record(self):
+        self.plant("reuse", end=0)
+        path = self.mkjob("reuse", 0.2, (("u1", "explore", "cost"),))
+        with mock.patch.dict(os.environ, self.cenv):
+            err = io.StringIO()
+            rc = cli.main(["fanout", path, "--yes"], roots=self.roots, stdout=io.StringIO(),
+                          stderr=err)
+        self.assertEqual(rc, 2, err.getvalue())
+        self.assertIn("the fan-out id reuse is taken", err.getvalue())
+        self.assertEqual(self.kinds("reuse"), [])
+        self.assertFalse(os.path.exists(os.path.join(self.records, "u1.json")))
+        self.assertEqual(self.rec("reuse", "fanout.json")["rc"], 0)
+        rc, out, err = self.detach(path, "--yes")
+        self.assertEqual((rc, out), (2, ""), err)
+        self.assertIn("the fan-out id reuse is taken", err)
+        self.assertEqual(self.kinds("reuse"), [])
+
+    def test_end_before_start(self):
+        sleeper = subprocess.Popen(["/bin/sleep", "60"])
+        self.addCleanup(lambda: sleeper.poll() is None and sleeper.kill())
+        reaped(sleeper)
+        st = wait_for(lambda: proc.started(sleeper.pid), 10)
+        self.plant("old2", end=0)
+        old = time.time() - 3600
+        os.utime(os.path.join(self.fdir("old2"), "fanout.json"), (old, old))
+        self.plant("old2", pid=sleeper.pid, pid_started=st)
+        rc, out, err = self.verb("status", "old2")
+        self.assertEqual((rc, out.split()[:2]), (0, ["old2", "running"]), err)
+        rc, out, err = self.verb("wait", "old2", "--timeout", "0")
+        self.assertEqual((rc, out), (124, "old2\n"), err)
+        rc, out, err = self.verb("stop", "old2")
+        self.assertEqual(rc, 0, err)
+        self.assertIn("stop sent to pid %d" % sleeper.pid, err)
+        self.assertTrue(wait_for(lambda: sleeper.poll() is not None, 5))
+
+
 class SentenceTest(unittest.TestCase):
     def test_sentences(self):
         self.assertEqual(messages.say("hook.on"), HOOK)
