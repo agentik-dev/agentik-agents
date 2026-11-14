@@ -13,13 +13,14 @@
 - [x] act 1: `tests/test_al2b_linux.py` (lines 1 to 6 and DoubtTest; its 8 classes skip here, one reason each) and `tests/test_al2b_argv.py` (7a to 7d), red at 2b81b47: 3 failures and 14 errors of 18 (no `_BWRAP_EMPTY_IF`, `_TRIED`, `_launch_python`, `_stub_inside`, `inside`; no `walled.sh`), the agreement test green.
 - [x] act 2: R2, R3 and R5: the backend, its trial (kept per process), `walled.sh`; al2's no-backend test hides the bwrap path too. `A BwrapArgvTest TrialTest WalledShTest` 14 OK; `tests/test_al2_wall.py` OK.
 - [x] act 3: R4: the probe's launcher (`probe.launch`, `inside`), the stub's `start(port)`; the launcher passes the builders' environment by its names alone, since Apple's `/usr/bin/python3` adds `SDKROOT` and others at its start. `A` 18 OK under both interpreters.
-- [ ] act 4: the `Makefile`'s two lists; the gate once.
+- [x] act 4: the `Makefile`'s two lists name `test_al2b_argv.py` and `test_al2b_linux.py`.
+- [ ] act 5: the gate once.
 
 ## Handover
 - decide, owner: the coordinator: the version is not taken in this build, so `plugin-version-check` reds the branch; consumer: the landing.
 
 ## Next act
-Act 4: the lists and the gate.
+Act 5: the gate once on the head.
 
 ## Exit
 Not yet.
