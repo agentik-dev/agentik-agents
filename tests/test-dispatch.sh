@@ -157,6 +157,9 @@ fan "--yes alone" "argc=0" "" 7 "$F/stub" --yes
 fan "no args" "argc=0" "" 7 "$F/stub"
 fan "--yes= kept" "$(printf 'argc=2\n[--yes=1]\n[-yes]')" "" 7 "$F/stub" --yes=1 -yes
 fan "--help not alone" "$(printf 'argc=2\n[--help]\n[x]')" "" 7 "$F/stub" --help x
+# packet al7: where no wall is proved the detached forms reach the old tool unchanged
+fan "--detach" "$(printf 'argc=2\n[--detach]\n[x]')" "" 7 "$F/stub" --detach x
+fan "wait" "$(printf 'argc=4\n[wait]\n[x]\n[--timeout]\n[540]')" "" 7 "$F/stub" wait x --timeout 540
 fan "none on PATH" "" "$NO_TOOL" 2 "$F/none" x
 fan "own forward" "" "$OWN" 2 "$F/own" x
 if [ ! -e "$F/ran" ]; then pass=$((pass + 1)); else fail=$((fail + 1)); echo "FAIL fanout: the own forward ran"; fi
