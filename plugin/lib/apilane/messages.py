@@ -93,6 +93,8 @@ TEXTS = {
                 "ended; stop it again, or wait for it",
     "run.orphans": "fan-out {id}: its process is gone; {groups} shard group{s} ended; its whole "
                    "{budget_usd_text} counts against today",
+    "run.unseen": "%s: the run's record {path} could not be written ({why}), so no verb could see "
+                  "the run. Nothing ran." % DOOR,
     "run.never": "fan-out {id}: never started: no process of it lives, it wrote no start, and no "
                  "shard of it ran{log_text}",
     "run.starting": "fan-out {id}: still starting, no pid yet; stop it again once status reads "

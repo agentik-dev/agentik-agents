@@ -2,13 +2,14 @@
 
 `<state>/fanouts/<id>/`, 0700: `start.json`, written by the verb at the reservation; `fanout.json`,
 the object `--json` prints plus `tag` and `ended`, written when the run returns; and a detached
-run's `log.txt` and `child.json` (its child's pid and start time, written by the parent). Each file
+run's `log.txt`; and `child.json`, the pid and start time of the process that will write
+`start.json`, written by the detached parent and by that process itself. Each file
 is 0600 and written by one rename. Every run, foreground or detached, takes its folder by one
 exclusive mkdir under the folder's lock, so no run starts in a folder that holds another's record. `wait`, `status` and `stop` match an
 ID against the job's id pattern before they join it to a path. The sweep prunes old folders and
 records once at a fan-out's start. Nothing here prints: a verb returns what its caller prints, or
 raises a RunError with a `code` (`run.unknown`, `run.none`, `run.two`, `run.path`, `run.starting`,
-`run.record`, `job.long`, `id.used`, `id.taken`), whose sentence is `messages.py`'s.
+`run.record`, `job.long`, `id.used`, `id.taken`, `run.unseen`), whose sentence is `messages.py`'s.
 """
 import contextlib
 import fcntl
@@ -135,6 +136,19 @@ def adopted(roots, fid, out):
     except (OSError, AttributeError, ValueError, io.UnsupportedOperation):
         return False
     return (mine.st_dev, mine.st_ino) == (log.st_dev, log.st_ino)
+
+
+def claim(roots, fid, pid, started):
+    """The process that will write `start.json` names itself in `child.json` when it takes or
+    adopts the folder, unless the file already does, so `state` reads `starting` while it lives
+    (R2-F1). `run.unseen` when it cannot: a run no verb can see does not start."""
+    known = _read(os.path.join(folder(roots, fid), "child.json")) or {}
+    if known.get("pid") == pid and known.get("pid_started"):
+        return
+    try:
+        write(roots, fid, "child.json", {"pid": pid, "pid_started": started(pid)})
+    except RunError as e:
+        raise RunError("run.unseen", id=fid, path=e.fields.get("path"), why=e.fields.get("why"))
 
 
 def drop(roots, fid, ino):

@@ -68,7 +68,12 @@ roots = paths.Roots(*sys.argv[2:6])
 hook, child, argv = sys.argv[6], json.loads(sys.argv[7]), sys.argv[8:]
 parts = cli.Parts()
 if hook.startswith("lock:"):
-    os.chmod(os.path.join(roots.state, "fanouts", hook[5:]), 0o500)
+    here = os.path.join(roots.state, "fanouts", hook[5:])
+    for _i in range(200):   # once the parent has named this child in child.json
+        if os.path.exists(os.path.join(here, "child.json")):
+            break
+        time.sleep(0.05)
+    os.chmod(here, 0o500)
 elif hook == "term":
     real = parts.run
     def run(*a, **k):
@@ -76,6 +81,13 @@ elif hook == "term":
         os.kill(os.getpid(), signal.SIGTERM)
         time.sleep(0.3)
         return r
+    parts.run = run
+elif hook.startswith("stall:"):
+    real_run = parts.run
+    def run(*a, **k):
+        while not os.path.exists(hook[6:]):
+            time.sleep(0.05)
+        return real_run(*a, **k)
     parts.run = run
 elif hook == "deaf":
     orig = signal.signal
@@ -1052,6 +1064,101 @@ class NeverTest(Det):
         rc, out, err = self.detach(path, "--yes")
         self.assertEqual((rc, out), (0, "cut3\n"), err)
         self.assertTrue(self.ended("cut3"))
+
+
+def failing_child_json(real):
+    """`runs.write` that fails for `child.json` alone, as an unwritable record would."""
+    def write(roots, fid, name, obj):
+        if name == "child.json":
+            from apilane import runs
+            raise runs.RunError("run.record", id=fid, path=name, why="Permission denied")
+        return real(roots, fid, name, obj)
+    return write
+
+
+class ClaimTest(Det):
+    """Review 2, R2-F1: the process that will write `start.json` names itself in `child.json` when
+    it takes or adopts the folder, so a live run stalled before its start is never read `never`."""
+    age, never = NeverTest.age, NeverTest.never
+
+    def stalled(self, fid):
+        from apilane import runs
+        kid = wait_for(lambda: self.rec(fid, "child.json"), 30)
+        self.assertTrue(kid, "no child.json")
+        self.assertTrue(proc.alive(kid["pid"], kid["pid_started"]))
+        self.age(fid, 200)
+        ino = os.stat(self.fdir(fid)).st_ino
+        run = runs.read(self.roots, fid)
+        self.assertEqual(runs.state(run, proc.alive), "starting")
+        rc, out, err = self.verb("stop", fid)
+        self.assertEqual(rc, 124, err)
+        self.assertIn("still starting", err)
+        rc, out, err = self.verb("wait", fid, "--timeout", "1")
+        self.assertEqual(rc, 124, err)
+        self.assertNotIn("never started", err)
+        with self.assertRaises(runs.RunError) as got:
+            runs.make(self.roots, fid)
+        self.assertEqual(got.exception.code, "id.taken")
+        self.assertEqual(os.stat(self.fdir(fid)).st_ino, ino)
+        return kid
+
+    def test_foreground_stalled(self):
+        gate = os.path.join(self.t, "go-fg")
+        path = self.mkjob("hold1", 0.2, (("w1", "explore", "cost"),))
+        p = subprocess.Popen(self.prefix("stall:" + gate) + ["fanout", path, "--yes"],
+                             env=self.cenv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                             stderr=subprocess.PIPE, universal_newlines=True)
+        self.addCleanup(lambda: p.poll() is None and p.kill())
+        kid = self.stalled("hold1")
+        self.assertEqual(kid["pid"], p.pid)
+        open(gate, "w").close()
+        _out, err = p.communicate(timeout=120)
+        self.assertEqual(p.returncode, 0, err)
+        self.assertEqual(self.kinds("hold1").count("reserve"), 1)
+        self.assertTrue(self.ended("hold1"))
+
+    def test_detached_child_stalled(self):
+        from apilane import runs
+        gate = os.path.join(self.t, "go-d")
+        path = self.mkjob("hold2", 0.2, (("w2", "explore", "cost"),))
+        box = {}
+
+        def one():
+            out, err = io.StringIO(), io.StringIO()
+            box["d"] = (cli.main(["fanout", path, "--detach", "--yes"], roots=self.roots,
+                                 stdout=out, stderr=err, child=self.prefix("stall:" + gate)),
+                        out.getvalue(), err.getvalue())
+        with mock.patch.dict(os.environ, self.cenv), \
+                mock.patch.object(runs, "write", failing_child_json(runs.write)):
+            th = threading.Thread(target=one)
+            th.start()
+            try:
+                self.stalled("hold2")
+            finally:
+                open(gate, "w").close()
+                th.join(150)
+        self.assertEqual(box["d"][0], 0, box)
+        self.assertTrue(self.ended("hold2"))
+
+    def test_claim_fails(self):
+        from apilane import runs
+        path = self.mkjob("hold3", 0.2, (("w3", "explore", "cost"),))
+        err = io.StringIO()
+        with mock.patch.dict(os.environ, self.cenv), \
+                mock.patch.object(runs, "write", failing_child_json(runs.write)):
+            rc = cli.main(["fanout", path, "--yes"], roots=self.roots, stdout=io.StringIO(),
+                          stderr=err)
+        self.assertEqual(rc, 2, err.getvalue())
+        self.assertEqual(self.kinds("hold3"), [])
+        self.assertFalse(os.path.exists(os.path.join(self.records, "w3.json")))
+        self.assertFalse(os.path.exists(self.fdir("hold3")))
+
+    def test_dead_named_process(self):
+        self.plant("gone1", start=False)
+        with open(os.path.join(self.fdir("gone1"), "child.json"), "w") as fh:
+            json.dump({"pid": dead_pid(), "pid_started": "Mon Jan  1 00:00:00 2001"}, fh)
+        self.age("gone1", 200)
+        self.never("gone1")
 
 
 class PickTest(Det):

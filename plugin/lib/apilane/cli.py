@@ -212,6 +212,7 @@ def fanout(rest, roots, lane, parts, stdin, stdout, err, child=None):
     if not runs.adopted(roots, job.id, stdout):
         made = runs.make(roots, job.id, alive=parts.alive)[1]
     try:
+        runs.claim(roots, job.id, os.getpid(), parts.started)   # seen before it spends (R2-F1)
         return _foreground(job, roots, lane, parts, stdout, err, as_json)
     finally:
         if made is not None:
