@@ -873,6 +873,85 @@ class SweepTest(Det):
         self.assertFalse(os.path.exists(os.path.join(self.roots.state, "live", "empty")))
 
 
+def slowed(prefix, sec):
+    """A child prefix that sleeps `sec` seconds before the child starts."""
+    return ["/bin/sh", "-c", 'sleep %s; exec "$@"' % sec, "sh"] + list(prefix)
+
+
+def reaped(p):
+    """A thread that reaps a process the test started, so `ps` never reads its zombie as alive."""
+    th = threading.Thread(target=p.wait, daemon=True)
+    th.start()
+    return th
+
+
+class SameIdTest(Det):
+    """Review 1, R1-F2: a foreground run and a detached one under one id end as one run and one
+    refusal, and `status` and `stop` find the one that runs."""
+
+    def fore(self, path):
+        p = subprocess.Popen(self.prefix() + ["fanout", path, "--yes"], env=self.cenv,
+                             stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                             stderr=subprocess.PIPE, universal_newlines=True)
+        self.addCleanup(self.reap, p)
+        return p
+
+    def reap(self, p):
+        if p.poll() is None:
+            p.kill()
+        p.communicate()
+
+    def back(self, path, child, box):
+        def one():
+            out, err = io.StringIO(), io.StringIO()
+            box["d"] = (cli.main(["fanout", path, "--detach", "--yes", "--json"], roots=self.roots,
+                                 stdout=out, stderr=err, child=child),
+                        out.getvalue(), err.getvalue())
+        th = threading.Thread(target=one)
+        th.start()
+        return th
+
+    def test_detached_first(self):
+        path = self.mkjob("twin", 1, (("t1", "explore"), ("t2", "review")))
+        box = {}
+        with mock.patch.dict(os.environ, self.cenv):
+            th = self.back(path, slowed(self.prefix(), 4), box)
+            self.assertTrue(wait_for(lambda: os.path.isdir(self.fdir("twin")), 10))
+            fg = self.fore(path)
+            th.join(150)
+        self.assertEqual(box["d"][0], 0, box)
+        out, err = fg.communicate(timeout=60)
+        self.assertEqual(fg.returncode, 2, err)
+        self.assertIn("the fan-out id twin is taken", err)
+        self.assertEqual(self.kinds("twin").count("reserve"), 1)
+        pid = json.loads(box["d"][1])["pid"]
+        self.assertEqual(self.started("twin", labels=("t1", "t2"))["pid"], pid)
+        rc, out, err = self.verb("status", "twin")
+        self.assertEqual((rc, out.split()[:2]), (0, ["twin", "running"]), err)
+        rc, out, err = self.verb("stop", "twin")
+        self.assertEqual(rc, 0, err)
+        self.assertIn("stop sent to pid %d" % pid, err)
+        self.assertEqual(self.kinds("twin").count("settle"), 1)
+
+    def test_at_once(self):
+        for n in range(3):
+            fid = "once-%d" % n
+            path = self.mkjob(fid, 0.1, (("a%d" % n, "explore", "cost"),))
+            box = {}
+            with mock.patch.dict(os.environ, self.cenv):
+                fg = self.fore(path)
+                th = self.back(path, self.prefix(), box)
+                th.join(150)
+                _out, ferr = fg.communicate(timeout=120)
+            self.assertEqual(sorted([box["d"][0], fg.returncode]), [0, 2], (box, ferr))
+            self.assertEqual(self.kinds(fid).count("reserve"), 1)
+            self.assertTrue(self.ended(fid), fid)
+            win = json.loads(box["d"][1])["pid"] if box["d"][0] == 0 else fg.pid
+            self.assertEqual(self.rec(fid, "start.json")["pid"], win)
+            rc, out, err = self.verb("status", fid)
+            self.assertEqual((rc, out.split()[:2]), (0, [fid, "ended"]), err)
+
+
 class SentenceTest(unittest.TestCase):
     def test_sentences(self):
         self.assertEqual(messages.say("hook.on"), HOOK)

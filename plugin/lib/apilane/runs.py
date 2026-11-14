@@ -2,12 +2,17 @@
 
 `<state>/fanouts/<id>/`, 0700: `start.json`, written by the verb at the reservation; `fanout.json`,
 the object `--json` prints plus `tag` and `ended`, written when the run returns; and a detached
-run's `log.txt`. Each file is 0600 and written by one rename. `wait`, `status` and `stop` match an
+run's `log.txt` and `child.json` (its child's pid and start time, written by the parent). Each file
+is 0600 and written by one rename. Every run, foreground or detached, takes its folder by one
+exclusive mkdir under the folder's lock, so no run starts in a folder that holds another's record. `wait`, `status` and `stop` match an
 ID against the job's id pattern before they join it to a path. The sweep prunes old folders and
 records once at a fan-out's start. Nothing here prints: a verb returns what its caller prints, or
 raises a RunError with a `code` (`run.unknown`, `run.none`, `run.two`, `run.path`, `run.starting`,
-`run.record`, `job.long`, `id.used`), whose sentence is `messages.py`'s.
+`run.record`, `job.long`, `id.used`, `id.taken`), whose sentence is `messages.py`'s.
 """
+import contextlib
+import fcntl
+import io
 import json
 import math
 import os
@@ -81,16 +86,69 @@ def _dirs(roots):
         os.chmod(d, 0o700)
 
 
-def make(roots, fid):
-    """The run's folder, made by an exclusive mkdir; one already there is a used id."""
+@contextlib.contextmanager
+def _locked(roots):
+    """The folder's own lock, held while a run's folder is made, cleared or removed."""
+    fd = os.open(os.path.join(roots.state, FOLDER, ".lock"), os.O_RDWR | os.O_CREAT, 0o600)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        yield
+    finally:
+        os.close(fd)
+
+
+def _taken(roots, fid):
+    """`id.used` with the log's day where the log holds the id's reservation, else `id.taken`."""
+    days = [l.get("day") for l in usage(roots, fid) if l.get("kind") == "reserve"]
+    if days and isinstance(days[0], str):
+        return RunError("id.used", id=fid, day=days[0])
+    return RunError("id.taken", id=fid, path=folder(roots, fid))
+
+
+def make(roots, fid, *, alive=None, now=None):
+    """The run's folder, made by an exclusive mkdir under the lock; returns (path, inode). A folder
+    already there is a used id, but for one that never started (R1-F4), which is removed first."""
     path = folder(roots, fid)
     _dirs(roots)
+    with _locked(roots):
+        try:
+            os.mkdir(path, 0o700)
+        except FileExistsError:
+            run = read(roots, fid)
+            if run is None or state(run, _alive(alive), now) != "never":
+                raise _taken(roots, fid)
+            shutil.rmtree(path, True)
+            try:
+                os.mkdir(path, 0o700)
+            except FileExistsError:
+                raise _taken(roots, fid)
+        os.chmod(path, 0o700)
+        return path, os.stat(path).st_ino
+
+
+def adopted(roots, fid, out):
+    """True when `out` is the folder's `log.txt`: this process is the detached child the folder's
+    maker started, and the folder is its own."""
     try:
-        os.mkdir(path, 0o700)
-    except FileExistsError:
-        raise RunError("id.used", id=fid, day=time.strftime("%Y-%m-%d", time.gmtime()))
-    os.chmod(path, 0o700)
-    return path
+        mine = os.fstat(out.fileno())
+        log = os.stat(os.path.join(folder(roots, fid), "log.txt"))
+    except (OSError, AttributeError, ValueError, io.UnsupportedOperation):
+        return False
+    return (mine.st_dev, mine.st_ino) == (log.st_dev, log.st_ino)
+
+
+def drop(roots, fid, ino):
+    """Remove the folder its maker made, only while it is that folder and holds no `start.json`:
+    a refused run never removes another run's record (R1-F2). True when it went."""
+    path = folder(roots, fid)
+    try:
+        with _locked(roots):
+            if os.lstat(path).st_ino != ino or os.path.lexists(os.path.join(path, "start.json")):
+                return False
+            shutil.rmtree(path, True)
+    except OSError:
+        return False
+    return True
 
 
 def write(roots, fid, name, obj):
@@ -150,12 +208,19 @@ def every(roots):
     return found
 
 
-def state(run, alive):
+def state(run, alive, now=None):
+    """`ended`, `starting`, `never` (no start past the start window, no child alive: read as
+    ended, R1-F4), `running` or `lost`."""
     if run["end"]:
         return "ended"
     start = run["start"]
     if not start:
-        return "starting"
+        child = run.get("child") or {}
+        if child and alive(child.get("pid"), child.get("pid_started")):
+            return "starting"
+        if _age(run["folder"], time.time() if now is None else now) <= START_SEC:
+            return "starting"
+        return "never"
     return "running" if alive(start.get("pid"), start.get("pid_started")) else "lost"
 
 

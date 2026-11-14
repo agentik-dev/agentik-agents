@@ -205,8 +205,22 @@ def fanout(rest, roots, lane, parts, stdin, stdout, err, child=None):
             err(messages.say("no.answer"))
             return 1
     if detach:
-        return detach_run(job, roots, stdout, err, as_json, child)
+        return detach_run(job, roots, stdout, err, as_json, child, parts.started)
     runs.sweep(roots, alive=parts.alive)
+    # the run's folder by one exclusive mkdir, as --detach takes it, unless this is the detached
+    # child of the folder's maker (its stdout is the folder's log.txt): one run a folder (R1-F2, F3)
+    made = None
+    if not runs.adopted(roots, job.id, stdout):
+        made = runs.make(roots, job.id, alive=parts.alive)[1]
+    try:
+        return _foreground(job, roots, lane, parts, stdout, err, as_json)
+    finally:
+        if made is not None:
+            runs.drop(roots, job.id, made)
+
+
+def _foreground(job, roots, lane, parts, stdout, err, as_json):
+    from apilane import messages, report, runs
     session = session_id()
     held = {}
     claude = parts.find_claude()
@@ -281,17 +295,19 @@ def _text(path):
         return ""
 
 
-def detach_run(job, roots, stdout, err, as_json, child=None):
+def detach_run(job, roots, stdout, err, as_json, child=None, started=None):
     """--detach: start `fanout - --yes` in a session of its own, then poll, never signal, until
-    its start.json holds its pid (0), it is gone (1 reserved, else its own exit), or 120 s (124)."""
-    from apilane import messages, runs
-    path = runs.make(roots, job.id)
+    its start.json holds its pid (0), it is gone (1 reserved, else its own exit), or 120 s (124).
+    It records its child's pid and start time in child.json, and removes only the folder it made
+    while that holds no start.json (R1-F2, F4)."""
+    from apilane import messages, proc, runs
+    path, made = runs.make(roots, job.id)
     err(messages.say("detach.starting", id=job.id))
     log = os.path.join(path, "log.txt")
     try:
         fd = os.open(log, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_APPEND, 0o600)
     except OSError:
-        shutil.rmtree(path, True)
+        runs.drop(roots, job.id, made)
         raise
     try:
         kid = subprocess.Popen(list(child or default_child()) + ["fanout", "-", "--yes"],
@@ -331,7 +347,7 @@ def detach_run(job, roots, stdout, err, as_json, child=None):
                 return 1
             if text:
                 err(text)
-            shutil.rmtree(path, True)
+            runs.drop(roots, job.id, made)
             rc = kid.returncode
             return 2 if rc == 0 else (rc if rc > 0 else 128 - rc)
         if time.monotonic() >= deadline:

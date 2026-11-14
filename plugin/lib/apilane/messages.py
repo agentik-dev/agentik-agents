@@ -66,6 +66,8 @@ TEXTS = {
                   "ceiling of {max_day_usd_text}. Nothing ran." % DOOR,
     "id.used": "%s: the fan-out id {id} is already in the log for {day}. Nothing ran; give "
                "another id, or --tag for a name several runs share." % DOOR,
+    "id.taken": "%s: the fan-out id {id} is taken: {path} holds a run of it. Nothing ran; give "
+                "another id, or --tag for a name several runs share." % DOOR,
     "job.tag": "%s: the job's tag {tag} is not a letter or digit then at most 63 letters, digits "
                "or dashes. Nothing ran." % DOOR,
     # al7: a detached run, and the verbs that name a run by its id
