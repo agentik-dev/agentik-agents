@@ -221,7 +221,9 @@ class WallStartTest(WallCase):
         self.assertFalse(os.path.exists(mark))
 
     def test_no_backend_raises_wall_platform(self):
-        with mock.patch.object(self.wall.sys, "platform", "linux"):
+        # al2b: Linux has a backend where bwrap is, so the no-backend half hides it too
+        with mock.patch.object(self.wall.sys, "platform", "linux"), \
+                mock.patch.object(self.wall, "_BWRAP", self.home.path("no-bwrap")):
             self.assertIsNone(self.wall.backend())
             with self.assertRaises(Exception) as cm:
                 self.wall.wrap([self.fake], read=[], write=[], net="all", home=self.home.root)
