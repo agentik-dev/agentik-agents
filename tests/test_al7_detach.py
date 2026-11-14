@@ -91,6 +91,16 @@ def dead_pid():
     return p.pid
 
 
+def kill9(pid):
+    """SIGKILL to a run the test started, then reap it: an in-process parent leaves its child
+    a zombie of the test, which `ps` still reads as alive."""
+    os.kill(pid, signal.SIGKILL)
+    try:
+        os.waitpid(pid, 0)
+    except ChildProcessError:
+        pass
+
+
 def gone(pgid):
     try:
         os.killpg(pgid, 0)
@@ -350,15 +360,23 @@ class DetachTest(Det):
 
 
 class RefuseTest(Det):
+    def shard_marks(self):
+        """Each shard fake's record, by name and time: the probe's own start is not a shard's."""
+        found = {}
+        for name in os.listdir(self.records):
+            if name.endswith(".json") and not name[0].isdigit():
+                found[name] = os.stat(os.path.join(self.records, name)).st_mtime_ns
+        return found
+
     def refused(self, path, *extra, want, stdin=None):
-        lines, starts = len(self.log()), len(self.starts())
+        lines, marks = len(self.log()), self.shard_marks()
         fid = os.path.basename(path)[:-5]
         had = os.path.exists(self.fdir(fid))
         rc, out, err = self.detach(path, *extra, stdin=stdin)
         self.assertEqual(rc, 2, err)
         self.assertIn(want, err)
         self.assertEqual(len(self.log()), lines, err)
-        self.assertEqual(len(self.starts()), starts, err)
+        self.assertEqual(self.shard_marks(), marks, err)
         self.assertEqual(os.path.exists(self.fdir(fid)), had, err)
 
     def test_refusals(self):
@@ -491,7 +509,7 @@ class CeilingTest(Det):
         self.assertEqual(rc, 2, err)
         self.assertIn("passes the day's ceiling", err)
         self.assertEqual(len(self.starts()), starts)
-        os.kill(self.rec("ca", "start.json")["pid"], signal.SIGKILL)
+        kill9(self.rec("ca", "start.json")["pid"])
         self.let_go()
         self.assertTrue(self.ended("cb"))
         rc, out, err = self.detach(self.mkjob("cd", 2, (("j4", "explore"),)), "--yes")
@@ -530,7 +548,7 @@ class WaitTest(Det):
         self.assertEqual(self.detach(self.mkjob("w4", 1, (("k4", "explore"),), release=rel),
                                      "--yes")[0], 0)
         self.started("w4", labels=("k4",))
-        os.kill(self.rec("w4", "start.json")["pid"], signal.SIGKILL)
+        kill9(self.rec("w4", "start.json")["pid"])
         rc, out, err = self.verb("wait", "w4")
         open(rel, "w").close()
         self.assertEqual((rc, out), (1, "w4\n"), err)
@@ -661,7 +679,7 @@ class StopTest(Det):
         self.assertEqual(self.detach(self.mkjob("p3", 1, (("m1", "explore"), ("m2", "review"))),
                                      "--yes")[0], 0)
         self.started("p3", labels=("m1", "m2"))
-        os.kill(self.rec("p3", "start.json")["pid"], signal.SIGKILL)
+        kill9(self.rec("p3", "start.json")["pid"])
         lines = len(self.log())
         rc, out, err = self.verb("stop", "p3")
         self.assertEqual(rc, 0, err)
@@ -700,9 +718,8 @@ class StopTest(Det):
     def test_term_after_return(self):
         path = self.mkjob("p8", 0.2, (("o2", "explore", "cost"),))
         self.assertEqual(self.detach(path, "--yes", hook="term")[0], 0)
-        start = self.rec("p8", "start.json")
-        self.assertTrue(wait_for(lambda: not proc.alive(start["pid"], start["pid_started"])))
-        self.assertTrue(self.rec("p8", "fanout.json"))
+        self.assertTrue(self.ended("p8"))
+        self.assertEqual(self.kinds("p8").count("settle"), 1)
 
 
 class CountTest(Det):
@@ -729,7 +746,7 @@ class CountTest(Det):
         path = self.mkjob("c2", 1, (("y1", "explore"), ("y2", "explore"), ("y3", "review")), jobs=2)
         self.assertEqual(self.detach(path, "--yes")[0], 0)
         self.started("c2", labels=("y1", "y2"))
-        os.kill(self.rec("c2", "start.json")["pid"], signal.SIGKILL)
+        kill9(self.rec("c2", "start.json")["pid"])
         time.sleep(0.5)
         tail = "fan-out c2 is gone: agentik agents fanout stop c2"
         for _ in range(2):
@@ -835,7 +852,7 @@ class SweepTest(Det):
         self.plant("live8", pid=pid, pid_started=st)
         self.age(self.fdir("live8"), 8)
         rl = self.run_dir("live8-01", pid, st, 8)
-        two = ledger.stamp(ledger.utcnow(time.time() - 2 * 86400))
+        two = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() - 2 * 86400))
         live = os.path.join(self.roots.state, "live", "other")
         self.plant("e2", session="other", live={"ended": two, "beat": two})
         self.plant("l2", session="other", live={"beat": two})
