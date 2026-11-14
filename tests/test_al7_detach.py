@@ -1054,6 +1054,44 @@ class NeverTest(Det):
         self.assertTrue(self.ended("cut3"))
 
 
+class PickTest(Det):
+    """Review 1, R1-F1: `wait` with no id takes the run that ended last, by a time finer than a
+    second, and by the order of the settles in the log where two still tie."""
+
+    def same_at(self, *fids):
+        for fid in fids:
+            start = self.rec(fid, "start.json")
+            start["at"] = "2026-11-13T10:00:00Z"
+            with open(os.path.join(self.fdir(fid), "start.json"), "w") as fh:
+                json.dump(start, fh)
+
+    def ended_at(self, fid, ns):
+        os.utime(os.path.join(self.fdir(fid), "start.json"), ns=(ns - 10 ** 9, ns - 10 ** 9))
+        os.utime(os.path.join(self.fdir(fid), "fanout.json"), ns=(ns, ns))
+
+    def test_pick(self):
+        for fid in ("aa-first", "zz-second"):
+            self.plant(fid, end=0)
+        self.same_at("aa-first", "zz-second")
+        t = time.time_ns() - 10 ** 10
+        self.ended_at("aa-first", t)
+        self.ended_at("zz-second", t + 300 * 10 ** 6)
+        rc, out, err = self.verb("wait")
+        self.assertEqual((rc, out.splitlines()[0]), (0, "zz-second"), err)
+        shutil.rmtree(os.path.join(self.roots.state, "fanouts"))
+        for fid in ("ab-early", "zy-late"):
+            ledger.reserve(self.roots, fanout=fid, budget_usd=1.0, max_day_usd=3.0,
+                           session=SESSION, pid=dead_pid(), pid_started="x")
+            self.plant(fid, end=0)
+        ledger.settle(self.roots, fanout="ab-early", spent_usd=0.1)
+        ledger.settle(self.roots, fanout="zy-late", spent_usd=0.1)
+        self.same_at("ab-early", "zy-late")
+        for fid in ("ab-early", "zy-late"):
+            self.ended_at(fid, t)
+        rc, out, err = self.verb("wait")
+        self.assertEqual((rc, out.splitlines()[0]), (0, "zy-late"), err)
+
+
 class SentenceTest(unittest.TestCase):
     def test_sentences(self):
         self.assertEqual(messages.say("hook.on"), HOOK)

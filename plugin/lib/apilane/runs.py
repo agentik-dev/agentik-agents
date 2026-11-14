@@ -303,9 +303,39 @@ def by_type(rows):
     return counts
 
 
-def _newest(run):
-    start, end = run["start"] or {}, run["end"] or {}
-    return str(start.get("at") or end.get("ended") or "")
+def _settles(roots):
+    """{fan-out id: the place of its last settle in the day's log}: the order runs ended in."""
+    order = {}
+    try:
+        with open(os.path.join(roots.state, "usage.jsonl"), encoding="utf-8") as fh:
+            for i, line in enumerate(fh):
+                try:
+                    obj = json.loads(line)
+                except ValueError:
+                    continue
+                if isinstance(obj, dict) and obj.get("kind") == "settle":
+                    order[obj.get("fanout")] = i
+    except OSError:
+        pass
+    return order
+
+
+def _newest_ns(path):
+    newest = _mtime(path) or 0
+    for root, _d, files in os.walk(path):
+        for f in files:
+            newest = max(newest, _mtime(os.path.join(root, f)) or 0)
+    return newest
+
+
+def _ending(run, order):
+    """When a run ended, finer than a second: its `fanout.json`'s mtime in ns (a lost run's newest
+    file's), then its settle's place in the log where two still tie (R1-F1). Never its name."""
+    if run["end"]:
+        at = _mtime(os.path.join(run["folder"], "fanout.json")) or 0
+    else:
+        at = _newest_ns(run["folder"])
+    return at, order.get(run["id"], -1)
 
 
 def resolve(roots, word, session, alive, verb):
@@ -324,7 +354,8 @@ def resolve(roots, word, session, alive, verb):
     rest = [r for r in mine if state(r, alive) in ("ended", "lost")]
     if verb == "stop" or not rest:
         raise RunError("run.none")
-    return max(rest, key=_newest)
+    order = _settles(roots)
+    return max(rest, key=lambda r: _ending(r, order))
 
 
 def status(roots, word, *, every_run=False, session, alive=None):
