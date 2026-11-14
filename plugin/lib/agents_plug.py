@@ -154,6 +154,10 @@ CHECKS = [{"name": t, "kind": "on_path", "missing": "note", "remedy": REMEDY} fo
     {"name": "lane", "kind": "lane", "timeout": 18},
 ]
 NO_LANE = "no local lane is set up here, so the router, the upstream and the backends were not asked"
+# A lane set up whose router nothing answers on (the check's `not_started`): a lane at rest, since
+# `agentik agents local` starts the router when a session asks for it (row ak7b-router-note)
+NOT_STARTED = ("the local lane is set up here and its router is not started: nothing answers at "
+               "http://%s; `agentik agents local` starts it")
 ROUTER_STATES = {"ok": "ok", "warn": "warn", "FAIL": "fail"}
 OURS = ("AGENTROUTE_", "CLAUDE_LOCAL_", "LOCALRIG_")
 # The variables a default may be computed from that are a setting, not this machine's folders:
@@ -659,21 +663,56 @@ def check_python(c):
              "remedy": None}]
 
 
+def router_rows(c):
+    """The router's check as one object: its rows, and what it wrote to stderr."""
+    argv = [sys.executable, "-I", "-X", "pycache_prefix=" + CACHE,
+            os.path.join(HERE, "agentroute"), "--check", "--json"]
+    got = subprocess.run(argv, capture_output=True, text=True, timeout=c["timeout"],
+                         stdin=subprocess.DEVNULL)
+    return json.loads(got.stdout)["rows"], got.stderr
+
+
+def router_listen():
+    """The address the router listens on, as its own assignment reads it here."""
+    for row in SETTINGS:
+        if row["read"] == "python":
+            return {f[0]: f[1] for f in read_python(row)}.get("LISTEN")
+    return None
+
+
+def not_started(r):
+    return r.get("not_started") is True
+
+
 def check_lane(c):
     if not lane_set_up():
         return [{"name": c["name"], "status": "note", "detail": NO_LANE, "remedy": None}]
-    argv = [sys.executable, "-I", "-X", "pycache_prefix=" + CACHE,
-            os.path.join(HERE, "agentroute"), "--check", "--json"]
     try:
-        got = subprocess.run(argv, capture_output=True, text=True, timeout=c["timeout"],
-                             stdin=subprocess.DEVNULL)
-        rows = json.loads(got.stdout)["rows"]
-        return [{"name": r["what"].strip(), "status": ROUTER_STATES.get(r["state"], "warn"),
+        rows, _ = router_rows(c)
+        return [{"name": r["what"].strip(), "status": "note", "detail": NOT_STARTED % router_listen(),
+                 "remedy": None} if not_started(r) else
+                {"name": r["what"].strip(), "status": ROUTER_STATES.get(r["state"], "warn"),
                  "detail": r["detail"], "remedy": None} for r in rows]
     except Exception as e:  # noqa: BLE001  any answer it cannot read (review 1, R1-F1)
         return [{"name": c["name"], "status": "fail",
                  "detail": "the router's check gave no answer: %s" % (str(e).splitlines() or [""])[0],
                  "remedy": None}]
+
+
+def lane_text():
+    """The text doctor's lane block: the router's text form from its rows, but a router not
+    started is one line, as the no-lane note is, and out of the count (row ak7b-router-note)."""
+    rows, err = router_rows(next(c for c in CHECKS if c["kind"] == "lane"))
+    lines, counts = err.splitlines(), {}
+    for r in rows:
+        if not_started(r):
+            lines.append(NOT_STARTED % router_listen())
+            continue
+        lines.append("  %-5s %-16s %s" % (r["state"], r["what"], r["detail"]))
+        counts[r["state"]] = counts.get(r["state"], 0) + 1
+    lines.append("  " + "  ".join("%d %s" % (counts.get(k, 0), k) for k in ("ok", "warn", "FAIL"))
+                 + ("   (warn rows do not gate a session)" if counts.get("warn") else ""))
+    return lines
 
 
 KINDS = {"on_path": check_on_path, "python": check_python, "lane": check_lane}
@@ -750,6 +789,13 @@ def main(argv=None, out=sys.stdout, err=sys.stderr):
             return 3
         out.write("yes\n" if up else "no\n")
         return 0 if up else 1
+    if args == ["lane", "text"]:
+        try:
+            text = "".join(line + "\n" for line in lane_text())
+        except Exception:  # noqa: BLE001  the text doctor then asks the router as at the pin
+            return 3
+        out.write(text)
+        return 0
     if args == ["describe", "--json"]:
         schema, read = "agentik.describe/1", lambda: describe(version)
     elif args == ["doctor", "--json"]:

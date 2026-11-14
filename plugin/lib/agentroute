@@ -623,13 +623,15 @@ def _get(url: str, timeout: float = 5.0, method: str = "GET", headers: dict | No
 def check(as_json: bool = False) -> int:
     """Preflight. A probe that fails is UNKNOWN and reported as a failure, never skipped.
     as_json: the same probes and exit, printed as one object {"ok", "rows": [{state, what,
-    detail}]} (packet ak7), the doctor read's source."""
+    detail}]} (packet ak7), the doctor read's source. The router's row alone may carry
+    "not_started": true, where nothing answers a connect on LISTEN (row ak7b-router-note): it
+    stays a FAIL here, and only a doctor reads it as a lane at rest."""
     ok = True
     rows = []
 
-    def row(state, what, detail):
+    def row(state, what, detail, **mark):
         nonlocal ok
-        rows.append((state, what, detail))
+        rows.append((state, what, detail, mark))
         if state == "FAIL":
             ok = False
 
@@ -638,7 +640,8 @@ def check(as_json: bool = False) -> int:
         st, _ = _get(f"http://{LISTEN}/api/hello", 2.0, "HEAD")
         row("ok" if st == 200 else "FAIL", "router", f"http://{LISTEN} answered {st}")
     except OSError as exc:
-        row("FAIL", "router", f"http://{LISTEN} not answering ({exc}); start with `agentroute --serve`")
+        row("FAIL", "router", f"http://{LISTEN} not answering ({exc}); start with `agentroute --serve`",
+            **({"not_started": True} if isinstance(exc, ConnectionRefusedError) else {}))
     # 2. upstream reachability (no credential is sent; any HTTP answer proves the path)
     try:
         st, _ = _get(UPSTREAM + "/api/hello", 5.0, "HEAD")
@@ -693,13 +696,13 @@ def check(as_json: bool = False) -> int:
                               f"backends={', '.join(BACKENDS)}")
     row("ok", "ledger", str(LOG_PATH))
     if as_json:
-        print(json.dumps({"ok": ok, "rows": [{"state": s, "what": w, "detail": d}
-                                             for s, w, d in rows]}))
+        print(json.dumps({"ok": ok, "rows": [dict({"state": s, "what": w, "detail": d}, **m)
+                                             for s, w, d, m in rows]}))
         return 0 if ok else 1
-    for state, what, detail in rows:
+    for state, what, detail, _ in rows:
         print(f"  {state:<5} {what:<16} {detail}")
     counts = {}
-    for state, _, _ in rows:
+    for state, _, _, _ in rows:
         counts[state] = counts.get(state, 0) + 1
     print("  " + "  ".join(f"{counts.get(k, 0)} {k}" for k in ("ok", "warn", "FAIL"))
           + ("   (warn rows do not gate a session)" if counts.get("warn") else ""))
