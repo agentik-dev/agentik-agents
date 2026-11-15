@@ -11,7 +11,7 @@ claude plugin marketplace add agentik-dev/agentik-commons; claude plugin install
 ```
 
 It needs Claude Code, `bash` and the system's Python at 3.9 or newer. The table works alone; the local model is optional and needs Ollama.
-Part of [agentik](https://github.com/agentik-dev): the other tools, and how to uninstall them.
+Part of [agentik](https://github.com/agentik-dev): the other tools, and how to leave.
 
 ## What it does
 
