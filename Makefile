@@ -147,7 +147,7 @@ check-unlocked: test lint doclint hygiene plugin-version-check descriptions vali
 	elif shasum -c --status design/readme/rendered.sha256 2>/dev/null; then echo "readme: fresh"; \
 	else echo "readme: stale, run make readme"; exit 2; fi
 
-lint: ## Syntax-check every tool (sh, bash, python)
+lint: ## Syntax-check every tool (sh, bash, python), then the README's top (GUIDE §10)
 	@sh -n plugin/lib/agentik-agents && echo "  plugin/lib/agentik-agents: sh syntax OK"
 	@for f in plugin/hooks/api-lane plugin/lib/apilane/prefilter.sh plugin/lib/claude-fanout; do \
 	  sh -n "$$f" && echo "  $$f: sh syntax OK" || exit 1; done
@@ -158,6 +158,7 @@ lint: ## Syntax-check every tool (sh, bash, python)
 	  plugin/lib/agents_plug.py plugin/lib/apilane/*.py \
 	  && echo "  python tools: syntax OK"
 	@bash -n scripts/readme-render && echo "  scripts/readme-render: bash syntax OK"
+	@$(PY) scripts/readme-top
 
 doclint: ## The doc gate (conventions §5): scripts/doclint against DOCLINT_SHA, then the script, then scripts/recordlint on HANDOFF.md and NICE_TO_HAVE.md (hq design/05 §4)
 	@printf '%s  scripts/doclint\n' '$(DOCLINT_SHA)' | shasum -a 256 -c --status - \
