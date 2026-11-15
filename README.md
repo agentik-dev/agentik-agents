@@ -1,5 +1,20 @@
 # agentik-agents
 
+agentik-agents is a Claude Code plugin that shows what every session and helper on this machine is doing, in one table, and can run routine side work on a local model.
+Use it when more than one session is open and you have lost track.
+
+Install it in a terminal, then type the second line in a new Claude Code session:
+
+```
+claude plugin marketplace add agentik-dev/agentik-commons; claude plugin install agents@agentik
+/agents:status
+```
+
+It needs Claude Code, `bash` and the system's Python at 3.9 or newer. The table works alone; the local model is optional and needs Ollama.
+Part of [agentik](https://github.com/agentik-dev): the other tools, and how to uninstall them.
+
+## What it does
+
 Three things for Claude Code on one Mac, under one command, `agentik agents <verb>`:
 
 - **`status`**: what every agent is doing right now. One row per seat, helper and local agent, from files already on disk. Read-only.
