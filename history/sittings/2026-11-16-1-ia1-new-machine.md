@@ -16,11 +16,11 @@
 - [x] R1 and R2, install-cli: an old name only where its link stands, a person's file passed over with exit 0 and one stderr line; `make uninstall` silent on an absent old name; install-cli.md and the README's sentence (the dispatcher's help footer is pinned byte for byte by test-dispatch, so it stays)
 - [x] R3, the doctor: text and `--json` want `agentik-agents` and `agentik` alone; an old name whose link stands on PATH is a note
 - [x] R4, R5 and R6: a missing sessions folder is an empty table, exit 0, one line (stderr under `--json`); `/agents:status` names `/agents:install-cli`; the README's "works alone" holds by R4; NICE n61, n62 leave, n63 (the pinned help footer) is filed
-- [ ] 1.9.4, alone in the last commit under `plugin/`
+- [x] 1.9.4, alone in the last commit under `plugin/`; the four acceptance probes pass in temp homes; hygiene over `main..HEAD` exit 0
 - [ ] `make check` once through the gate; hygiene over `main..HEAD`
 
 ## Handover
 - If this sitting is cut: the first unticked line above.
 
 ## Next act
-1.9.4 alone in the last commit under `plugin/`, then `make check` through the gate.
+`make check` through the gate on this commit; on red, read the log and fix.
