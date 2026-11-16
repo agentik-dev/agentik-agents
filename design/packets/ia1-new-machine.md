@@ -41,7 +41,7 @@ Baseline at 649651c, each in a temp HOME: a regular file `claude-local` makes `i
 
 ## 4. Findings that name this row
 
-The review's findings 2, 6 and 12 (agents' half); NICE n61 and n62, which leave with this row. Not built here: commons' setup quoting the last line of a failed step (finding 2's second half); relay's `/relay:doctor` (finding 12's other half).
+The review's findings 2, 6 and 12 (agents' half); NICE n61 and n62, which leave with this row. Left as they were, pinned byte for byte by earlier packets: the dispatcher's help footer and `plugin/commands/install-cli.md`'s body (NICE n63). `tests/test_al4_off_golden.py` part B leaves out doctor and install-cli against a base before this packet, which changes both on purpose; part A still compares them. Not built here: commons' setup quoting the last line of a failed step (finding 2's second half); relay's `/relay:doctor` (finding 12's other half).
 
 ## 5. Forbidden reads
 
