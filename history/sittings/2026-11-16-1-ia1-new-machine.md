@@ -13,7 +13,7 @@
 ## Done-ness
 - [x] the packet, with the baseline measured at the pin in temp homes
 - [x] R7, the tests seen red at the pin: bare-machine 1, 3, 5, 6; al6 InstallTest four; plug 8, 10; status two (bare-machine 15, our four links refreshed, green at the pin)
-- [ ] R1 and R2, install-cli
+- [x] R1 and R2, install-cli: an old name only where its link stands, a person's file passed over with exit 0 and one stderr line; `make uninstall` silent on an absent old name; install-cli.md and the README's sentence (the dispatcher's help footer is pinned byte for byte by test-dispatch, so it stays)
 - [ ] R3, the doctor
 - [ ] R4, R5 and R6, status, its command and the README
 - [ ] 1.9.4, alone in the last commit under `plugin/`
@@ -23,4 +23,4 @@
 - If this sitting is cut: the first unticked line above.
 
 ## Next act
-R1 and R2 in `plugin/lib/agents_install.py`, and `make uninstall` silent on an absent old name.
+R3, the doctor's wanted list, text and `--json`.

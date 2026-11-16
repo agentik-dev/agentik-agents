@@ -3,10 +3,13 @@
 
 The canonical install (agentik_install, beside this file) freezes this lib/, writes the launcher
 and the `agentik` door. Then each old name, agentroute, claude-agents, claude-local and localrig,
-becomes a link from the bin dir into the frozen tree, by a temp link and a rename; they stay on
-PATH until 2026-12-31. A path that is anything but a link or absent is left as it is and named.
-While the API lane is on, a fifth, claude-fanout, links to the lane's forward the same way (packet
-al6, design/21 item 12); while it is off, a path of that name is not touched.
+is refreshed to its file in the frozen tree, by a temp link and a rename, only where a link of that
+name already stands in the bin dir, as agentik_install._old_link rules it: a new machine gets none
+(packet ia1-new-machine). They stay until 2026-12-31. A person's own file under one of the names
+is left byte for byte and named in one stderr line, exit 0. While the API lane is on, a fifth,
+claude-fanout, links to the lane's forward on any machine (packet al6, design/21 item 12), and a
+path of that name that is not a link is left and named, exit 1; while the lane is off, a path of
+that name is not touched.
 Exit 0 done; 1 it could not, the reason on stderr (GUIDE section 10). Stdlib, 3.9.
 """
 import argparse
@@ -45,8 +48,10 @@ def lane_on(err):
 
 
 def link_old(bin_dir, tree, err, names=OLD):
-    """Each old name in bin_dir to its file in tree; the names left unlinked."""
-    left = []
+    """Each name in bin_dir to its file in tree: an old name only where its link stands already,
+    claude-fanout wherever no file holds it. (linked, left, passed): the names linked, those it
+    could not link, and the old names a person's own file holds, left as they are."""
+    linked, left, passed = [], [], []
     # The freeze writes 0644 but for the runner and the door, and the dispatcher runs each tool
     # from the tree whether its old name links or not (a1 F1): every chmod before any link.
     for name in names:
@@ -59,6 +64,10 @@ def link_old(bin_dir, tree, err, names=OLD):
         path = os.path.join(bin_dir, name)
         target = os.path.join(tree, name)
         if name in left:
+            continue
+        if name in OLD and not agentik_install._old_link(bin_dir, name):
+            if os.path.lexists(path):
+                passed.append(name)
             continue
         if os.path.lexists(path) and not os.path.islink(path):
             print("install-cli: %s is not a link, left as it is; %s is not linked" % (path, name),
@@ -78,7 +87,9 @@ def link_old(bin_dir, tree, err, names=OLD):
                 pass
             print("install-cli: %s: %s" % (path, e), file=err)
             left.append(name)
-    return left
+            continue
+        linked.append(name)
+    return linked, left, passed
 
 
 def main(argv=None, out=sys.stdout, err=sys.stderr, lane=None):
@@ -98,8 +109,10 @@ def main(argv=None, out=sys.stdout, err=sys.stderr, lane=None):
         print(line, file=out)
     bin_dir = os.path.dirname(done["launcher"])
     names = OLD + (FORWARD,) if (lane_on(err) if lane is None else lane) else OLD
-    left = link_old(bin_dir, done["tree"], err, names)
-    linked = [n for n in names if n not in left]
+    linked, left, passed = link_old(bin_dir, done["tree"], err, names)
+    if passed:
+        print("install-cli: left %s in %s as it is: not a link, so no old name's to refresh"
+              % (", ".join(passed), agentik_install.shown(bin_dir)), file=err)
     if linked:
         print("linked %s in %s -> the tree (the old names, until %s)"
               % (", ".join(linked), bin_dir, UNTIL), file=out)

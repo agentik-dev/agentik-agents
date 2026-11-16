@@ -2,8 +2,9 @@
 #
 # The tools are sh, bash and python3; there is nothing to compile. `install` runs the plugin's
 # install-cli under PREFIX (default ~/.local): it freezes plugin/lib/ into
-# PREFIX/share/agentik-agents/<hash>/ and writes PREFIX/bin/agentik-agents (the launcher), the
-# agentik door (agentik-r1 D3) and the four old names as links into the tree, until 2026-12-31.
+# PREFIX/share/agentik-agents/<hash>/ and writes PREFIX/bin/agentik-agents (the launcher) and the
+# agentik door (agentik-r1 D3); each of the four old names' links into the tree it refreshes only
+# where that link already stands (packet ia1-new-machine), until 2026-12-31.
 # It is idempotent and reversible; `uninstall` takes back all but the door. Python, run by the
 # launcher and by these recipes, also leaves $HOME/.cache/agentik/pycache and Apple's
 # $HOME/Library/Caches/com.apple.python; nothing else outside this repo is touched.
@@ -63,7 +64,7 @@ help: ## Show this help
 	  | sed 's/:.*## /\t/' | sort | awk -F'\t' '{printf "  %-12s %s\n", $$1, $$2}'
 
 .PHONY: install
-install: ## Refuse a dirty tree, then the plugin's install-cli under PREFIX (default ~/.local): the launcher, the agentik door, the old names' links into a frozen tree
+install: ## Refuse a dirty tree, then the plugin's install-cli under PREFIX (default ~/.local): the launcher, the agentik door, the old names' links refreshed where they stand, into a frozen tree
 	@if [ "$(origin BINDIR)" = "command line" ]; then \
 	  echo "install: refused, BINDIR is not honoured: install-cli writes into PREFIX/bin; set PREFIX" >&2; exit 2; fi
 	@if [ -n "$$(git status --porcelain 2>/dev/null)" ] || ! git rev-parse --verify --quiet HEAD >/dev/null; then \
@@ -86,6 +87,7 @@ uninstall: ## Remove what install-cli wrote under PREFIX: its launcher, the old 
 	  printf '  skipped %s (not the launcher install-cli wrote)\n' "$$l"; fi; \
 	for t in $(TOOLS); do \
 	  link="$$bin/$$t"; \
+	  [ -e "$$link" ] || [ -L "$$link" ] || continue; \
 	  case "$$(readlink -- "$$link" 2>/dev/null)" in \
 	  "$$share"/*) rm -- "$$link" && printf '  removed %s\n' "$$link" ;; \
 	  *) printf '  skipped %s (not a link into %s)\n' "$$link" "$$share" ;; \
