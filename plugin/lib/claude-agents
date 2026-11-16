@@ -26,8 +26,10 @@ Only ids, model and tool names, numbers, timestamps and the `what` labels (a cwd
 basename, a helper's description) leave this tool: never prompt, result or
 tool-input text.
 
-Exit codes: 0 whenever the read works (an empty table included); 1 when the
-sessions dir cannot be read; 2 on a usage error. `--watch N` redraws every N
+Exit codes: 0 whenever the read works (an empty table included, and a missing
+sessions dir, where no session of the session plugin has run: the table is empty,
+with ABSENT's line under it, or on stderr under --json); 1 when the sessions dir
+exists and cannot be read; 2 on a usage error. `--watch N` redraws every N
 seconds until SIGINT, which exits 0.
 """
 
@@ -601,12 +603,20 @@ def helpers_of(sid: str, files: list, now: float, since_s: float, every: bool, m
     return rows
 
 
+# A missing sessions dir (packet ia1-new-machine R4): no session plugin, or none of its sessions yet
+ABSENT = "no rows: they come from the session plugin, and none of its sessions has run here"
+
+
 def collect(args, scanner: CostScan) -> dict:
-    """The table. Raises OSError when the sessions dir cannot be read."""
+    """The table. Raises OSError when the sessions dir exists and cannot be read; a missing one is
+    no seats, with `_absent` set."""
     now = time.time()
     since_s = args.since * 60
     ledger = read_ledger(ledger_path())
-    seats = list_seats(sessions_dir(), now, since_s, args.all)
+    try:
+        seats, absent = list_seats(sessions_dir(), now, since_s, args.all), False
+    except FileNotFoundError:
+        seats, absent = [], True
     agents = []
     for _mt, sid, sdir, meter, tpath, files in seats:
         try:
@@ -624,7 +634,7 @@ def collect(args, scanner: CostScan) -> dict:
         pass
     agents = [sanitise(r) for r in agents]
     return {"generated": iso(now), "since_min": None if args.all else args.since, "agents": agents,
-            "_now": now}
+            "_now": now, "_absent": absent}
 
 
 def api_rows(roots=None, alive=None) -> list:
@@ -744,7 +754,9 @@ def render_text(table: dict, args) -> str:
     out = [line([name for name, _w in COLS])]
     for r in table["agents"]:
         out.append(line(cells(r, table["_now"])))
-    if not table["agents"]:
+    if table.get("_absent"):
+        out.append(ABSENT)
+    elif not table["agents"]:
         out.append("no agents" if args.all else f"no agents in the last {args.since} min")
     missing = unpriced(table["agents"])
     if missing:
@@ -798,6 +810,8 @@ def draw(args, scanner: CostScan, clear: bool) -> int:
         return 1
     if args.json:
         text = render_json(table, None if args.watch else 2)
+        if table.get("_absent"):
+            print(ABSENT, file=sys.stderr, flush=True)
     else:
         text = render_text(table, args)
         if clear:
