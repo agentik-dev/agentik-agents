@@ -18,10 +18,10 @@
 - [x] R4, R5 and R6: a missing sessions folder is an empty table, exit 0, one line (stderr under `--json`); `/agents:status` names `/agents:install-cli`; the README's "works alone" holds by R4; NICE n61, n62 leave, n63 (the pinned help footer) is filed
 - [x] 1.9.4, alone in the last commit under `plugin/`; the four acceptance probes pass in temp homes; hygiene over `main..HEAD` exit 0
 - [x] the first check, job `20261116-145337-2156` on `e2f1f57`, exit 2: test-descriptions pins install-cli.md's body (restored to main's), test_al4_off_golden part B compares doctor and install-cli to the base (scoped to a base before ia1); n63 widened
-- [ ] 1.9.4 again alone in the last commit under `plugin/`; `make check` once more through the gate
+- [x] 1.9.4 again alone in the last commit under `plugin/` (`20ee3eb`); `make check` through the gate on `20ee3eb`: job `20261116-150032-2169`, exit 0; hygiene `--require-private --commits main..HEAD` exit 0
 
 ## Handover
 - If this sitting is cut: the first unticked line above.
 
 ## Next act
-The restamp (1.9.4-restamp, then 1.9.4), then the gate.
+The coordinator's review and the landing; nothing open in this sitting.
