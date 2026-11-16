@@ -152,11 +152,16 @@ python_row() {
 
 doctor() {
 	missing=
-	for t in agentroute claude-local localrig claude-agents agentik-agents agentik; do
+	for t in agentik-agents agentik; do
 		p=$(command -v "$t" 2>/dev/null) || { p= && missing=1; }
 		printf '  %-18s %s\n' "$t" "${p:-NOT ON PATH}"
 	done
 	[ -z "$missing" ] || echo "  (/agents:install-cli, or 'agentik-agents install-cli', puts them on PATH)"
+	# the old names are not wanted (packet ia1-new-machine): one whose link stands on PATH is a note
+	for t in agentroute claude-local localrig claude-agents; do
+		p=$(command -v "$t" 2>/dev/null) && [ -L "$p" ] || continue
+		printf '  %-18s %s\n' "$t" "$p (an old name's link, until 2026-12-31)"
+	done
 	p=$(command -v claude 2>/dev/null) || p=
 	printf '  %-18s %s\n' claude "${p:-NOT ON PATH (the local lane runs it)}"
 	printf '  %-18s %s\n' python3 "$(python_row)"

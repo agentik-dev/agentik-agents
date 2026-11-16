@@ -146,8 +146,11 @@ SUMMARIES = {
 }
 
 # The doctor's checks, in order: one row a check, `kind` naming how it is made.
-TOOLS = ("agentroute", "claude-local", "localrig", "claude-agents", "agentik-agents", "agentik")
+TOOLS = ("agentik-agents", "agentik")
+# The old names are not wanted (packet ia1-new-machine R3): one whose link stands on PATH is a note.
+OLD_NAMES = ("agentroute", "claude-local", "localrig", "claude-agents")
 CHECKS = [{"name": t, "kind": "on_path", "missing": "note", "remedy": REMEDY} for t in TOOLS] + [
+    {"name": t, "kind": "old_name"} for t in OLD_NAMES] + [
     {"name": "claude", "kind": "on_path", "missing": "warn", "remedy": None,
      "why": "the local lane runs it"},
     {"name": "python3", "kind": "python", "floor": (3, 9)},
@@ -641,6 +644,14 @@ def check_on_path(c):
              "remedy": c["remedy"]}]
 
 
+def check_old_name(c):
+    path = shutil.which(c["name"])
+    if not path or not os.path.islink(path):
+        return []
+    return [{"name": c["name"], "status": "note",
+             "detail": "%s (an old name's link, until 2026-12-31)" % path, "remedy": None}]
+
+
 def check_python(c):
     path = shutil.which("python3")
     if not path:
@@ -715,7 +726,8 @@ def lane_text():
     return lines
 
 
-KINDS = {"on_path": check_on_path, "python": check_python, "lane": check_lane}
+KINDS = {"on_path": check_on_path, "old_name": check_old_name, "python": check_python,
+         "lane": check_lane}
 
 
 def api_checks(lane=None, roots=None, parts=None):

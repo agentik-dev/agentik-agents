@@ -14,7 +14,7 @@
 - [x] the packet, with the baseline measured at the pin in temp homes
 - [x] R7, the tests seen red at the pin: bare-machine 1, 3, 5, 6; al6 InstallTest four; plug 8, 10; status two (bare-machine 15, our four links refreshed, green at the pin)
 - [x] R1 and R2, install-cli: an old name only where its link stands, a person's file passed over with exit 0 and one stderr line; `make uninstall` silent on an absent old name; install-cli.md and the README's sentence (the dispatcher's help footer is pinned byte for byte by test-dispatch, so it stays)
-- [ ] R3, the doctor
+- [x] R3, the doctor: text and `--json` want `agentik-agents` and `agentik` alone; an old name whose link stands on PATH is a note
 - [ ] R4, R5 and R6, status, its command and the README
 - [ ] 1.9.4, alone in the last commit under `plugin/`
 - [ ] `make check` once through the gate; hygiene over `main..HEAD`
@@ -23,4 +23,4 @@
 - If this sitting is cut: the first unticked line above.
 
 ## Next act
-R3, the doctor's wanted list, text and `--json`.
+R4 in `plugin/lib/claude-agents`, R5 in `plugin/commands/status.md`; NICE n61 and n62 leave.
