@@ -204,15 +204,42 @@ class InstallTest(Temp):
                 fh.write("#!/bin/sh\n")
         return path, outside
 
+    def absent(self, bin_dir):
+        """packet ia1-new-machine R1: a new prefix gets none of the four old names."""
+        for n in self.OLD:
+            self.assertFalse(os.path.lexists(os.path.join(bin_dir, n)), n)
+
     def test_off(self):
         path, outside = self.plant("link")
         rc, out, err, bin_dir = self.install(False)
-        self.assertEqual(rc, 0, err)
-        self.assertIn("linked %s in %s -> the tree (the old names, until 2026-12-31)\n"
-                      % (", ".join(self.OLD), bin_dir), out)
+        self.assertEqual((rc, err), (0, ""))
+        self.assertNotIn("linked", out)
         self.assertEqual(os.readlink(path), outside)
-        for n in self.OLD:
-            self.assertTrue(os.path.islink(os.path.join(bin_dir, n)), n)
+        self.absent(bin_dir)
+
+    def test_old_name_file(self):
+        # ia1 R2: a person's own file under an old name is left byte for byte, exit 0, on every
+        # run, one stderr line; a link of an old name that stands is refreshed
+        bin_dir = os.path.join(self.roots.home, "P", "bin")
+        os.makedirs(bin_dir)
+        mine = os.path.join(bin_dir, "claude-local")
+        with open(mine, "w") as fh:
+            fh.write("#!/bin/sh\necho mine\n")
+        os.symlink(os.path.join(self.t, "gone"), os.path.join(bin_dir, "localrig"))
+        for _ in range(2):
+            rc, out, err, _ = self.install(False)
+            self.assertEqual(rc, 0, err)
+            self.assertEqual(err, "install-cli: left claude-local in ~/P/bin as it is: not a link, "
+                             "so no old name's to refresh\n")
+            with open(mine) as fh:
+                self.assertEqual(fh.read(), "#!/bin/sh\necho mine\n")
+            self.assertFalse(os.path.islink(mine))
+            self.assertIn("linked localrig in %s -> the tree (the old names, until 2026-12-31)\n"
+                          % bin_dir, out)
+        share = os.path.realpath(os.path.join(self.roots.home, "P", "share"))
+        self.assertTrue(os.path.realpath(os.path.join(bin_dir, "localrig")).startswith(share + os.sep))
+        for n in ("agentroute", "claude-agents"):
+            self.assertFalse(os.path.lexists(os.path.join(bin_dir, n)), n)
 
     def test_on_in_file_no_wall(self):
         # review 1, R1-F2: where no wall is proved the lane cannot be on, whatever the file says
@@ -223,18 +250,17 @@ class InstallTest(Temp):
                 mock.patch.object(paths, "account", lambda: self.roots):
             rc, out, err, bin_dir = self.install(None)
         self.assertEqual((rc, err), (0, ""))
-        self.assertIn("linked %s in %s -> the tree (the old names, until 2026-12-31)\n"
-                      % (", ".join(self.OLD), bin_dir), out)
+        self.assertNotIn("linked", out)
         self.assertNotIn("claude-fanout", out)
         self.assertEqual(os.readlink(path), outside)
-        for n in self.OLD:
-            self.assertTrue(os.path.islink(os.path.join(bin_dir, n)), n)
+        self.absent(bin_dir)
 
     def test_on(self):
         path, _ = self.plant("link")
         rc, out, err, bin_dir = self.install(True)
         self.assertEqual(rc, 0, err)
-        self.assertIn("linked %s, claude-fanout in" % ", ".join(self.OLD), out)
+        self.assertIn("linked claude-fanout in %s" % bin_dir, out)
+        self.absent(bin_dir)
         share = os.path.realpath(os.path.join(self.roots.home, "P", "share"))
         self.assertTrue(os.path.realpath(path).startswith(share + os.sep), os.readlink(path))
         self.assertTrue(os.access(os.path.realpath(path), os.X_OK))

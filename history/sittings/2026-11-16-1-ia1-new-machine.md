@@ -12,7 +12,7 @@
 
 ## Done-ness
 - [x] the packet, with the baseline measured at the pin in temp homes
-- [ ] R7, the tests seen red at the pin
+- [x] R7, the tests seen red at the pin: bare-machine 1, 3, 5, 6; al6 InstallTest four; plug 8, 10; status two (bare-machine 15, our four links refreshed, green at the pin)
 - [ ] R1 and R2, install-cli
 - [ ] R3, the doctor
 - [ ] R4, R5 and R6, status, its command and the README
@@ -23,4 +23,4 @@
 - If this sitting is cut: the first unticked line above.
 
 ## Next act
-Write the failing tests for R1, R2 and R4 and commit them.
+R1 and R2 in `plugin/lib/agents_install.py`, and `make uninstall` silent on an absent old name.

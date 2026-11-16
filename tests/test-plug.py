@@ -335,8 +335,23 @@ class Plug(unittest.TestCase):
         for c in doc["checks"]:
             self.assertEqual(set(c), {"name", "status", "detail", "remedy"})
             self.assertIn(c["status"], ("ok", "note", "warn", "fail"))
-        self.assertEqual({c["name"]: c["remedy"] for c in doc["checks"]}["agentroute"],
+        self.assertEqual({c["name"]: c["remedy"] for c in doc["checks"]}["agentik-agents"],
                          "/agents:install-cli")
+        # packet ia1-new-machine R3: the four old names are not wanted; one whose link stands on
+        # PATH is a note, a person's own file of that name is not named
+        old = ("agentroute", "claude-agents", "claude-local", "localrig")
+        self.assertFalse([n for n in names if n in old], names)
+        bin_dir = os.path.join(self.t, "bin")
+        os.makedirs(bin_dir)
+        os.symlink("/usr/bin/true", os.path.join(bin_dir, "agentroute"))
+        with open(os.path.join(bin_dir, "localrig"), "w", encoding="utf-8") as handle:
+            handle.write("#!/bin/sh\n")
+        os.chmod(os.path.join(bin_dir, "localrig"), 0o755)
+        doc = self.answer(self.run_a("doctor", "--json", PATH=bin_dir + ":/usr/bin:/bin"))
+        rows = [c for c in doc["checks"] if c["name"] in old]
+        self.assertEqual(rows, [{"name": "agentroute", "status": "note", "remedy": None,
+                                 "detail": "%s (an old name's link, until 2026-12-31)"
+                                 % os.path.join(bin_dir, "agentroute")}])
         # the stub: the doctor read in-process, every connection and child recorded
         plug, off, children = load_plug(), [], []
 
@@ -396,7 +411,17 @@ class Plug(unittest.TestCase):
         self.assertEqual(list(doc)[:2], ["schema", "ok"])
         self.assertEqual((doc["schema"], doc["ok"]), ("agentik.agents.sessions/1", True))
         self.assertEqual(list(doc)[2:], ["generated", "since_min", "agents"])
+        # packet ia1-new-machine R4: no sessions folder is an empty table, exit 0, one line
         run = self.run_a("status", "--json")
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertEqual(json.loads(run.stdout.decode("utf-8"))["agents"], [])
+        self.assertEqual(run.stderr, b"no rows: they come from the session plugin, and none of its "
+                         b"sessions has run here\n")
+        # a sessions folder that exists and cannot be read stays an error
+        held = os.path.join(self.t, "not-a-folder")
+        with open(held, "w", encoding="utf-8") as handle:
+            handle.write("x\n")
+        run = self.run_a("status", "--json", CLAUDE_AGENTS_SESSIONS_DIR=held)
         self.assertEqual(run.returncode, 1)
         self.assertEqual(run.stdout, b"")
         self.assertEqual(len(run.stderr.decode().splitlines()), 1, run.stderr)
