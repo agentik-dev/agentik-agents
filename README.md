@@ -30,7 +30,7 @@ claude plugin marketplace add agentik-dev/agentik-commons
 claude plugin install agents@agentik
 ```
 
-The command line, for a terminal, is `install-cli`: `/agents:install-cli` in a session, or the plugin's own `bin/agentik-agents install-cli`. It freezes the plugin's code under `~/.local/share/agentik-agents/` and writes `agentik-agents`, the `agentik` door and links for the old names `agentroute`, `claude-agents`, `claude-local` and `localrig` (until 2026-12-31) into `~/.local/bin`; a file there that is not a link it leaves, and names. Then:
+The command line, for a terminal, is `install-cli`: `/agents:install-cli` in a session, or the plugin's own `bin/agentik-agents install-cli`. It freezes the plugin's code under `~/.local/share/agentik-agents/` and writes `agentik-agents` and the `agentik` door into `~/.local/bin`; a link there for an old name, `agentroute`, `claude-agents`, `claude-local` or `localrig`, it refreshes until 2026-12-31, and a new machine gets none; a file of that name that is not a link it leaves, and names. Then:
 
 ```sh
 agentik agents doctor
