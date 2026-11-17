@@ -9,7 +9,8 @@ new machine gets none (packet ia1-new-machine). Run by an old name, the dispatch
 beside it by its real path, so the process's command line names its tree and every later prune
 counts that tree live (packet ag1-old-name-links). A link of the form before that packet, straight
 to the tool's file in a tree, stays where it points while a running process names it by its path
-in the bin dir: the prune counts that process's tree live through the link alone. They stay until
+in the bin dir and that tree still stands: the prune counts that process's tree live through the
+link alone. They stay until
 2026-12-31. A person's own file under one of the names
 is left byte for byte and named in one stderr line, exit 0. While the API lane is on, a fifth,
 claude-fanout, links to the lane's forward on any machine (packet al6, design/21 item 12), and a
@@ -39,13 +40,16 @@ def held_old(bin_dir, share, names=OLD, ps="ps"):
     """The old names whose link is the form before packet ag1-old-name-links, to `<tree>/<name>`
     in the share, and that a running process names by its path in bin_dir: the process runs from
     that tree, which the prune counts live only while the link resolves there (R3). A link to the
-    dispatcher is never held; a process list that cannot be read holds none."""
+    dispatcher is never held; a process list that cannot be read holds none. It runs after the
+    prune, so a link whose target the prune removed is never held: it moves like any other (a
+    process the prune could not see, such as one whose path holds a space, has lost its tree)."""
     root = os.path.realpath(share).rstrip("/") + "/"
     old = []
     for name in names:
         path = os.path.join(bin_dir, name)
         real = os.path.realpath(path)
-        if os.path.islink(path) and real.startswith(root) and os.path.basename(real) == name:
+        if (os.path.islink(path) and real.startswith(root) and os.path.basename(real) == name
+                and os.path.exists(real)):
             old.append(name)
     if not old:
         return set()
