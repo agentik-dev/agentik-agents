@@ -59,13 +59,17 @@ class OldNames(unittest.TestCase):
 
     def setUp(self):
         self.home = os.path.join(self.t, self.id().rsplit(".", 1)[-1])
-        self.prefix = os.path.join(self.home, "P")
-        self.bin = os.path.join(self.prefix, "bin")
-        self.share = os.path.join(self.prefix, "share", "agentik-agents")
         self.stub = os.path.join(self.home, "stub")
-        os.makedirs(self.bin)
+        self.at("P")
         os.makedirs(self.stub)
         self.write(os.path.join(self.stub, "ps"), PS % {"dir": self.home}, 0o755)
+
+    def at(self, name):
+        """The case's prefix, `name` under its HOME, with an empty bin folder."""
+        self.prefix = os.path.join(self.home, name)
+        self.bin = os.path.join(self.prefix, "bin")
+        self.share = os.path.join(self.prefix, "share", "agentik-agents")
+        os.makedirs(self.bin)
 
     def write(self, path, text, mode=0o644):
         with open(path, "w", encoding="utf-8") as handle:
@@ -89,7 +93,8 @@ class OldNames(unittest.TestCase):
 
     @staticmethod
     def tree(run):
-        return re.search(r"^installed \S+ -> (\S+) \(", run.stdout, re.M).group(1)
+        """The frozen tree install-cli's first line names; its path may hold a space."""
+        return re.search(r"^installed .+? -> (.+?) \([^()]*\); ", run.stdout, re.M).group(1)
 
     @staticmethod
     def pruned(run):
@@ -120,6 +125,29 @@ class OldNames(unittest.TestCase):
         self.assertEqual(os.readlink(link), os.path.join(self.tree(run), "agentik-agents"))
         self.assertFalse(os.path.exists(t0))
         self.assertEqual(self.pruned(run), "prune-trees: removed 1, kept 3 (0 live, the newest 3)")
+
+    def test_10_a_held_link_whose_tree_the_prune_removed_moves(self):
+        # review 1, F1: the prune cuts a process's path at a space, so with a space in the prefix
+        # it never counts t0 live and removes it at the third install. A link is held only while
+        # its target stands: then it moves like any other, and no `kept` line names it.
+        self.at("P q")
+        t0 = self.tree(self.install(0))
+        link = os.path.join(self.bin, "agentroute")
+        self.old_link(t0, "agentroute")
+        self.ps("  4242 /usr/bin/python3 %s serve" % link)
+        for i in (1, 2):
+            run = self.install(i)
+            self.assertEqual(os.readlink(link), os.path.join(t0, "agentroute"), i)
+            self.assertIn("kept agentroute in %s -> its tree" % self.bin, run.stdout)
+        run = self.install(3)
+        self.assertFalse(os.path.exists(t0), "the case wants the prune to take t0: %s"
+                         % self.pruned(run))
+        self.assertEqual(os.readlink(link), os.path.join(self.tree(run), "agentik-agents"))
+        self.assertNotIn("kept agentroute", run.stdout)
+        helped = subprocess.run([link, "--help"], env={"HOME": self.home, "PATH": "/usr/bin:/bin"},
+                                capture_output=True, text=True, timeout=60)
+        self.assertEqual(helped.returncode, 0, helped.stderr)
+        self.assertTrue(helped.stdout.startswith("usage: agentroute"), helped.stdout[:200])
 
     def test_2_an_upgrade_with_no_process_moves_every_old_link(self):
         t0 = self.tree(self.install(0))
