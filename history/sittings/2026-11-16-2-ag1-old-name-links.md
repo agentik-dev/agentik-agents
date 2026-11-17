@@ -11,8 +11,8 @@
 
 ## Done-ness
 - [x] the packet, with the finding's reproduction measured at the pin in a temp HOME
-- [x] R7, the tests seen red at the pin: `tests/test_ag1_old_names.py` 1 to 5, 7 and 8 (6, a new prefix, and 9, make uninstall, green at the pin: they hold what stays); bare-machine 15 rewritten to the new target
-- [ ] R1 to R4: the new form, the hold over a running process, the dispatcher's old-name exec
+- [x] R7, the tests seen red at the pin: `tests/test_ag1_old_names.py` 1 to 5, 7 and 8 (6, a new prefix, green at the pin; 9 runs make, so it is left to the gate); bare-machine 15 rewritten to the new target
+- [x] R1 to R4: an old name links to the dispatcher in the tree, which execs the tool by its real path; an old-form link a process names is held; `T` 1 to 8 green by hand, test-dispatch and al6 green; NICE n64 (claude-fanout) filed
 - [ ] 1.9.5, alone in the last commit under `plugin/`
 - [ ] `make check` through the gate; hygiene `--require-private --commits main..HEAD` exit 0
 

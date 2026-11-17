@@ -18,6 +18,21 @@
 self=$(readlink -f -- "$0" 2>/dev/null) || self=$0
 here=$(CDPATH= cd -P -- "$(dirname -- "$self")" >/dev/null && pwd -P) || exit 2
 
+# Run by an old name, a link install-cli wrote to this file in a frozen tree, until 2026-12-31:
+# the tool beside it, by its real path, so the process's command line names the tree it runs
+# from and every later prune counts that tree live (packet ag1-old-name-links). A link that did
+# not resolve leaves `here` the link's own folder: the tool there is the link, never execed.
+case ${0##*/} in
+agentroute | claude-agents | claude-local | localrig)
+	old=${0##*/}
+	if [ -L "$0" ] && [ -f "$here/$old" ] && [ ! -L "$here/$old" ]; then
+		exec "$here/$old" "$@"
+	fi
+	echo "$old: $0 does not resolve to a frozen tree; run /agents:install-cli" >&2
+	exit 3
+	;;
+esac
+
 usage() {
 	echo "usage: agentik agents <verb> [args...] | agentik agents --help | --version" >&2
 	echo "verbs: local status rig route doctor describe install-cli help" >&2
