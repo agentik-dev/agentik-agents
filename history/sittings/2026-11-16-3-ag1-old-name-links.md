@@ -15,10 +15,13 @@
 - [x] F1: `held_old` holds a name only where its link's target stands after the prune; `T` 1 to 8 and 10 green by hand (9 runs make: the gate's)
 - [x] NICE n65 (F2) and n66 (the four leads the pin shares); the packet's sentence for F3, and F1's condition in its section 3
 - [x] 1.9.6, alone in the last commit under `plugin/` (1.9.5 was never released)
-- [ ] `make check` through the gate; hygiene `--require-private --commits main..HEAD` exit 0
+- [x] `make check` through the gate on `2a24ccc`: job `20261116-185255-2217`, exit 0 (`T` 1 to 10 green in its log); hygiene `--require-private --commits main..HEAD` exit 0
 
 ## Handover
 - If this sitting is cut: the first unticked line above.
 
 ## Next act
-`make check` through the gate on this head, then hygiene over `main..HEAD`.
+The coordinator's read and the landing; nothing open in this sitting.
+
+## Exit
+closed: review 1's ruling built, the check green on `2a24ccc`; this file's close is the one commit after it
