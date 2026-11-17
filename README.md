@@ -49,7 +49,7 @@ It needs `bash`, `/usr/bin/python3` (3.9 or later; the tools are stdlib only) an
 | `route ...` | the loopback router: Claude models to Anthropic, local models to the local server; `route --check` exits non-zero on a FAIL row |
 | `rig ...` | bring local backends up and down, set the default, manage their keys |
 | `doctor` | what is on `PATH`, `python3` and its version, the local lane's check; it reports and never gates |
-| `install-cli [--prefix P]` | the command line on `PATH`, from the plugin's frozen code; exit 0 done, 1 it could not |
+| `install-cli [--prefix P] [--force]` | the command line on `PATH`, from the plugin's frozen code; a newer command it placed is left, one line says so, and `--force` places this one; exit 0 done, 1 it could not |
 
 `agentik agents --help` prints the table with the tool each verb runs. `agentik` is the front door every agentik tool installs; `agentik-agents <verb>` is the same command.
 
