@@ -16,13 +16,13 @@
 - [x] R1 to R4: an old name links to the dispatcher in the tree, which execs the tool by its real path; an old-form link a process names is held; `T` 1 to 8 green by hand, test-dispatch and al6 green; NICE n64 (claude-fanout) filed
 - [x] 1.9.5, alone in the last commit under `plugin/`; hygiene `--require-private --commits main..HEAD` exit 0 by hand
 - [x] the first check, job `20261116-172738-2199` on `c8425e4`, exit 2: every test green, doclint wanted this charter's window row and Next act and the packet's sections 3 and 4 by their names
-- [ ] `make check` through the gate again; hygiene `--require-private --commits main..HEAD` exit 0
+- [x] `make check` through the gate on `c8522cc`: job `20261116-173732-2204`, exit 0; hygiene `--require-private --commits main..HEAD` exit 0
 
 ## Handover
 - If this sitting is cut: the first unticked line above.
 
 ## Next act
-The second check through the gate, then the hand-back; the coordinator's review and the landing after.
+The coordinator's review and the landing; nothing open in this sitting.
 
 ## Exit
-open
+closed: every ruling built, the check green on `c8522cc`; this file's close is the one commit after it
