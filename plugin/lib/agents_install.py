@@ -16,6 +16,8 @@ is left byte for byte and named in one stderr line, exit 0. While the API lane i
 claude-fanout, links to the lane's forward on any machine (packet al6, design/21 item 12), and a
 path of that name that is not a link is left and named, exit 1; while the lane is off, a path of
 that name is not touched.
+Where a newer command install-cli placed stands, nothing is written and no link moves: the one
+line install_cli() prints for that case says so, exit 0; `--force` places this tree over it.
 Exit 0 done; 1 it could not, the reason on stderr (GUIDE section 10). Stdlib, 3.9.
 """
 import argparse
@@ -29,6 +31,10 @@ import agentik_install  # noqa: E402
 OLD = ("agentroute", "claude-agents", "claude-local", "localrig")
 UNTIL = "2026-12-31"
 
+
+# install_cli()'s line where a newer command is kept, with this verb's --force named (commons'
+# agentik_install, row up3-forward-only); tests/test_ag1_old_names.py holds the two equal.
+KEPT = "Left %s at %s, newer than this plugin's %s; --force places it."
 
 FORWARD = "claude-fanout"
 # What an old name links to in the tree: the dispatcher, which execs the tool by its real path.
@@ -142,12 +148,20 @@ def main(argv=None, out=sys.stdout, err=sys.stderr, lane=None):
                                      description="Freeze this plugin's lib/, write the launcher, "
                                      "the agentik door and the old names' links.")
     parser.add_argument("--prefix", help="the install's root (default ~/.local)")
+    parser.add_argument("--force", action="store_true",
+                        help="place this plugin's command over a newer one install-cli placed")
     args = parser.parse_args(argv)
     try:
-        done = agentik_install.install(args.prefix)
+        done = agentik_install.install(args.prefix, force=args.force)
     except (OSError, KeyError, ValueError) as e:
         print("install-cli: %s" % e, file=err)
         return 1
+    if done["kept"]:
+        # a newer command stands: nothing was written and no old name's link moves (row sy3-sync
+        # R3); the line is agentik_install.install_cli's for that case, its words and its format
+        print(KEPT % (agentik_install.shown(done["launcher"]), done["kept"], done["version"]),
+              file=out)
+        return 0
     print("installed %s -> %s (%s); %s" % (done["launcher"], done["tree"], done["version"],
                                           done["door"]), file=out)
     for line in done["pruned"]:

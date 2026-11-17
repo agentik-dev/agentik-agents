@@ -80,14 +80,15 @@ class OldNames(unittest.TestCase):
         """The processes the stand-in `ps` shows beside its probe's line."""
         self.write(os.path.join(self.home, "ps-lines"), "".join(l + "\n" for l in lines))
 
-    def install(self, i):
+    def env(self, plugin):
+        return {"HOME": self.home, "PATH": self.stub + ":/usr/bin:/bin", "CLAUDE_PLUGIN_ROOT": plugin,
+                "CLAUDE_PLUGIN_DATA": os.path.join(self.home, "data")}
+
+    def install(self, i, *argv):
         plugin = self.plugins[i]
         run = subprocess.run([os.path.join(plugin, "bin", "agentik-agents"), "install-cli",
-                              "--prefix", self.prefix],
-                             env={"HOME": self.home, "PATH": self.stub + ":/usr/bin:/bin",
-                                  "CLAUDE_PLUGIN_ROOT": plugin,
-                                  "CLAUDE_PLUGIN_DATA": os.path.join(self.home, "data")},
-                             capture_output=True, text=True, timeout=120)
+                              "--prefix", self.prefix] + list(argv),
+                             env=self.env(plugin), capture_output=True, text=True, timeout=120)
         self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
         return run
 
@@ -276,6 +277,38 @@ class OldNames(unittest.TestCase):
         self.assertIn((ours, "link", "removed"), rows)
         self.assertNotIn(mine, [r[0] for r in rows])
         self.gone_but_mine(ours, mine)
+
+    # ---- row sy3-sync R3: a newer command is left, and --force places this one ----------------
+
+    def test_11_a_newer_command_is_left_and_force_places_this_one(self):
+        launcher = os.path.join(self.bin, "agentik-agents")
+        t4 = self.tree(self.install(4))
+        link = os.path.join(self.bin, "agentroute")
+        os.symlink(os.path.join(t4, "agentik-agents"), link)
+        with open(launcher, "rb") as handle:
+            newer = handle.read()
+        self.ps()
+        run = self.install(0)
+        # the one line commons' install_cli prints for that case, run on the same state
+        lib = os.path.join(self.plugins[0], "lib")
+        canon = subprocess.run(["/usr/bin/python3", "-I", "-c",
+                                "import sys; sys.path.insert(0, sys.argv[1]); import agentik_install; "
+                                "sys.exit(agentik_install.install_cli(sys.argv[2], takes_force=True))",
+                                lib, self.prefix],
+                               env=self.env(self.plugins[0]), capture_output=True, text=True, timeout=120)
+        self.assertEqual((canon.returncode, canon.stderr), (0, ""))
+        self.assertEqual(canon.stdout, "Left ~/P/bin/agentik-agents at %s, newer than this plugin's %s; "
+                         "--force places it.\n" % (VERSIONS[4], VERSIONS[0]))
+        self.assertEqual((run.stdout, run.stderr), (canon.stdout, ""))
+        with open(launcher, "rb") as handle:
+            self.assertEqual(handle.read(), newer)
+        self.assertEqual(os.readlink(link), os.path.join(t4, "agentik-agents"))
+        run = self.install(0, "--force")
+        t0 = self.tree(run)
+        self.assertIn("(%s)" % VERSIONS[0], run.stdout.split("\n")[0])
+        with open(launcher, encoding="utf-8") as handle:
+            self.assertIn("\nVERSION=%s\n" % VERSIONS[0], handle.read())
+        self.assertEqual(os.readlink(link), os.path.join(t0, "agentik-agents"))
 
     def test_9_make_uninstall_takes_the_new_form(self):
         ours, mine = self.upgraded()
