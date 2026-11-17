@@ -120,7 +120,7 @@ test: ## Run every test suite (stub-driven, they spend nothing), then the 3.9 fl
 	  printf '=== %s ===\n' "$$t"; bash "$$t" || fail=1; \
 	done; \
 	for t in tests/test-route.py tests/test-status.py tests/test-plug.py tests/test-hygiene.py tests/test-bare-machine.py tests/test-descriptions.py \
-	  tests/test_al1_run.py tests/test_al2_wall.py tests/test_al3_fanout.py tests/test_al4_report.py tests/test_al4_off_golden.py tests/test_al6_join.py tests/test_al7_detach.py; do \
+	  tests/test_al1_run.py tests/test_al2_wall.py tests/test_al3_fanout.py tests/test_al4_report.py tests/test_al4_off_golden.py tests/test_al6_join.py tests/test_al7_detach.py tests/test_ag1_old_names.py; do \
 	  printf '=== %s ===\n' "$$t"; $(PY) "$$t" || fail=1; \
 	done; \
 	if $(FLOOR) -c '' 2>/dev/null; then \

@@ -411,7 +411,8 @@ class BareMachine(unittest.TestCase):
 
     def test_15_install_cli_refreshes_our_old_links(self):
         # ia1 R1: where our four links stand (a machine installed before), each is refreshed to
-        # the new tree, as agentik_install._old_link rules it
+        # the new tree, as agentik_install._old_link rules it; ag1 R1, R3: to the dispatcher there,
+        # which execs the tool by its real path
         home = os.path.join(self.t, "home-old-links")
         prefix = os.path.join(home, "P")
         bindir = os.path.join(prefix, "bin")
@@ -427,7 +428,7 @@ class BareMachine(unittest.TestCase):
         self.assertEqual(len(trees), 1, trees)
         for name in OLD:
             link = os.path.join(bindir, name)
-            self.assertEqual(os.readlink(link), os.path.join(share, trees[0], name))
+            self.assertEqual(os.readlink(link), os.path.join(share, trees[0], "agentik-agents"))
             self.assertTrue(os.access(link, os.X_OK), link)
         helped = self.ok(self.run_tool("--help", exe=os.path.join(bindir, "agentroute"), home=home))
         self.assertTrue(helped.stdout.startswith("usage: agentroute"), helped.stdout[:200])
