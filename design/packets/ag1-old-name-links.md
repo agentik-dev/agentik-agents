@@ -30,18 +30,20 @@ Baseline at 95cfbbc, in a temp HOME and prefix with a stand-in `ps` showing `/us
 - R5: the vendored `agentik_install.py` is not edited. R6: `UNTIL` and its words stay.
 - R7: tests first, failing at the pin, in a temp HOME and prefix with a stand-in `ps`.
 
-## 3. The form, and why
-
-Each old name is a link of install-cli's to the dispatcher, `<tree>/agentik-agents`, in the newest tree. Invoked under an old name, the dispatcher execs the tool beside its own resolved path, `<tree>/<name>`, so the kernel's command line for the tool names the tree. Two other forms were ruled out by the vendored module: a link to the launcher (as the session tool's old name) loses the name, since the launcher execs its runner without `$0`; and a regular file at the old name is no row of `uninstall`'s plan, which takes links alone, so the suite's remove would leave it. The new form is a link resolving into the share, which both uninstalls already take.
-
-A link of the old form (to `<tree>/<name>`) is held where it points while a running process names `<bin>/<name>`: such a process runs from the tree the link points at, and the prune counts it live only through the link. A link of the new form is never held. A process list that cannot be read holds nothing (the prune keeps every tree then).
-
-## 4. Interfaces
+## 3. Interfaces
 
 - `agents_install.link_old(bin_dir, tree, err, names=OLD, held=())` returns `(linked, left, passed)` as ia1's; an old name's target is `<tree>/agentik-agents`; a name in `held` is not touched.
 - `agents_install.held_old(bin_dir, share, names, ps="ps")`: the old names of the old form a running process names.
 - `install-cli`'s stdout line for a held name: `kept <names> in <bin> -> its tree: a running process started by that name runs from it; an install after it ends moves it`.
 - The dispatcher: invoked by a link named an old name, it execs `<its tree>/<name>` with the args unchanged.
+
+The form, and why. Each old name is a link of install-cli's to the dispatcher, `<tree>/agentik-agents`, in the newest tree. Invoked under an old name, the dispatcher execs the tool beside its own resolved path, `<tree>/<name>`, so the kernel's command line for the tool names the tree. Two other forms were ruled out by the vendored module: a link to the launcher (as the session tool's old name) loses the name, since the launcher execs its runner without `$0`; and a regular file at the old name is no row of `uninstall`'s plan, which takes links alone, so the suite's remove would leave it. The new form is a link resolving into the share, which both uninstalls already take.
+
+A link of the old form (to `<tree>/<name>`) is held where it points while a running process names `<bin>/<name>`: such a process runs from the tree the link points at, and the prune counts it live only through the link. A link of the new form is never held. A process list that cannot be read holds nothing (the prune keeps every tree then).
+
+## 4. Findings that name this row
+
+The review's finding 8. Filed here: NICE n64, claude-fanout (the API lane's forward) keeps the link form the old names left; the brief names the old names alone. Not built: a process started through an old link that an install before this packet already moved names no tree, so nothing can keep its tree.
 
 ## 5. Forbidden reads
 
