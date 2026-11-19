@@ -203,6 +203,7 @@ doctor() {
 
 # The stub verb (packet al0): exec PATH's claude-fanout with the args, each --yes before a --
 # dropped; none, or one that resolves inside this folder, is exit 2. Its help alone runs nothing.
+# It marks the env before the exec, so a claude-fanout that forwards back here is exit 2 (n17).
 fanout() {
 	t=$(command -v claude-fanout 2>/dev/null) || t=
 	case $#:${1-} in
@@ -216,6 +217,10 @@ fanout() {
 	esac
 	[ -n "$t" ] || {
 		echo "agentik agents fanout: the API lane is not in this version yet, and no claude-fanout is on PATH to hand the call to." >&2
+		exit 2
+	}
+	[ -z "${AGENTIK_AGENTS_FANOUT_TO:-}" ] || {
+		echo "agentik agents fanout: the claude-fanout it handed the call to ($AGENTIK_AGENTS_FANOUT_TO) called it back, and the API lane is not in this version yet." >&2
 		exit 2
 	}
 	r=$(readlink -f -- "$t" 2>/dev/null) || r=$t
@@ -233,6 +238,8 @@ fanout() {
 		esac
 		set -- "$@" "$a"
 	done
+	AGENTIK_AGENTS_FANOUT_TO=$t
+	export AGENTIK_AGENTS_FANOUT_TO
 	exec "$t" "$@"
 }
 
