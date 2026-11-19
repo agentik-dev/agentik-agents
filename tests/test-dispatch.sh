@@ -163,6 +163,35 @@ fan "wait" "$(printf 'argc=4\n[wait]\n[x]\n[--timeout]\n[540]')" "" 7 "$F/stub" 
 fan "none on PATH" "" "$NO_TOOL" 2 "$F/none" x
 fan "own forward" "" "$OWN" 2 "$F/own" x
 if [ ! -e "$F/ran" ]; then pass=$((pass + 1)); else fail=$((fail + 1)); echo "FAIL fanout: the own forward ran"; fi
+# n17: a claude-fanout outside D that forwards back to the verb is refused on re-entry, exit 2;
+# the forward counts its runs and gives up past 20, and perl's alarm walls the call at 10 s, so
+# the pin's dispatcher shows the loop (exit 99) where it still loops, and none can hang the suite
+mkdir -p "$F/loop"
+printf '#!/bin/sh
+echo x >> "%s/loop.n"
+[ "$(wc -l < "%s/loop.n")" -le 20 ] || exit 99
+exec "${LOOP_EXE:?}" fanout "$@"
+' \
+  "$F" "$F" > "$F/loop/claude-fanout"
+chmod +x "$F/loop/claude-fanout"
+LOOP="agentik agents fanout: the claude-fanout it handed the call to ($F/loop/claude-fanout) called it back, and the API lane is not in this version yet."
+loop() {
+  rm -f "$F/loop.n"
+  HOME="$F/home" LOOP_EXE="$1" PATH="$F/loop:/usr/bin:/bin" /usr/bin/perl -e 'alarm 10; exec @ARGV or exit 127' \
+    "$1" fanout x >/dev/null 2>"$F/err"
+}
+loop "$N/agentik-agents"; code=$?
+if [ "$code" = 2 ] && [ "$(cat "$F/err")" = "$LOOP" ] && [ "$(wc -l < "$F/loop.n" | tr -d ' ')" = 1 ]; then
+  pass=$((pass + 1))
+else
+  fail=$((fail + 1)); printf 'FAIL fanout, a forward back: exit %s [%s], runs %s\n' "$code" "$(cat "$F/err")" "$(wc -l < "$F/loop.n")"
+fi
+if git -C "$REPO" cat-file -e 070ef2d:plugin/lib/agentik-agents 2>/dev/null; then
+  mkdir -p "$F/loop-pin" && git -C "$REPO" show 070ef2d:plugin/lib/agentik-agents > "$F/loop-pin/agentik-agents"
+  chmod +x "$F/loop-pin/agentik-agents"
+  loop "$F/loop-pin/agentik-agents"; code=$?
+  if [ "$code" = 99 ]; then pass=$((pass + 1)); else fail=$((fail + 1)); echo "FAIL fanout, the pin's loop: exit $code, want 99"; fi
+fi
 fan "--help" "$(fan_help "$F/stub/claude-fanout")" "" 0 "$F/stub" --help
 fan "-h" "$(fan_help "$F/stub/claude-fanout")" "" 0 "$F/stub" -h
 fan "--help, none on PATH" "$(fan_help none)" "" 0 "$F/none" --help
