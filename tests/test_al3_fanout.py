@@ -525,9 +525,12 @@ class PlanTest(Base):
         off = make_lane(enabled=False, console_limit_usd=None)
         e = self.assertCode("lane.off", plan, big, off)
         self.assertEqual(e.fields, {"config": self.roots.config})
-        self.assertCode("limit.unstated", plan, big, make_lane(console_limit_usd=None))
+        none = make_lane(console_limit_usd=None)   # no limit stated: noted, never refused
+        self.assertCode("wall.dir", plan, big, none)
         self.assertCode("wall.dir", plan, big, make_lane())
         ok = Harness(self.roots).check_dirs
+        self.assertCode("budget.fanout", plan, big, none, ok)
+        self.assertEqual(plan(make_job(1.0), none, ok)["budget_usd"], 1.0)
         e = self.assertCode("budget.fanout", plan, big, make_lane(), ok)
         self.assertEqual(e.fields, {"budget_usd": 3.0, "max_fanout_usd": 2.0})
         reserve(self.roots, "earlier", 9.0)
