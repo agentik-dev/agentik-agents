@@ -57,9 +57,6 @@ TEXTS = {
     "job.type": "%s: {type} is not a shard type; the types are review, explore and analyze. "
                 "Nothing ran." % DOOR,
     "lane.off": "%s: the API lane is off in {config}. Nothing ran; %s lists the steps." % (DOOR, STATUS),
-    "limit.unstated": "%s: no Console limit is stated in {config}; add \"console_limit_usd\" "
-                      "under \"api:\", the spend limit you set on the key's workspace. No fan-out "
-                      "runs until it is there." % DOOR,
     "budget.fanout": "%s: a budget of {budget_usd_text} is above the fan-out ceiling of "
                      "{max_fanout_usd_text}. Nothing ran; lower the budget." % DOOR,
     "budget.day": "%s: a budget of {budget_usd_text} on today's {day_sum_usd_text} passes the day's "
@@ -187,8 +184,7 @@ TEXTS = {
     "doctor.old": "{path}, not this tool's forward: rm {path}",
     "status.head": "api lane: on, {running} agent{s} running",
     "limit.stated": "Console limit: {limit} by your word in the file",
-    "limit.none": "Console limit: none stated, and no fan-out runs until \"console_limit_usd\" "
-                  "is in the file",
+    "limit.none": "Console limit: none stated; the two ceilings alone hold a fan-out's spending",
     "gates.note": "note: {config} is not a line of {gates}; listing it guards against a casual edit.",
     # the fan-out's progress, on stderr
     "reserved": "fan-out {fanout}: {budget_usd_text} reserved; today {day_sum_usd_text} before it",
@@ -232,6 +228,8 @@ def plan(p, lane):
             s.get("label")))
     for d in p.get("dirs") or []:
         out.append("  reads %s" % d)
+    if lane.console_limit_usd is None:
+        out.append(say("limit.none"))
     return "\n".join(out)
 
 

@@ -57,7 +57,6 @@ CODES = {
     "job.flag": {"flag": "--model"},
     "job.type": {"type": "write"},
     "lane.off": {"config": "/x/config.yaml"},
-    "limit.unstated": {"config": "/x/config.yaml"},
     "budget.fanout": {"budget_usd": 5.0, "max_fanout_usd": 2.0},
     "budget.day": {"budget_usd": 2.0, "day_sum_usd": 9.0, "max_day_usd": 10.0},
     "id.used": {"id": "rv-auth", "day": "2026-11-13"},
@@ -593,6 +592,16 @@ class CliOnTest(Home):
         self.assertIn("rv-auth", out)
         self.assertEqual(parts.calls[1][1], (["job.json"],))
 
+    def test_limit_note(self):
+        from apilane import messages
+        note = messages.say("limit.none")
+        rc, out, err = cli_run(["fanout", "job.json", "--dry-run"], self.roots, on_parts())
+        self.assertEqual(rc, 0, err)
+        self.assertNotIn(note, out)
+        self.config("api:\n  enabled: true\n")
+        rc, out, err = cli_run(["fanout", "job.json", "--dry-run"], self.roots, on_parts())
+        self.assertEqual((rc, out.splitlines()[-1]), (0, note), err)
+
     def test_needs_yes(self):
         parts = on_parts()
         from apilane import messages
@@ -654,7 +663,8 @@ class StatusVerbTest(Home):
     def test_status(self):
         out = self.status("api:\n  enabled: true\n")
         self.assertTrue(out.startswith(FIRST_RUN + "\n"), out)
-        self.assertIn("no fan-out runs", out)
+        self.assertIn("Console limit: none stated; the two ceilings alone hold a fan-out's "
+                      "spending\n", out)
         self.assertIn(self.roots.config, out)
         self.assertIn(self.roots.state, out)
         self.assertIn("edit-gates", out)

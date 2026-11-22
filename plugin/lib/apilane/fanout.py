@@ -58,9 +58,6 @@ def plan(job, *, lane, roots, models=None, check_dirs=None, now=None):
     nothing, opens no key, runs no probe, writes no file and makes no folder."""
     if lane.enabled is not True:
         raise FanoutError("lane.off", config=roots.config)
-    # Cut on the owner's recommended answer, not yet given; one line that can leave.
-    if lane.console_limit_usd is None:
-        raise FanoutError("limit.unstated", config=roots.config)
     if check_dirs is None:
         from apilane import wall
         check_dirs = wall.check_dirs
