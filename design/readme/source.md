@@ -71,7 +71,7 @@ The router keeps a ledger at `~/.local/state/agentik-agents/route/requests.jsonl
 
 ## The API lane
 
-It is off until one file says otherwise: `~/.config/agentik/agents/config.yaml` in the account's own home, which no repo, variable or flag can stand in for. While it is off, help, `status`, `doctor`, `install-cli` and the hooks print what they print without it, save that a run started before the switch went off still shows. It turns on only on a platform where its read wall is proved; once the file turns it on, elsewhere every lane verb refuses and names the platform.
+It is off until one file says otherwise: `~/.config/agentik/agents/config.yaml` in the account's own home, which no repo, variable or flag can stand in for. While it is off, help, `status`, `doctor`, `install-cli` and the hooks print what they print without it, save that a run started before the switch went off still shows. It turns on only on a platform where its read wall is proved; once the file turns it on, elsewhere every lane verb refuses and names the platform, and `fanout` does so even while it is off.
 
 ```sh
 # in ~/.config/agentik/agents/config.yaml:  "api:", and under it, indented, "enabled: true"
