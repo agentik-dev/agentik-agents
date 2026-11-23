@@ -12,6 +12,7 @@ backend, so they run under a sandbox that denies the network: nothing reaches a 
 
 import json
 import os
+import platform
 import re
 import shutil
 import subprocess
@@ -337,8 +338,9 @@ class BareMachine(unittest.TestCase):
                          "agentik-agents %s\n" % self.version)
 
     def test_13_fanout_through_the_installed_launcher(self):
-        # packet al0: the verb hands the call to the claude-fanout on PATH, each --yes before a --
-        # dropped; none on PATH, or one inside the frozen tree, is exit 2 with nothing run
+        # packet al2b-linux-wall: where no wall is proved the verb runs nothing, whatever its
+        # args: the platform's line on stderr, exit 2, and a claude-fanout first on PATH, a
+        # marker, never starts (al0's stub, which handed the call to it, left then)
         home = os.path.join(self.t, "home-fanout")
         prefix = os.path.join(home, "P")
         os.makedirs(home)
@@ -347,49 +349,25 @@ class BareMachine(unittest.TestCase):
         share = os.path.join(prefix, "share", "agentik-agents")
         trees = [n for n in os.listdir(share) if not n.startswith(".")]
         self.assertEqual(len(trees), 1, trees)
-        # al6: the stub is the verb only where no wall is proved, so the frozen tree says so
+        # the frozen tree says no wall is proved
         with open(os.path.join(share, trees[0], "apilane", "walled.sh"), "w") as handle:
             handle.write("apilane_walled() { return 1; }\n")
-        stub, none, own = (os.path.join(home, n) for n in ("stub", "none", "own"))
-        for folder in (stub, none, own):
-            os.makedirs(folder)
+        mark = os.path.join(home, "mark")
+        os.makedirs(mark)
         ran = os.path.join(home, "ran")
-        forward = os.path.join(share, trees[0], "own-forward")
-        for path, text in ((os.path.join(stub, "claude-fanout"),
-                            '#!/bin/sh\necho "argc=$#"; for a; do printf "[%s]\\n" "$a"; done\n'
-                            'exit 7\n'),
-                           (forward, '#!/bin/sh\n: > "%s"\nexit 9\n' % ran)):
-            with open(path, "w", encoding="utf-8") as handle:
-                handle.write(text)
-            os.chmod(path, 0o755)
-        os.symlink(forward, os.path.join(own, "claude-fanout"))
-
-        def fan(folder, *argv):
-            run = self.run_tool("fanout", *argv, exe=launcher, home=home,
-                                path=folder + ":/usr/bin:/bin")
-            return run.returncode, run.stdout, run.stderr
-
-        def helped(found):
-            return ("usage: agentik agents fanout [--yes] ARGS...\n"
-                    "For now it hands ARGS to the claude-fanout on PATH, each --yes before a -- "
-                    "dropped.\nThe API lane's own fan-out takes this name in a later version.\n"
-                    "claude-fanout on PATH: %s\n" % found)
-
-        self.assertEqual(fan(stub, "--budget-usd", "2", "a b", "", "-x"),
-                         (7, "argc=5\n[--budget-usd]\n[2]\n[a b]\n[]\n[-x]\n", ""))
-        self.assertEqual(fan(stub, "--yes", "--budget-usd", "2", "p", "--yes", "--", "--yes"),
-                         (7, "argc=5\n[--budget-usd]\n[2]\n[p]\n[--]\n[--yes]\n", ""))
-        self.assertEqual(fan(none, "x"), (2, "", "agentik agents fanout: the API lane is not in "
-                                          "this version yet, and no claude-fanout is on PATH to "
-                                          "hand the call to.\n"))
-        self.assertEqual(fan(own, "x"), (2, "", "agentik agents fanout: the claude-fanout on PATH "
-                                         "is this tool's own forward, and the API lane is not in "
-                                         "this version yet.\n"))
-        self.assertFalse(os.path.exists(ran))
-        found = os.path.join(stub, "claude-fanout")
-        self.assertEqual(fan(stub, "--help"), (0, helped(found), ""))
-        self.assertEqual(fan(stub, "-h"), (0, helped(found), ""))
-        self.assertEqual(fan(none, "--help"), (0, helped("none"), ""))
+        with open(os.path.join(mark, "claude-fanout"), "w", encoding="utf-8") as handle:
+            handle.write('#!/bin/sh\n: > "%s"\nexit 7\n' % ran)
+        os.chmod(os.path.join(mark, "claude-fanout"), 0o755)
+        line = ("agentik agents: the API lane cannot turn on here: no wall is proved on %s, and "
+                "the lane never runs unwalled. Nothing ran; set api.enabled to false to silence "
+                "this.\n" % platform.system())
+        for argv in (("--budget-usd", "2", "a b", "", "-x"), ("--yes", "p"), (), ("--help",),
+                     ("-h",), ("wait", "x")):
+            with self.subTest(argv=argv):
+                run = self.run_tool("fanout", *argv, exe=launcher, home=home,
+                                    path=mark + ":/usr/bin:/bin")
+                self.assertEqual((run.returncode, run.stdout, run.stderr), (2, "", line))
+                self.assertFalse(os.path.exists(ran))
 
     def test_14_install_cli_keeps_a_claude_fanout_link(self):
         # packet al0 R8: install-cli leaves PREFIX/bin/claude-fanout, a link to a file outside the

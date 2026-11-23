@@ -847,6 +847,11 @@ class PlatformTest(Home):
         self.assertEqual(cli_run(["unwalled"], self.roots, Parts()), (0, "", ""))
 
     def test_launcher(self):
+        # through the launcher, with no file under the HOME: a copy whose walled.sh says no wall
+        # says the platform's line, and a copy with no apilane/ one line of its own; each exits 2
+        # with nothing on stdout and runs nothing (al2b-linux-wall, the stub's removal)
+        from apilane import messages
+        import platform
         trees = {}
         for name in ("nowall", "absent"):
             dst = os.path.join(self.home, name, "plugin")
@@ -863,7 +868,12 @@ class PlatformTest(Home):
                                env={"HOME": home, "PATH": "/usr/bin:/bin", "CLAUDE_PLUGIN_ROOT": trees[name]},
                                capture_output=True, timeout=60)
             got.append((p.returncode, p.stdout, p.stderr))
-        self.assertEqual(got[0], got[1])
+        line = messages.say("wall.platform", platform=platform.system()) + "\n"
+        self.assertEqual(got[0], (2, b"", line.encode()))
+        self.assertEqual(got[1][:2], (2, b""))
+        self.assertEqual(got[1][2].count(b"\n"), 1)
+        self.assertNotIn(b"usage:", got[1][2])
+        self.assertNotIn(b"claude-fanout", got[1][2])
 
     def test_agree(self):
         try:
