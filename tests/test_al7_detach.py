@@ -67,6 +67,13 @@ from apilane import cli, paths
 roots = paths.Roots(*sys.argv[2:6])
 hook, child, argv = sys.argv[6], json.loads(sys.argv[7]), sys.argv[8:]
 parts = cli.Parts()
+if os.environ.get("AL6_RECORDS_WRITE"):   # al6's Lane on the bubblewrap wall: its records folder
+    from apilane import wall
+    real_wrap = wall.wrap
+    def wrap(argv, *, read, write, net, home):
+        return real_wrap(argv, read=read, write=list(write) + [os.environ["AL6_RECORDS_WRITE"]],
+                         net=net, home=home)
+    wall.wrap = wrap
 if hook.startswith("lock:"):
     here = os.path.join(roots.state, "fanouts", hook[5:])
     for _i in range(200):   # once the parent has named this child in child.json
@@ -789,6 +796,8 @@ class TzTest(unittest.TestCase):
 
 
 class WorkLinesTest(Det):
+    bwrap_records = True
+
     def test_lines(self):
         dd = self.work
         line = ["--detach", "--yes", "--budget-usd", "0.50", "--profile", "analyze", "--add-dir",
