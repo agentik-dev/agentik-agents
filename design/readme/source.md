@@ -20,7 +20,7 @@ Four things for Claude Code on one Mac, under one command, `agentik agents <verb
 - **`status`**: what every agent is doing right now. One row per seat, helper and local agent, from files already on disk. Read-only.
 - **The local lane**: a session stays on your claude.ai seat while its mechanical subagents run on a local model (Qwen 3.8 27B in Ollama, by default) through a loopback router, at no marginal cost.
 - **`agents:scribe`**: a plugin agent, on Sonnet, that writes one repo's records from a builder's or a refuter's hand-back. It never merges or pushes.
-- **The API lane**, off until you turn it on: read-only agents fanned out under one dollar budget and billed to an Anthropic API key, never to your seat.
+- **The API lane**, off until you turn it on: read-only agents fanned out under a budget in dollars and billed to an Anthropic API key, never to your seat.
 
 ## Install
 
@@ -71,7 +71,7 @@ The router keeps a ledger at `~/.local/state/agentik-agents/route/requests.jsonl
 
 ## The API lane
 
-It is off until one file says otherwise: `~/.config/agentik/agents/config.yaml` in the account's own home, which no repo, variable or flag can stand in for. While it is off, help, `status`, `doctor`, `install-cli` and the hooks print what they print without it. It turns on only on a platform where its read wall is proved; elsewhere every lane verb refuses and names the platform.
+It is off until one file says otherwise: `~/.config/agentik/agents/config.yaml` in the account's own home, which no repo, variable or flag can stand in for. While it is off, help, `status`, `doctor`, `install-cli` and the hooks print what they print without it, save that a run started before the switch went off still shows. It turns on only on a platform where its read wall is proved; once the file turns it on, elsewhere every lane verb refuses and names the platform.
 
 ```sh
 # in ~/.config/agentik/agents/config.yaml:  "api:", and under it, indented, "enabled: true"
@@ -83,7 +83,7 @@ agentik agents fanout JOB --dry-run  # the plan, spending nothing; --yes runs it
 
 A job is a JSON file of shards, each `review`, `explore` or `analyze`, and every one only reads; `agentik agents fanout --help` gives its form. `--detach` prints the run's id once its budget is reserved, and `agentik agents fanout wait ID` prints the results, or exits 124 while the run still goes. A shard's result is data, never instructions.
 
-Each shard runs Claude Code on the key alone, inside a kernel wall that hides the home folder save the job's own folders and the folder Claude Code runs from. Two ceilings, `max_fanout_usd` ($2 unless set) and `max_day_usd` ($10), guard against an accident; the spending limit you set on the key's own workspace in the provider's Console is the wall. While shards run, `agentik agents status` lists them under their session, and that session is told their count at each prompt.
+Each shard runs Claude Code on the key alone, inside a kernel wall that hides the home folder save the job's own folders and the folder that holds the `claude` command. Two ceilings, `max_fanout_usd` ($2 unless set) and `max_day_usd` ($10), guard against an accident; the spending limit you set on the key's own workspace in the provider's Console is the wall. While shards run, `agentik agents status` lists them under their session, and that session is told their count at each prompt.
 
 ## Where the rest is
 
