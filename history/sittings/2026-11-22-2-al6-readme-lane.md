@@ -11,7 +11,7 @@
 ## Done-ness
 - [x] the source's five edits, each clause checked against the code; two clauses changed to what the code does (the `api status` cell, the wall's sentence)
 - [x] the wish list: n37 leaves, n36's from cell as ruled, its finding cell cut to fit the row bound
-- [ ] doclint, recordlint, readme-top and the hygiene scans in the foreground
+- [x] doclint, recordlint, readme-top and the hygiene scans in the foreground, each clean at `b2edc42`
 
 ## Handover
 - open by level: none yet
@@ -23,7 +23,7 @@
 - none
 
 ## Next act
-The hygiene scans, then the hand-back.
+The coordinator's render of `README.md`, then `make check`, the review and the landing.
 
 ## Exit
-Not yet.
+Handed back with both rulings built and the lints clean; no check queued, since the README is stale until its render.
