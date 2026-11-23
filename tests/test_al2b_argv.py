@@ -72,10 +72,20 @@ class BwrapArgvTest(unittest.TestCase):
                    # the root's own folders and the resolver are the machine's: none here but
                    # where a test names them
                    mock.patch.object(wall, "_bwrap_top", lambda: []),
-                   mock.patch.object(wall, "_RESOLV", self.home.path("no-resolv.conf"))]
+                   mock.patch.object(wall, "_RESOLV", self.home.path("no-resolv.conf")),
+                   # the trust files and `/nix` are the machine's too: none here but where a test
+                   # names them (`create`, so the round-one wall reads red on the asserts alone)
+                   mock.patch.object(wall, "_BWRAP_TLS", (), create=True),
+                   mock.patch.object(wall, "_BWRAP_NIX", self.home.path("no-nix"), create=True)]
         for p in patches:
             p.start()
             self.addCleanup(p.stop)
+
+    def scratch(self, prefix):
+        """A made-up folder outside the home, by its real path, removed at the test's end."""
+        d = os.path.realpath(tempfile.mkdtemp(prefix=prefix))
+        self.addCleanup(shutil.rmtree, d, True)
+        return d
 
     def wrap(self, argv=("/bin/cat", "x"), read=(), write=(), net="all"):
         return wall.wrap([self.fake] + list(argv), read=list(read), write=list(write), net=net,
@@ -106,7 +116,8 @@ class BwrapArgvTest(unittest.TestCase):
         self.addCleanup(shutil.rmtree, run, True)
         m = mounts(ops(self.wrap(read=[job], write=[run]))[0])
         empty = [d for k, d in m if k == "empty"]
-        for folder in (self.home.root, os.path.realpath("/tmp"), os.path.realpath("/var/tmp")):
+        for folder in (self.home.root, os.path.realpath("/tmp"), os.path.realpath("/var"),
+                       os.path.realpath("/var/tmp")):
             self.assertIn(folder, empty)
             at = m.index(("empty", folder))
             later = [d for k, d in m[:at] if k in ("ro", "rw") and d != "/" and within(d, folder)]
@@ -198,19 +209,116 @@ class BwrapArgvTest(unittest.TestCase):
         other = self.home.mkdir("elsewhere")
         out = self.home.path("out-resolv.conf")
         os.symlink(self.home.write("elsewhere/r.conf", "x\n"), out)
+        var = self.scratch("al2b-var-")   # this Mac's temp home lies under its real /var
         for conf in (plain, out):
-            with mock.patch.object(wall, "_BWRAP_RUN", run), mock.patch.object(wall, "_RESOLV", conf):
+            with mock.patch.object(wall, "_BWRAP_RUN", run), mock.patch.object(wall, "_RESOLV", conf), \
+                    mock.patch.object(wall, "_BWRAP_VAR", var, create=True):
                 m = mounts(ops(self.wrap(net="all"))[0])
             self.assertNotIn(("ro", res), m, conf)
             self.assertNotIn(("ro", other), m, conf)
+
+    def test_the_resolver_in_a_folder_emptied_whole_is_the_file_alone(self):
+        # review 1's F2: a resolv.conf directly in `/run` (or `/var`) brought the whole folder
+        # back; there the bind is that one file, and a deeper folder is bound as before
+        run, var = self.scratch("al2b-run-"), self.scratch("al2b-var-")
+        os.makedirs(os.path.join(run, "NetworkManager"))
+        cases = {"run-top": (os.path.join(run, "resolv.conf"), "file"),
+                 "var-top": (os.path.join(var, "resolv.conf"), "file"),
+                 "run-deeper": (os.path.join(run, "NetworkManager", "resolv.conf"), "folder")}
+        for name, (target, kind) in sorted(cases.items()):
+            with self.subTest(case=name):
+                with open(target, "w") as fh:
+                    fh.write("nameserver 192.0.2.53\n")
+                link = self.home.path("resolv-%s.conf" % name)
+                os.symlink(target, link)
+                with mock.patch.object(wall, "_BWRAP_RUN", run), \
+                        mock.patch.object(wall, "_RESOLV", link), \
+                        mock.patch.object(wall, "_BWRAP_VAR", var, create=True):
+                    cmd = self.wrap(net="all")
+                    lo = mounts(ops(self.wrap(net="loopback"))[0])
+                pairs, _ = ops(cmd)
+                m = mounts(pairs)
+                for whole in (run, var):
+                    self.assertNotIn(("--ro-bind", (whole, whole)), pairs)
+                    self.assertIn(("empty", whole), m)
+                back = target if kind == "file" else os.path.dirname(target)
+                self.assertIn(("ro", back), m)
+                self.assertLess(m.index(("empty", os.path.dirname(back))), m.index(("ro", back)))
+                inside = [(k, d) for k, d in m if k in ("ro", "rw")
+                          and (within(d, run) or within(d, var))]
+                self.assertEqual(inside, [("ro", back)], m)
+                self.assertNotIn(("ro", back), lo)
+
+    def test_var_is_emptied_whole_and_nothing_bound_inside_where_none_is_shown(self):
+        # review 1's F1: a socket file under `/var` (lxd's, sssd's, a real `/var/run`) was
+        # reachable under loopback, since a read-only bind does not stop a connect
+        self.assertNotIn("var", wall._BWRAP_KEEP)
+        m = mounts(ops(self.wrap(net="loopback"))[0])
+        real = os.path.realpath("/var")
+        self.assertIn(("empty", real), m)
+        self.assertGreater(m.index(("empty", real)), m.index(("ro", "/")))
+        var = self.scratch("al2b-var-")
+        for d in ("lib/lxd", "snap/lxd/common/lxd", "crash", "tmp"):
+            os.makedirs(os.path.join(var, d))
+        with mock.patch.object(wall, "_BWRAP_VAR", var, create=True):
+            m = mounts(ops(self.wrap(net="loopback"))[0])
+        self.assertIn(("empty", var), m)
+        inside = [(k, d) for k, d in m if d != var and within(d, var)]
+        self.assertEqual(inside, [("empty", os.path.join(var, "tmp"))], m)
+
+    def test_a_trust_file_linked_from_etc_ssl_into_var_comes_back_alone(self):
+        var, etc = self.scratch("al2b-var-"), self.scratch("al2b-etc-")
+        pem = os.path.join(var, "lib", "ca-certificates", "pem")
+        os.makedirs(pem)
+        os.makedirs(os.path.join(var, "lib", "lxd"))
+        usr = self.home.write("usr-share/ca.crt", "made-up\n")
+        certs, bundle, plain, other = (os.path.join(etc, n) for n in
+                                       ("certs", "ca-bundle.pem", "cert.pem", "out.crt"))
+        os.symlink(pem, certs)                                   # a folder linked into /var
+        with open(os.path.join(var, "lib", "ca-certificates", "ca-bundle.pem"), "w") as fh:
+            fh.write("made-up\n")
+        os.symlink(os.path.join(var, "lib", "ca-certificates", "ca-bundle.pem"), bundle)
+        with open(plain, "w") as fh:                              # a file of its own
+            fh.write("made-up\n")
+        os.symlink(usr, other)                                   # a link out of /var
+        tls = (certs, bundle, plain, other, os.path.join(etc, "absent.pem"))
+        with mock.patch.object(wall, "_BWRAP_VAR", var, create=True), \
+                mock.patch.object(wall, "_BWRAP_TLS", tls, create=True):
+            m = mounts(ops(self.wrap(net="loopback"))[0])
+        inside = sorted(d for k, d in m if k == "ro" and within(d, var))
+        self.assertEqual(inside, sorted([pem, os.path.join(var, "lib", "ca-certificates",
+                                                           "ca-bundle.pem")]), m)
+        for d in inside:
+            self.assertLess(m.index(("empty", var)), m.index(("ro", d)))
+        self.assertNotIn(("ro", plain), m)
+        self.assertNotIn(("ro", usr), m)
+
+    def test_nix_is_emptied_but_its_store_and_snap_stays(self):
+        self.assertNotIn("nix", wall._BWRAP_KEEP)
+        self.assertIn("snap", wall._BWRAP_KEEP)
+        nix = self.scratch("al2b-nix-")
+        store = os.path.join(nix, "store")
+        os.makedirs(store)
+        os.makedirs(os.path.join(nix, "var", "nix", "daemon-socket"))
+        with mock.patch.object(wall, "_BWRAP_NIX", nix, create=True):
+            m = mounts(ops(self.wrap(net="loopback"))[0])
+        self.assertIn(("empty", nix), m)
+        self.assertIn(("ro", store), m)
+        self.assertLess(m.index(("empty", nix)), m.index(("ro", store)))
+        self.assertEqual([(k, d) for k, d in m if d != nix and within(d, nix)], [("ro", store)])
+        # no `/nix` on the machine: nothing mounted at it
+        absent = os.path.join(nix, "absent")
+        with mock.patch.object(wall, "_BWRAP_NIX", absent, create=True):
+            m = mounts(ops(self.wrap(net="loopback"))[0])
+        self.assertEqual([d for _, d in m if within(d, absent)], [])
 
     def test_the_roots_own_folders_are_emptied(self):
         top = TOP
         self.assertEqual(top(["made-up-data", "usr", "etc", "opt", "snap", "nix", "var", "sys",
                               "dev", "proc", "bin", "lib", "lib64", "srv", "boot", "root",
                               "home", "tmp", "run", "mnt"]),
-                         ["/boot", "/home", "/made-up-data", "/mnt", "/root", "/run", "/srv",
-                          "/tmp"])
+                         ["/boot", "/home", "/made-up-data", "/mnt", "/nix", "/root", "/run",
+                          "/srv", "/tmp", "/var"])
         for path in top():   # this machine's own listing: real folders, never a link, off the list
             self.assertTrue(os.path.isdir(path) and not os.path.islink(path), path)
             self.assertNotIn(os.path.basename(path), wall._BWRAP_KEEP)

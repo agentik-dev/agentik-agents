@@ -10,7 +10,7 @@
 
 ## Done-ness
 - [x] act 1: main merged (R5); `plugin.json` kept at main's 1.9.11 until the last act, `probe.py`'s docstring on both sides' terms.
-- [ ] act 2: R1 and R2 with their argv tests, R3's word, the Linux classes.
+- [x] act 2: R1 (`/var` emptied whole, `/nix` but its store, a trust file linked from `/etc/ssl` into `/var` back), R2 (the resolver's file alone in a folder emptied whole), R3's word; 4 argv tests new, 26 OK here, red at 66ea184; the Linux classes, skipped here.
 - [ ] act 3: R4, the packet's stale line and n69.
 - [ ] act 4: 1.10.0 alone in the last commit under `plugin/`; lint, doclint, hygiene at 0; the check queued once.
 
@@ -20,7 +20,7 @@
 - Not built, by the brief: the stub's removal, after the second run's green.
 
 ## Next act
-R1 and R2.
+R4: the packet's stale line and n69.
 
 ## Exit
 Open.

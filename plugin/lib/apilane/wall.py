@@ -22,22 +22,24 @@ The Linux backend (`bwrap`, bubblewrap) is proved where `/usr/bin/bwrap` is an e
 and one trial namespace starts. It gives the command its own mount, process, IPC, host-name and
 (where the kernel allows) cgroup namespaces, a fresh `/proc` and `/dev`, a new session and death
 with its parent; it binds the root read-only, then replaces by empty folders the home, `/tmp`,
-`/var/tmp`, `/run` whole, `/home`, `/media` and `/mnt` by their real paths where they exist, and
-every other real folder directly under `/` but the short system list below (`_BWRAP_KEEP`); it
-binds the `read` folders and the folder of the command's own path read-only and the `write`
-folders read-write at their own paths, the shallower mount first, so a deeper one wins; and last
-it covers each secret root a shard could still see by its real path, a folder by an empty one, a
-file by `/dev/null`. The secret roots are the list below and the platform's keyring.
-`net="loopback"` gives the command a network namespace whose one interface is its own loopback;
-`net="all"` shares the host's, and binds back read-only the folder under `/run` that
-`/etc/resolv.conf` points into, so names still resolve.
+`/run` and `/var` whole (`/var/tmp` empty inside it), `/home`, `/media`, `/mnt` and `/nix` by
+their real paths where they exist, and every other real folder directly under `/` but the short
+system list below (`_BWRAP_KEEP`); it binds back read-only what a CLI needs inside those (the
+nix store, and a trust file that `/etc/ssl` links into `/var`), the `read` folders and the
+folder of the command's own path, and read-write the `write` folders, at their own paths, the
+shallower mount first, so a deeper one wins; and last it covers each secret root a shard could
+still see by its real path, a folder by an empty one, a file by `/dev/null`. The secret roots are
+the list below and the platform's keyring. `net="loopback"` gives the command a network
+namespace whose one interface is its own loopback; `net="all"` shares the host's, and where
+`/etc/resolv.conf` points into `/run` or `/var` binds back read-only its folder, or the file
+alone where it lies directly in one of those two, so names still resolve.
 
 What it does not hide, said once: the system list's folders (`/etc`, `/usr`, `/opt`, `/snap`,
-`/nix`, `/sys`, `/var` but its temp folder), read-only; a socket file inside a `read` or `write`
-folder, which a shard may connect to, and under `net="all"` the resolver's own sockets in its
-folder and the host's abstract sockets; a plaintext secret inside a job dir; and a hard link
-inside a job dir to a file outside it. The emptied folders are writable inside and thrown away
-after.
+`/sys`) and the nix store, read-only; a socket file a shard may connect to, since a read-only
+bind does not stop a connect: one under `/usr`, `/opt`, `/etc`, `/snap` or the nix store, and
+one inside a `read` or `write` folder; under `net="all"` the resolver's own sockets in its folder
+and the host's abstract sockets; a plaintext secret inside a job dir; and a hard link inside a
+job dir to a file outside it. The emptied folders are writable inside and thrown away after.
 """
 
 import os
@@ -193,21 +195,35 @@ def _sandbox_exec_wrap(argv, *, read, write, net, home):
 # -- the Linux backend: bwrap (bubblewrap) -------------------------------------------------------
 
 _BWRAP = "/usr/bin/bwrap"
-# Emptied always (the home is added by its real path): the temp folders, and the runtime folder
-# whole, with every socket file in it (a container daemon's, the system bus, the account's agent).
+# Emptied always (the home is added by its real path): the temp folder, and the runtime folder and
+# `/var` whole, with every socket file in them (a container daemon's, the system bus, the
+# account's agent, lxd's, sssd's, a `/var/run` that is a real folder): a read-only bind does not
+# stop a connect, so a folder that may hold one is emptied, never kept. `/var/tmp` comes back
+# empty inside it, as before.
 _BWRAP_RUN = "/run"
-_BWRAP_EMPTY = ("/tmp", "/var/tmp")
+_BWRAP_VAR = "/var"
+_BWRAP_EMPTY = ("/tmp",)
 # Emptied where they exist, by their real paths, so a link to a disk elsewhere is followed: the
 # other homes and the mounted disks.
 _BWRAP_EMPTY_IF = ("/home", "/media", "/mnt")
-# The folders directly under `/` that stay, read-only: the system's own (`/etc`, `/sys`, `/var`,
-# and the program and library folders where they are real, not links into `/usr`), the ones a
-# CLI is installed in (`/usr` with `/usr/local`, `/opt`, `/snap`, `/nix`), and `/dev` and `/proc`,
-# made fresh. Every other real folder there (`/srv`, `/boot`, `/root`, a machine's own `/data`)
-# is emptied, and what is bound comes back after it.
-_BWRAP_KEEP = ("bin", "dev", "etc", "lib", "lib32", "lib64", "libx32", "nix", "opt", "proc",
-               "sbin", "snap", "sys", "usr", "var")
-# Where `/etc/resolv.conf` points into `_BWRAP_RUN`, its folder is bound back under net="all".
+# `/nix` is emptied where it exists (its daemon's socket is under `/nix/var`) and its store alone
+# comes back, read-only, since a CLI installed through nix runs from there.
+_BWRAP_NIX = "/nix"
+# The folders directly under `/` that stay, read-only: the system's own (`/etc`, `/sys`, and the
+# program and library folders where they are real, not links into `/usr`), the ones a CLI is
+# installed in (`/usr` with `/usr/local`, `/opt`, `/snap`, whose mounts are read-only images),
+# and `/dev` and `/proc`, made fresh. Every other real folder there (`/var`, `/nix`, `/srv`,
+# `/boot`, `/root`, a machine's own `/data`) is emptied, and what is bound comes back after it.
+_BWRAP_KEEP = ("bin", "dev", "etc", "lib", "lib32", "lib64", "libx32", "opt", "proc", "sbin",
+               "snap", "sys", "usr")
+# What a CLI needs under `/var` to start and to reach the provider, bound back read-only after
+# `/var` is emptied: the trust files a TLS client reads, where one is a link out of `/etc/ssl`
+# into `/var` (openSUSE's `/etc/ssl/certs` and `/etc/ssl/ca-bundle.pem` point into
+# `/var/lib/ca-certificates`), by the link's target. Nothing else: the CLI and its runtime start
+# from the home and `/usr` (the target's are files there, or links into `/usr/share`).
+_BWRAP_TLS = ("/etc/ssl/certs", "/etc/ssl/certs/ca-certificates.crt", "/etc/ssl/cert.pem",
+              "/etc/ssl/ca-bundle.pem")
+# Where `/etc/resolv.conf` points into `/run` or `/var`, what of it is bound back under net="all".
 _RESOLV = "/etc/resolv.conf"
 # al2's secret roots and this platform's place for the keychain.
 _BWRAP_SECRET_ROOTS = SECRET_ROOTS + (".local/share/keyrings",)
@@ -252,12 +268,38 @@ def _bwrap_top(names=None):
     return sorted("/" + n for n in names if n not in _BWRAP_KEEP)
 
 
+def _bwrap_whole():
+    """The folders emptied whole at their top, by their real paths: the runtime folder and `/var`."""
+    return [os.path.realpath(p) for p in (_BWRAP_RUN, _BWRAP_VAR)]
+
+
 def _bwrap_resolver():
-    """The folder under `_BWRAP_RUN` that `/etc/resolv.conf` points into, or None."""
+    """What is bound back under net="all" for `/etc/resolv.conf`, where it points into a folder
+    emptied whole: the file alone where it lies directly in that folder (a bind of the folder
+    itself would bring back all of `/run`), else its own folder; None where it points elsewhere."""
     real = os.path.realpath(_RESOLV)
-    if real == _RESOLV or not _within(real, _BWRAP_RUN) or not os.path.isfile(real):
+    if real == _RESOLV or not os.path.isfile(real):
         return None
-    return os.path.dirname(real)
+    for whole in _bwrap_whole():
+        if real != whole and _within(real, whole):
+            folder = os.path.dirname(real)
+            return real if folder == whole else folder
+    return None
+
+
+def _bwrap_back():
+    """What the wall binds back read-only inside a folder it empties, by real path: each trust
+    file of `_BWRAP_TLS` that is a link into `/var`, and the nix store where `/nix` is a folder."""
+    var = os.path.realpath(_BWRAP_VAR)
+    out = []
+    for p in _BWRAP_TLS:
+        real = os.path.realpath(p)
+        if real != var and _within(real, var) and os.path.exists(real) and real not in out:
+            out.append(real)
+    store = os.path.join(_BWRAP_NIX, "store")
+    if os.path.isdir(_BWRAP_NIX) and os.path.isdir(store):
+        out.append(os.path.realpath(store))
+    return out
 
 
 def _depth(path):
@@ -267,14 +309,14 @@ def _depth(path):
 def _bwrap_wrap(argv, *, read, write, net, home):
     home_real = _canon(home)
     emptied = []
-    for p in list(_BWRAP_EMPTY) + [_BWRAP_RUN] + [p for p in _BWRAP_EMPTY_IF if os.path.isdir(p)] \
-            + _bwrap_top():
+    for p in list(_BWRAP_EMPTY) + [_BWRAP_RUN, _BWRAP_VAR, os.path.join(_BWRAP_VAR, "tmp")] \
+            + [p for p in _BWRAP_EMPTY_IF + (_BWRAP_NIX,) if os.path.isdir(p)] + _bwrap_top():
         q = os.path.realpath(p)
         if q not in emptied:
             emptied.append(q)
     if home_real not in emptied:
         emptied.append(home_real)
-    reads = [_canon(p) for p in read] + [os.path.dirname(argv[0])]
+    reads = [_canon(p) for p in read] + [os.path.dirname(argv[0])] + _bwrap_back()
     resolver = _bwrap_resolver() if net == "all" else None
     if resolver:
         reads.append(resolver)

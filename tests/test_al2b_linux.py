@@ -168,6 +168,9 @@ class WallSecretTest(BwrapCase):
         self.refused(run, "made-up-linked-text")
 
 
+WORD = "al2b-made-up-word"   # printed by a walled command after what it lists: the wall ran
+
+
 class DoubtTest(BwrapCase):
     """What the argv alone cannot settle: /proc, the runtime folder, and the child's end."""
 
@@ -184,17 +187,27 @@ class DoubtTest(BwrapCase):
 
     def test_the_runtime_folder_is_empty(self):
         # R2 of the second round: absent is stricter than empty, and holds too (the first run
-        # saw `/run/user` covered, so the uid's folder absent); a name in it still fails
+        # saw `/run/user` covered, so the uid's folder absent); a name in it still fails. Review
+        # 1's F3: the walled command prints a made-up word after the listing, so a wall that
+        # never started (bwrap's own error, nothing on stdout) fails here
         uid = str(os.getuid())
         folder = "/run/user/" + uid
         if not os.path.isdir(folder):
             self.skipTest("no %s on this machine" % folder)
-        listing = self.walled(["/bin/ls", "-A", "/run/user"])
-        self.assertNotIn(uid, listing.stdout.split(), listing.stdout)
-        run = self.walled(["/bin/ls", "-A", folder])
-        self.assertEqual(run.stdout, "", "a name of %s shows inside the wall" % folder)
-        if run.returncode != 0:
-            self.assertIn("No such file", run.stderr, run.stderr)
+        for path, name in (("/run/user", uid), (folder, None)):
+            with self.subTest(path=path):
+                run = self.walled(["/bin/sh", "-c", '/bin/ls -A "$1"; echo "%s $?"' % WORD,
+                                   "sh", path])
+                lines = run.stdout.splitlines()
+                self.assertTrue(lines and lines[-1].startswith(WORD + " "),
+                                "the wall never ran the command: %r" % run.stderr)
+                listed = " ".join(lines[:-1]).split()
+                if name:
+                    self.assertNotIn(name, listed, run.stdout)
+                else:
+                    self.assertEqual(listed, [], "a name of %s shows inside the wall" % folder)
+                if lines[-1] != WORD + " 0":
+                    self.assertIn("No such file", run.stderr, run.stderr)
 
     def test_killing_the_wall_ends_its_child(self):
         out = self.home.mkdir("out")
@@ -284,41 +297,52 @@ class Listener:
 
 
 class RunSocketTest(BwrapCase):
-    """L1: a socket file under `/run`, which the first wall left readable, is not reached."""
+    """L1 and review 1's F1: a socket file in a folder the first walls left readable (`/run`,
+    `/var`) is not reached; one in a write folder is."""
 
-    def test_a_socket_under_run_is_refused_and_one_in_a_write_folder_is_reached(self):
+    def test_a_socket_in_a_kept_folder_is_refused_and_one_in_a_write_folder_is_reached(self):
         self.holds()
-        lock = "/run/lock"   # world-writable on the target, and not emptied by the first wall
-        if not (os.path.isdir(lock) and os.access(lock, os.W_OK)):
-            self.skipTest("no writable %s on this machine" % lock)
-        outside = Listener(self, os.path.join(lock, "al2b-%d.sock" % os.getpid()))
         out = self.home.mkdir("out")
         inside = Listener(self, os.path.join(out, "al2b.sock"))
-        for net in ("loopback", "all"):
-            run = self.walled([al2.FAKE_PY, "-I", "-c", SOCK_CHILD, outside.path], net=net)
-            self.assertEqual(run.returncode, 0, run.stderr)
-            self.assertTrue(run.stdout.startswith("refused"), (net, run.stdout))
         run = self.walled([al2.FAKE_PY, "-I", "-c", SOCK_CHILD, inside.path], write=[out],
                           net="loopback")
         self.assertEqual(run.stdout.strip(), "reached", run.stderr)
+        # world-writable on the target: `/run/lock`, which the first wall kept, and Ubuntu's
+        # `/var/crash`, which the second kept
+        for folder in ("/run/lock", "/var/crash"):
+            with self.subTest(folder=folder):
+                if not (os.path.isdir(folder) and os.access(folder, os.W_OK)):
+                    self.skipTest("no writable %s on this machine" % folder)
+                outside = Listener(self, os.path.join(folder, "al2b-%d.sock" % os.getpid()))
+                for net in ("loopback", "all"):
+                    run = self.walled([al2.FAKE_PY, "-I", "-c", SOCK_CHILD, outside.path],
+                                      net=net)
+                    self.assertEqual(run.returncode, 0, run.stderr)
+                    self.assertTrue(run.stdout.startswith("refused"), (net, run.stdout))
 
 
 class ResolverTest(BwrapCase):
-    """L1: `/run` is emptied whole; under net="all" alone the resolver's folder is back."""
+    """L1 and review 1's F2: `/run` is emptied whole; under net="all" alone what of it holds the
+    resolver is back: its folder, or the file alone where that lies directly in `/run` or `/var`."""
 
     def test_the_resolver_under_all_alone(self):
-        folder = wall._bwrap_resolver()
-        if folder is None:
-            self.skipTest("/etc/resolv.conf does not point into /run on this machine")
+        back = wall._bwrap_resolver()
+        if back is None:
+            self.skipTest("/etc/resolv.conf does not point into /run or /var on this machine")
         name = os.path.basename(os.path.realpath("/etc/resolv.conf"))
         run = self.walled(["/bin/cat", "/etc/resolv.conf"], net="all")
         self.assertEqual(run.returncode, 0, run.stderr)
         self.assertIn("nameserver", run.stdout)
+        folder = back if os.path.isdir(back) else os.path.dirname(back)
         run = self.walled(["/bin/ls", "-A", folder], net="loopback")
         self.assertNotIn(name, run.stdout.split(), run.stdout)
-        run = self.walled(["/bin/ls", "-A", "/run"], net="all")
+        top = "/" + back.split("/")[1]
+        run = self.walled(["/bin/ls", "-A", top], net="all")
         self.assertEqual(run.returncode, 0, run.stderr)
-        self.assertEqual(run.stdout.split(), [folder.split("/")[2]], run.stdout)
+        if top == os.path.realpath(wall._BWRAP_RUN):
+            self.assertEqual(run.stdout.split(), [back.split("/")[2]], run.stdout)
+        else:
+            self.assertIn(back.split("/")[2], run.stdout.split(), run.stdout)
 
 
 class RootTest(BwrapCase):
@@ -329,11 +353,16 @@ class RootTest(BwrapCase):
                          ["/al2b-made-up-data"])
         top = wall._bwrap_top()
         self.assertIn("/tmp", top)
-        bound = os.path.realpath(self.home.root)   # the fake's folder is in it, bound back
+        # what the wall itself mounts inside a folder it empties: the test's home (the fake's
+        # folder is in it, bound back), `/var/tmp`, and what it binds back (a trust file's
+        # target under `/var`, the nix store)
+        inside = [os.path.realpath(self.home.root), os.path.realpath("/var/tmp")] \
+            + wall._bwrap_back()
         for folder in top:
             with self.subTest(folder=folder):
-                # empty, but for the first step on the way to the one folder bound inside it
-                way = bound[len(folder):].strip("/").split("/")[:1] if wall._within(bound, folder) else []
+                # empty, but for the first step on the way to each folder mounted inside it
+                way = sorted({p[len(folder):].strip("/").split("/")[0] for p in inside
+                              if p != folder and wall._within(p, folder)})
                 run = self.walled(["/bin/ls", "-A", folder], net="loopback")
                 self.assertEqual((run.returncode, run.stdout.split()), (0, way), run.stderr)
         run = self.walled(["/bin/ls", "/usr/bin"])
