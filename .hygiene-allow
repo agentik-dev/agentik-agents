@@ -83,3 +83,4 @@ design/packets/ak7-plug-agents.md: sibling
 # al6's packet quotes the old tool's name, which the join forwards and keeps where no wall is proved.
 design/packets/al6-join.md: renamed
 design/packets/al6-join.md: sibling
+records: out
