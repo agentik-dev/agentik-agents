@@ -37,6 +37,8 @@ DATA = "/System/Volumes/Data"
 WRITE_RULE = '(deny file-write* (subpath "/"))'
 STAND_IN = apitypes.Type("al9a-writer", "made-up-model", ("Read", "Edit", "Write"), None)
 WRITER_CHECKS = ["key", "tools", "walled", "restricted", "write", "writewalled", "inert"]
+HELD = ("neither attempt's outside writes landed, the direct attempt's were each refused "
+        "and .git is unchanged")
 # the pin's stub, its six replies to one made-up conversation: the sha256 measured at 82f2710
 PIN_REPLIES = "677f945dc873c5ec1005eec261d4ef490157362c47f89177c41a004407fb7da8"
 
@@ -357,6 +359,8 @@ if MODE == "more":
     tools = tools + ["Bash"]
 elif MODE == "less":
     tools = tools[:-1]
+elif MODE == "readalone" and not writer:
+    tools = ["Read"]                       # as the real CLI offers a reader under --bare
 def hook(path):
     with open(path) as fh:
         command = json.load(fh)["hooks"]["SessionStart"][0]["hooks"][0]["command"]
@@ -394,7 +398,9 @@ for turn in range(12):
             continue
         path = block["input"].get("file_path", "")
         try:
-            if block["name"] == "Write":
+            if block["name"] == "Write" and MODE == "refuse" and not inside(path):
+                text, err = "outside the working directories", True   # a permission layer's
+            elif block["name"] == "Write":
                 os.makedirs(os.path.dirname(path), exist_ok=True)
                 with open(path, "w") as fh:
                     fh.write(block["input"]["content"])
@@ -443,6 +449,32 @@ def widen_to_read(argv, *, read, write, net, home):
     return wall.wrap(argv, read=read, write=list(write) + list(read[:1]), net=net, home=home)
 
 
+def cut_write_rule(argv, *, read, write, net, home):
+    """The review's stand-in: the real macOS wall with its write rule cut out."""
+    cmd = wall.wrap(argv, read=read, write=write, net=net, home=home)
+    at = cmd.index("-p") + 1
+    cmd[at] = cmd[at].replace(WRITE_RULE, "")
+    return cmd
+
+
+def starts_nothing(argv, *, read, write, net, home):
+    """A stand-in wall that starts nothing at all."""
+    return ["/usr/bin/true"]
+
+
+def leftovers():
+    """The probe's own outside files still in the temp folder or /private/var/tmp."""
+    found = []
+    for folder in (os.path.realpath(tempfile.gettempdir()), os.path.realpath("/var/tmp")):
+        try:
+            names = os.listdir(folder)
+        except OSError:
+            continue
+        found += [os.path.join(folder, n) for n in names
+                  if n.startswith(("agentik-probe-writer-", "agentik-probe-direct-"))]
+    return found
+
+
 class WriterPassTest(WriterCase):
     """Acceptance 11, 12, 14: the writer's pass under the real wall."""
 
@@ -450,7 +482,8 @@ class WriterPassTest(WriterCase):
         rec = self.run_writer("good")
         self.assertIs(rec["ok"], True, rec)
         w = rec["writer"]
-        self.assertEqual(set(w), {"version", "ok", "checks"})
+        self.assertEqual(set(w), {"version", "ok", "type", "tools", "checks"})
+        self.assertEqual((w["type"], w["tools"]), (STAND_IN.name, ["Edit", "Read", "Write"]))
         self.assertEqual([c["name"] for c in w["checks"]], WRITER_CHECKS)
         self.assertEqual({n: c["ok"] for n, c in self.wchecks(rec).items()},
                          dict.fromkeys(WRITER_CHECKS, True), w)
@@ -459,15 +492,46 @@ class WriterPassTest(WriterCase):
         with open(os.path.join(self.roots.state, "probe.json"), encoding="utf-8") as fh:
             self.assertEqual(json.load(fh), rec)
         self.assertEqual(os.listdir(self.roots.state), ["probe.json"])
-        self.assertTrue(self.probe.passed(self.roots, al2.VERSION, writer=True))
+        self.assertTrue(self.probe.passed(self.roots, al2.VERSION, writer=True,
+                                          writer_type=STAND_IN))
+        self.assertFalse(self.probe.passed(self.roots, al2.VERSION, writer=True))  # no implement
+        self.assertEqual(leftovers(), [])
         print("\nthe writer object: " + json.dumps(w))
 
     def test_a_wall_that_lets_one_through_fails_writewalled(self):
         rec = self.run_writer("good", wrap=widen_to_read)
         c = self.wchecks(rec)["writewalled"]
-        self.assertEqual((c["ok"], c["detail"]), (False, "landed: the read dir"))
+        self.assertEqual((c["ok"], c["detail"]),
+                         (False, "the CLI's attempt: landed: the read dir"))
         self.assertIs(rec["writer"]["ok"], False)
         self.assertIs(rec["ok"], True)       # the reader's verdict is its own
+        self.assertEqual(leftovers(), [])
+
+    def test_a_cli_that_refuses_itself_leaves_the_wall_to_the_direct_attempt(self):
+        """R2 (L1): the review's stand-in, a CLI that refuses outside writes itself under a
+        wall with the write rule cut out: the direct attempt finds the hole and is named."""
+        self.need_wall()
+        if self.wall.backend() != "sandbox-exec":
+            self.skipTest("the cut is of the macOS profile")
+        rec = self.run_writer("refuse", wrap=cut_write_rule)
+        c = self.wchecks(rec)["writewalled"]
+        self.assertIs(c["ok"], False, c)
+        self.assertEqual(c["detail"], "the direct attempt: not refused: the account's temp folder")
+        self.assertIs(rec["writer"]["ok"], False)
+        self.assertEqual(leftovers(), [])
+
+    def test_a_wall_that_starts_nothing_does_not_pass_on_absence(self):
+        """R2: no file landed outside, yet nothing was tried: `writewalled` fails."""
+        rec = self.run_writer("good", wrap=starts_nothing)
+        c = self.wchecks(rec)["writewalled"]
+        self.assertEqual((c["ok"], c["detail"]), (False, "the direct attempt: it did not run"))
+        self.assertEqual(leftovers(), [])
+
+    def test_under_the_real_wall_both_attempts_hold(self):
+        rec = self.run_writer("refuse")
+        c = self.wchecks(rec)["writewalled"]
+        self.assertEqual((c["ok"], c["detail"]), (True, HELD))
+        self.assertEqual(leftovers(), [])
 
     def test_a_wall_that_walls_nothing_names_every_write_and_git(self):
         rec = self.run_writer("good", wrap=al2.open_wrap)
@@ -478,12 +542,49 @@ class WriterPassTest(WriterCase):
         self.assertIs(self.wchecks(rec)["write"]["ok"], True)
 
     def test_one_tool_more_or_less_fails_tools(self):
-        for mode, said in (("more", "offered beyond Read, Edit, Write: Bash"),
-                           ("less", "not offered: Write")):
+        """The writer's `tools` is exact; the reader's is the pin's (R1 of brief 2): one tool
+        more fails it, one less does not."""
+        for mode, said, reader in (
+                ("more", "offered beyond Read, Edit, Write: Bash",
+                 (False, "offered beyond Read, Grep and Glob: Bash")),
+                ("less", "not offered: Write", (True, "offered: Grep, Read"))):
             rec = self.run_writer(mode)
             self.assertEqual((self.wchecks(rec)["tools"]["ok"],
                               self.wchecks(rec)["tools"]["detail"]), (False, said))
-            self.assertIs({c["name"]: c["ok"] for c in rec["checks"]}["tools"], False, mode)
+            got = {c["name"]: (c["ok"], c["detail"]) for c in rec["checks"]}["tools"]
+            self.assertEqual(got, reader, mode)
+
+
+class ReaderToolsTest(WriterCase):
+    """R1 of brief 2 (F1): the reader's `tools` is the pin's, no tool beyond the type's."""
+
+    def review_record(self, offered):
+        """The review's repro: four requests, each offering `offered`, the job text back."""
+        texts = {"read": "probe-read-x", "walled": "probe-walled-x", "outside": "probe-outside-x"}
+        reqs = [{"credentials": {"x-api-key": "k"}, "tools": list(offered), "turn": t,
+                 "body": "probe-read-x" if t == 3 else "-"} for t in range(4)]
+        got = {"key": "k", "rc": 0, "output": "", "requests": reqs}
+        return self.probe._record("2.1.330", got, texts, True, "/nowhere")
+
+    def test_read_alone_passes_with_the_pins_detail(self):
+        rec = self.review_record(["Read"])
+        self.assertEqual([(c["name"], c["ok"], c["detail"]) for c in rec["checks"]
+                          if c["name"] == "tools"], [("tools", True, "offered: Read")])
+        self.assertIs(rec["ok"], True, rec)
+
+    def test_a_tool_beyond_the_three_fails(self):
+        rec = self.review_record(["Read", "Bash"])
+        c = {c["name"]: c for c in rec["checks"]}["tools"]
+        self.assertEqual((c["ok"], c["detail"]),
+                         (False, "offered beyond Read, Grep and Glob: Bash"))
+        self.assertIs(rec["ok"], False)
+
+    def test_a_reader_offered_read_alone_under_the_wall(self):
+        rec = self.run_writer("readalone")
+        got = {c["name"]: (c["ok"], c["detail"]) for c in rec["checks"]}
+        self.assertEqual(got["tools"], (True, "offered: Read"))
+        self.assertIs(rec["ok"], True, rec)
+        self.assertEqual(self.wchecks(rec)["tools"]["detail"], "offered: Edit, Read, Write")
 
 
 class InertTest(WriterCase):
@@ -522,20 +623,63 @@ class PassedTest(WriterCase):
         with open(os.path.join(self.roots.state, "probe.json"), "w", encoding="utf-8") as h:
             json.dump(rec, h)
 
+    def writer_obj(self, **over):
+        """A writer object as the pass now writes it, every check true."""
+        w = {"version": al2.VERSION, "ok": True, "type": STAND_IN.name,
+             "tools": sorted(STAND_IN.tools),
+             "checks": [{"name": n, "ok": True, "detail": ""} for n in WRITER_CHECKS]}
+        w.update(over)
+        return w
+
+    def writer_passed(self, wtype=STAND_IN):
+        return self.probe.passed(self.roots, al2.VERSION, writer=True, writer_type=wtype)
+
     def test_passed_reader_and_writer(self):
         self.write_record()     # the pin's shape: no writer object
         self.assertTrue(self.probe.passed(self.roots, al2.VERSION))
         self.assertFalse(self.probe.passed(self.roots, al2.VERSION, writer=True))
-        self.write_record(writer={"version": "9.9.8", "ok": True, "checks": []})
+        self.assertFalse(self.writer_passed())
+        self.write_record(writer=self.writer_obj(version="9.9.8"))
         self.assertTrue(self.probe.passed(self.roots, al2.VERSION))
-        self.assertFalse(self.probe.passed(self.roots, al2.VERSION, writer=True))
-        self.write_record(writer={"version": al2.VERSION, "ok": False, "checks": []})
+        self.assertFalse(self.writer_passed())
+        self.write_record(writer=self.writer_obj(ok=False))
         self.assertTrue(self.probe.passed(self.roots, al2.VERSION))
-        self.assertFalse(self.probe.passed(self.roots, al2.VERSION, writer=True))
-        self.write_record(writer={"version": al2.VERSION, "ok": True, "checks": []})
-        self.assertTrue(self.probe.passed(self.roots, al2.VERSION, writer=True))
-        self.write_record(ok=False, writer={"version": al2.VERSION, "ok": True, "checks": []})
-        self.assertFalse(self.probe.passed(self.roots, al2.VERSION, writer=True))
+        self.assertFalse(self.writer_passed())
+        self.write_record(writer=self.writer_obj())
+        self.assertTrue(self.writer_passed())
+        self.assertFalse(self.probe.passed(self.roots, al2.VERSION, writer=True))  # no implement
+        self.write_record(ok=False, writer=self.writer_obj())
+        self.assertFalse(self.writer_passed())
+
+    def test_restricted_never_decides_the_writer(self):
+        checks = [{"name": n, "ok": n != "restricted", "detail": ""} for n in WRITER_CHECKS]
+        self.write_record(writer=self.writer_obj(checks=checks))
+        self.assertTrue(self.writer_passed())
+
+    def test_a_failed_writewalled_with_ok_true_does_not_pass(self):
+        """R3 (L2): the review's record, `ok` true over a failed `writewalled`."""
+        checks = [{"name": n, "ok": n != "writewalled", "detail": ""} for n in WRITER_CHECKS]
+        self.write_record(writer=self.writer_obj(checks=checks))
+        with mock.patch.dict(apitypes.TYPES, {"implement": STAND_IN}):
+            self.assertFalse(self.probe.passed(self.roots, al2.VERSION, writer=True))
+        self.assertFalse(self.writer_passed())
+
+    def test_a_check_missing_or_twice_does_not_pass(self):
+        for names in ([n for n in WRITER_CHECKS if n != "inert"], WRITER_CHECKS + ["write"]):
+            checks = [{"name": n, "ok": True, "detail": ""} for n in names]
+            self.write_record(writer=self.writer_obj(checks=checks))
+            with mock.patch.dict(apitypes.TYPES, {"implement": STAND_IN}):
+                self.assertFalse(self.probe.passed(self.roots, al2.VERSION, writer=True), names)
+            self.assertFalse(self.writer_passed(), names)
+
+    def test_the_types_tools_changed_since_the_pass(self):
+        self.write_record(writer=self.writer_obj())
+        for changed in (STAND_IN._replace(tools=("Read", "Write")),
+                        STAND_IN._replace(tools=("Read", "Edit", "Write", "Glob")),
+                        STAND_IN._replace(name="another-writer")):
+            with mock.patch.dict(apitypes.TYPES, {"implement": changed}):
+                self.assertFalse(self.probe.passed(self.roots, al2.VERSION, writer=True), changed)
+            self.assertFalse(self.writer_passed(changed), changed)
 
     def test_no_writing_type_runs_no_writers_pass(self):
         self.assertIsNone(apitypes.TYPES.get("implement"))

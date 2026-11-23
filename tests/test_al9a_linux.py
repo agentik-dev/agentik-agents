@@ -180,5 +180,42 @@ class WriterProbeTest(al2b.ProbeCase):
         self.assertEqual(os.listdir(self.roots.state), ["probe.json"])
 
 
+def widen_out(argv, *, read, write, net, home):
+    """The stand-in under bwrap: the real wall, with the temp folder, /var/tmp and the read dir
+    bound writable, so an outside write lands on the disk."""
+    out = [os.path.realpath(tempfile.gettempdir()), os.path.realpath("/var/tmp")] + list(read[:1])
+    return wall.wrap(argv, read=read, write=list(write) + out, net=net, home=home)
+
+
+class WriterWalledTest(al2b.ProbeCase):
+    """R2 of brief 2: `writewalled` under bwrap proves the wall by the direct attempt."""
+
+    def run_writer(self, mode, **kw):
+        if al9a.GIT is None:
+            self.skipTest("no git here: the throwaway repo cannot be made")
+        claude = self.home.write("tools/claude-w-" + mode, al9a.FAKE_WRITER % {
+            "py": al2.FAKE_PY, "mode": mode, "version": al2.VERSION}, 0o755)
+        rec = probe.run(claude=claude, roots=self.roots, build_argv=al9a.build_argv,
+                        build_env=al2.build_env, writer=True, writer_type=al9a.STAND_IN, **kw)
+        c = {c["name"]: c for c in rec["writer"]["checks"]}["writewalled"]
+        print("\nwritewalled under bwrap, %s: %s" % (mode, json.dumps(c)))
+        self.assertEqual(al9a.leftovers(), [])
+        return c
+
+    def test_a_cli_that_refuses_itself_under_a_widened_wall(self):
+        c = self.run_writer("refuse", wrap=widen_out, inside=True)
+        self.assertIs(c["ok"], False)
+        self.assertTrue(c["detail"].startswith("the direct attempt: "), c)
+
+    def test_a_wall_that_starts_nothing(self):
+        c = self.run_writer("good", wrap=al9a.starts_nothing)
+        self.assertEqual((c["ok"], c["detail"]), (False, "the direct attempt: it did not run"))
+
+    def test_under_the_real_wall(self):
+        c = self.run_writer("refuse")
+        self.assertIs(c["ok"], True, c)
+        self.assertTrue(c["detail"].startswith("neither attempt's outside writes landed"), c)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
