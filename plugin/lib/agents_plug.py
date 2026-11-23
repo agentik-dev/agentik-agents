@@ -146,14 +146,21 @@ SUMMARIES = {
 }
 
 # The doctor's checks, in order: one row a check, `kind` naming how it is made.
-TOOLS = ("agentroute", "claude-local", "localrig", "claude-agents", "agentik-agents", "agentik")
+TOOLS = ("agentik-agents", "agentik")
+# The old names are not wanted (packet ia1-new-machine R3): one whose link stands on PATH is a note.
+OLD_NAMES = ("agentroute", "claude-local", "localrig", "claude-agents")
 CHECKS = [{"name": t, "kind": "on_path", "missing": "note", "remedy": REMEDY} for t in TOOLS] + [
+    {"name": t, "kind": "old_name"} for t in OLD_NAMES] + [
     {"name": "claude", "kind": "on_path", "missing": "warn", "remedy": None,
      "why": "the local lane runs it"},
     {"name": "python3", "kind": "python", "floor": (3, 9)},
     {"name": "lane", "kind": "lane", "timeout": 18},
 ]
 NO_LANE = "no local lane is set up here, so the router, the upstream and the backends were not asked"
+# A lane set up whose router nothing answers on (the check's `not_started`): a lane at rest, since
+# `agentik agents local` starts the router when a session asks for it (row ak7b-router-note)
+NOT_STARTED = ("the local lane is set up here and its router is not started: nothing answers at "
+               "http://%s; `agentik agents local` starts it")
 ROUTER_STATES = {"ok": "ok", "warn": "warn", "FAIL": "fail"}
 OURS = ("AGENTROUTE_", "CLAUDE_LOCAL_", "LOCALRIG_")
 # The variables a default may be computed from that are a setting, not this machine's folders:
@@ -637,6 +644,14 @@ def check_on_path(c):
              "remedy": c["remedy"]}]
 
 
+def check_old_name(c):
+    path = shutil.which(c["name"])
+    if not path or not os.path.islink(path):
+        return []
+    return [{"name": c["name"], "status": "note",
+             "detail": "%s (an old name's link, until 2026-12-31)" % path, "remedy": None}]
+
+
 def check_python(c):
     path = shutil.which("python3")
     if not path:
@@ -659,16 +674,35 @@ def check_python(c):
              "remedy": None}]
 
 
+def router_rows(c):
+    """The router's check as one object: its rows, and what it wrote to stderr."""
+    argv = [sys.executable, "-I", "-X", "pycache_prefix=" + CACHE,
+            os.path.join(HERE, "agentroute"), "--check", "--json"]
+    got = subprocess.run(argv, capture_output=True, text=True, timeout=c["timeout"],
+                         stdin=subprocess.DEVNULL)
+    return json.loads(got.stdout)["rows"], got.stderr
+
+
+def router_listen():
+    """The address the router listens on, as its own assignment reads it here."""
+    for row in SETTINGS:
+        if row["read"] == "python":
+            return {f[0]: f[1] for f in read_python(row)}.get("LISTEN")
+    return None
+
+
+def not_started(r):
+    return r.get("not_started") is True
+
+
 def check_lane(c):
     if not lane_set_up():
         return [{"name": c["name"], "status": "note", "detail": NO_LANE, "remedy": None}]
-    argv = [sys.executable, "-I", "-X", "pycache_prefix=" + CACHE,
-            os.path.join(HERE, "agentroute"), "--check", "--json"]
     try:
-        got = subprocess.run(argv, capture_output=True, text=True, timeout=c["timeout"],
-                             stdin=subprocess.DEVNULL)
-        rows = json.loads(got.stdout)["rows"]
-        return [{"name": r["what"].strip(), "status": ROUTER_STATES.get(r["state"], "warn"),
+        rows, _ = router_rows(c)
+        return [{"name": r["what"].strip(), "status": "note", "detail": NOT_STARTED % router_listen(),
+                 "remedy": None} if not_started(r) else
+                {"name": r["what"].strip(), "status": ROUTER_STATES.get(r["state"], "warn"),
                  "detail": r["detail"], "remedy": None} for r in rows]
     except Exception as e:  # noqa: BLE001  any answer it cannot read (review 1, R1-F1)
         return [{"name": c["name"], "status": "fail",
@@ -676,7 +710,24 @@ def check_lane(c):
                  "remedy": None}]
 
 
-KINDS = {"on_path": check_on_path, "python": check_python, "lane": check_lane}
+def lane_text():
+    """The text doctor's lane block: the router's text form from its rows, but a router not
+    started is one line, as the no-lane note is, and out of the count (row ak7b-router-note)."""
+    rows, err = router_rows(next(c for c in CHECKS if c["kind"] == "lane"))
+    lines, counts = err.splitlines(), {}
+    for r in rows:
+        if not_started(r):
+            lines.append(NOT_STARTED % router_listen())
+            continue
+        lines.append("  %-5s %-16s %s" % (r["state"], r["what"], r["detail"]))
+        counts[r["state"]] = counts.get(r["state"], 0) + 1
+    lines.append("  " + "  ".join("%d %s" % (counts.get(k, 0), k) for k in ("ok", "warn", "FAIL"))
+                 + ("   (warn rows do not gate a session)" if counts.get("warn") else ""))
+    return lines
+
+
+KINDS = {"on_path": check_on_path, "old_name": check_old_name, "python": check_python,
+         "lane": check_lane}
 
 
 def api_checks(lane=None, roots=None, parts=None):
@@ -750,6 +801,13 @@ def main(argv=None, out=sys.stdout, err=sys.stderr):
             return 3
         out.write("yes\n" if up else "no\n")
         return 0 if up else 1
+    if args == ["lane", "text"]:
+        try:
+            text = "".join(line + "\n" for line in lane_text())
+        except Exception:  # noqa: BLE001  the text doctor then asks the router as at the pin
+            return 3
+        out.write(text)
+        return 0
     if args == ["describe", "--json"]:
         schema, read = "agentik.describe/1", lambda: describe(version)
     elif args == ["doctor", "--json"]:

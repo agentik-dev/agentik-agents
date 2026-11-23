@@ -9,7 +9,9 @@ ahead of main: the same captures are byte-equal to a `git archive` of the merge 
 hold a seat and a helper, so rows exist. Masked: `generated`, a row's `elapsed_s`, the temp paths,
 the frozen tree's hash. `doctor` runs only under a sandbox-exec profile that denies the network;
 where that cannot run, the doctor captures alone skip with one printed reason. Not compared, by
-design: `fanout` and `api` (the lane's named exception) and `--version`.
+design: `fanout` and `api` (the lane's named exception) and `--version`. Part B leaves out doctor and
+install-cli against a base before packet ia1-new-machine, which changed both on purpose (no old
+name wanted or linked on a new machine); part A still compares them.
 """
 
 import json
@@ -51,6 +53,19 @@ def merge_base():
     except subprocess.CalledProcessError:
         return None
     return None if base == head else base
+
+
+# The captures packet ia1-new-machine changed on purpose, and the line that marks a tree after it.
+IA1_CHANGED = ("doctor", "install-cli")
+IA1_MARK = b"agentik_install._old_link("
+
+
+def before_ia1(base):
+    """Whether the base's install-cli predates packet ia1-new-machine."""
+    try:
+        return IA1_MARK not in git("show", "%s:plugin/lib/agents_install.py" % base)
+    except subprocess.CalledProcessError:
+        return True
 
 
 def sandbox_applies():
@@ -110,6 +125,7 @@ class OffGolden(unittest.TestCase):
             subprocess.run(["tar", "-x", "-C", dst], input=git("archive", cls.base, "plugin"),
                            check=True)
             cls.trees["base"] = os.path.join(dst, "plugin")
+        cls.base_before_ia1 = bool(cls.base) and before_ia1(cls.base)
         cls.homes = {}
         for name, config in HOMES.items():
             home = os.path.join(cls.t, "home-" + name)
@@ -162,6 +178,8 @@ class OffGolden(unittest.TestCase):
         for hname, home in self.homes.items():
             for name, argv in VERBS:
                 if name == "doctor" and not self.sandboxed:
+                    continue
+                if "base" in others and name in IA1_CHANGED and self.base_before_ia1:
                     continue
                 with self.subTest(home=hname, capture=name, against=others):
                     got = {tree: self.launch(tree, home, name, argv) for tree in ("this",) + others}

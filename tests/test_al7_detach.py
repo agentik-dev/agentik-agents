@@ -400,8 +400,8 @@ class RefuseTest(Det):
         self.refused(self.mkjob("r3", 2, (("c1", "explore"),)), "--yes",
                      want="passes the day's ceiling of $3.00")
         self.write_config("api:\n  enabled: true\n  max_day_usd: 3\n")
-        self.refused(self.mkjob("r4", 1, (("c1", "explore"),)), "--yes",
-                     want="no Console limit is stated")
+        self.refused(self.mkjob("r4", 2, (("c1", "explore"),)), "--yes",
+                     want="passes the day's ceiling of $3.00")   # no limit: no refusal of its own
         self.write_config("api:\n  enabled: true\n  console_limit_usd: 50\n  max_day_usd: 3\n")
         real = os.path.join(self.bin, "claude")
         os.rename(real, real + ".real")

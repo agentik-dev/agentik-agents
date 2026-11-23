@@ -4,7 +4,9 @@
 Every run is in a temp HOME with the XDG_* folders under it and no AGENTROUTE_*, CLAUDE_LOCAL_*
 or LOCALRIG_* variable but those a case names. Every run of the plugin's launcher is under a
 sandbox that denies the network, so no probe leaves this machine and none reaches loopback
-either; the doctor's own connections are also recorded in-process by a stub. Stdlib, 3.9.
+either; the doctor's own connections are also recorded in-process by a stub. Tests 19 to 23
+alone (row ak7b-router-note) let loopback through, to ports this test binds and closes or its
+own listener. Stdlib, 3.9.
 """
 import importlib.util
 import io
@@ -25,6 +27,10 @@ REPO = os.path.realpath(os.path.join(os.path.dirname(os.path.abspath(__file__)),
 LIB = os.path.join(REPO, "plugin", "lib")
 A = os.path.join(REPO, "plugin", "bin", "agentik-agents")
 SANDBOX = ["/usr/bin/sandbox-exec", "-p", "(version 1)(allow default)(deny network*)"]
+# row ak7b-router-note: loopback alone, so a closed port is refused, not denied
+LOOPBACK = ["/usr/bin/sandbox-exec", "-p", '(version 1)(allow default)(deny network*)'
+            '(allow network-outbound (remote ip "localhost:*"))']
+PIN = "2b81b47"                  # the row's pin: the router's check as it gated before the row
 DESCRIBE_KEYS = {"schema", "ok", "tool", "version", "summary", "repo", "plugin", "needs", "verbs",
                  "reads"}
 SETTING_KEYS = {"key", "value", "default", "type", "choices", "summary", "source", "change", "live",
@@ -329,8 +335,23 @@ class Plug(unittest.TestCase):
         for c in doc["checks"]:
             self.assertEqual(set(c), {"name", "status", "detail", "remedy"})
             self.assertIn(c["status"], ("ok", "note", "warn", "fail"))
-        self.assertEqual({c["name"]: c["remedy"] for c in doc["checks"]}["agentroute"],
+        self.assertEqual({c["name"]: c["remedy"] for c in doc["checks"]}["agentik-agents"],
                          "/agents:install-cli")
+        # packet ia1-new-machine R3: the four old names are not wanted; one whose link stands on
+        # PATH is a note, a person's own file of that name is not named
+        old = ("agentroute", "claude-agents", "claude-local", "localrig")
+        self.assertFalse([n for n in names if n in old], names)
+        bin_dir = os.path.join(self.t, "bin")
+        os.makedirs(bin_dir)
+        os.symlink("/usr/bin/true", os.path.join(bin_dir, "agentroute"))
+        with open(os.path.join(bin_dir, "localrig"), "w", encoding="utf-8") as handle:
+            handle.write("#!/bin/sh\n")
+        os.chmod(os.path.join(bin_dir, "localrig"), 0o755)
+        doc = self.answer(self.run_a("doctor", "--json", PATH=bin_dir + ":/usr/bin:/bin"))
+        rows = [c for c in doc["checks"] if c["name"] in old]
+        self.assertEqual(rows, [{"name": "agentroute", "status": "note", "remedy": None,
+                                 "detail": "%s (an old name's link, until 2026-12-31)"
+                                 % os.path.join(bin_dir, "agentroute")}])
         # the stub: the doctor read in-process, every connection and child recorded
         plug, off, children = load_plug(), [], []
 
@@ -390,7 +411,17 @@ class Plug(unittest.TestCase):
         self.assertEqual(list(doc)[:2], ["schema", "ok"])
         self.assertEqual((doc["schema"], doc["ok"]), ("agentik.agents.sessions/1", True))
         self.assertEqual(list(doc)[2:], ["generated", "since_min", "agents"])
+        # packet ia1-new-machine R4: no sessions folder is an empty table, exit 0, one line
         run = self.run_a("status", "--json")
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertEqual(json.loads(run.stdout.decode("utf-8"))["agents"], [])
+        self.assertEqual(run.stderr, b"no rows: they come from the session plugin, and none of its "
+                         b"sessions has run here\n")
+        # a sessions folder that exists and cannot be read stays an error
+        held = os.path.join(self.t, "not-a-folder")
+        with open(held, "w", encoding="utf-8") as handle:
+            handle.write("x\n")
+        run = self.run_a("status", "--json", CLAUDE_AGENTS_SESSIONS_DIR=held)
         self.assertEqual(run.returncode, 1)
         self.assertEqual(run.stdout, b"")
         self.assertEqual(len(run.stderr.decode().splitlines()), 1, run.stderr)
@@ -671,6 +702,142 @@ class Plug(unittest.TestCase):
                 self.assertEqual(by[key]["source"]["layer"], "default")
                 self.assertNotIn("rig", [v["layer"] for v in by[key]["values"]])
         self.assertEqual(by["backends.x.model"]["values"][-1]["layer"], "rig")
+
+    # row ak7b-router-note: a lane set up whose router nothing answers on is a note in both
+    # doctors; the router's own check gates as before. Each run below is under a sandbox that
+    # lets loopback through and nothing else; every address it asks is a loopback port bound
+    # and closed here, so nothing listens on it (or a listener of this test's own)
+    def free_port(self):
+        s = socket.socket()
+        s.bind(("127.0.0.1", 0))
+        port = s.getsockname()[1]
+        s.close()
+        return port
+
+    def set_up_lane(self, listen=None):
+        """The lane set up by a backends file in the made-up home; the router's address and the
+        upstream are free loopback ports (the router reads its address from a variable only)."""
+        self.write_backends(json.dumps({"default": {
+            "url": "http://127.0.0.1:%d" % self.free_port(), "model": "made-up-model"}}))
+        self.listen = listen or "127.0.0.1:%d" % self.free_port()
+        return {"AGENTROUTE_LISTEN": self.listen,
+                "AGENTROUTE_UPSTREAM": "http://127.0.0.1:%d" % self.free_port()}
+
+    def run_loop(self, argv, **extra):
+        return subprocess.run(LOOPBACK + argv, cwd=self.t, env=self.env(**extra),
+                              capture_output=True, timeout=60)
+
+    def answering(self, status):
+        """A listener on a loopback port that answers every request with `status`."""
+        import http.server
+        import threading
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_HEAD(self):
+                self.send_response(status)
+                self.send_header("content-length", "0")
+                self.end_headers()
+            do_GET = do_HEAD
+
+            def log_message(self, *a):
+                pass
+        srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        self.addCleanup(srv.server_close)
+        self.addCleanup(srv.shutdown)
+        return "127.0.0.1:%d" % srv.server_address[1]
+
+    @staticmethod
+    def lane_block(out):
+        return out.split("  Local lane:\n", 1)[1].split("\n\n", 1)[0].splitlines()
+
+    @staticmethod
+    def fails_counted(block):
+        counted = [ln for ln in block if re.match(r"^      \d+ ok  \d+ warn  \d+ FAIL", ln)]
+        return int(re.search(r"(\d+) FAIL", counted[-1]).group(1))
+
+    # acceptance 1
+    def test_19_router_not_started_json(self):
+        doc = self.answer(self.run_loop([A, "doctor", "--json"], **self.set_up_lane()))
+        rows = [c for c in doc["checks"] if c["name"] == "router"]
+        self.assertEqual([c["status"] for c in rows], ["note"], rows)
+        self.assertEqual(rows[0]["detail"], "the local lane is set up here and its router is not "
+                         "started: nothing answers at http://%s; `agentik agents local` starts it"
+                         % self.listen)
+        self.assertIsNone(rows[0]["remedy"])
+        self.assertEqual(doc["failed"], sum(c["status"] == "fail" for c in doc["checks"]))
+        names = [c["name"] for c in doc["checks"]]
+        self.assertIn("upstream", names)
+        self.assertIn("backend default", names)
+        for c in doc["checks"]:
+            self.assertEqual(set(c), {"name", "status", "detail", "remedy"})
+
+    # acceptance 2
+    def test_20_router_not_started_text(self):
+        run = self.run_loop([A, "doctor"], **self.set_up_lane())
+        self.assertEqual(run.returncode, 0, run.stderr)
+        out = run.stdout.decode()
+        block = self.lane_block(out)
+        self.assertEqual(block[0], "    the local lane is set up here and its router is not "
+                         "started: nothing answers at http://%s; `agentik agents local` starts it"
+                         % self.listen)
+        self.assertNotRegex(out, r"(?m)^ +FAIL +router ")
+        self.assertRegex(out, r"(?m)^      (ok|FAIL)  upstream ")
+        self.assertEqual(self.fails_counted(block),
+                         sum(bool(re.match(r"^      FAIL ", ln)) for ln in block))
+        self.assertIn("  doctor reports; it does not gate. For a script, use the verb that returns a\n"
+                      "  status: 'agentik agents route --check' exits non-zero on a FAIL row.\n", out)
+
+    # acceptance 3
+    def test_21_router_answers_500(self):
+        extra = self.set_up_lane(self.answering(500))
+        doc = self.answer(self.run_loop([A, "doctor", "--json"], **extra))
+        self.assertEqual([c["status"] for c in doc["checks"] if c["name"] == "router"], ["fail"])
+        run = self.run_loop([A, "doctor"], **extra)
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertRegex(run.stdout.decode(), r"(?m)^      FAIL  router +http://%s answered 500$"
+                         % re.escape(self.listen))
+        doc = self.answer(self.run_loop([sys.executable, os.path.join(LIB, "agentroute"),
+                                         "--check", "--json"], **extra), 1)
+        self.assertTrue(all(set(r) == {"state", "what", "detail"} for r in doc["rows"]))
+
+    # acceptance 4
+    def test_22_route_check_gates_as_at_the_pin(self):
+        extra = self.set_up_lane()
+        route = [sys.executable, "-I", os.path.join(LIB, "agentroute"), "--check"]
+        doc = self.answer(self.run_loop(route + ["--json"], **extra), 1)
+        self.assertIs(doc["ok"], False)
+        marked = [r for r in doc["rows"] if "not_started" in r]
+        self.assertEqual([(r["what"], r["state"], r["not_started"]) for r in marked],
+                         [("router", "FAIL", True)])
+        now = self.run_loop(route, **extra)
+        self.assertEqual(now.returncode, 1)
+        self.assertRegex(now.stdout.decode(), r"(?m)^  FAIL  router +http://%s not answering "
+                         % re.escape(self.listen))
+        try:
+            pin = subprocess.run(["git", "-C", REPO, "show", PIN + ":plugin/lib/agentroute"],
+                                 capture_output=True, timeout=30)
+        except OSError:
+            self.skipTest("no git here to read the pin's router")
+        if pin.returncode != 0:
+            self.skipTest("the pin %s is not in this checkout" % PIN)
+        path = os.path.join(self.t, "pin-agentroute")
+        with open(path, "wb") as handle:
+            handle.write(pin.stdout)
+        was = self.run_loop([sys.executable, "-I", path, "--check"], **extra)
+        self.assertEqual((now.returncode, now.stdout, now.stderr),
+                         (was.returncode, was.stdout, was.stderr))
+
+    # acceptance 5
+    def test_23_no_lane_note_unchanged(self):
+        doc = self.answer(self.run_loop([A, "doctor", "--json"]))
+        self.assertEqual([(c["name"], c["status"], c["detail"], c["remedy"]) for c in doc["checks"]
+                          if c["status"] == "note" and c["name"] in ("lane", "router")],
+                         [("lane", "note", "no local lane is set up here, so the router, the "
+                           "upstream and the backends were not asked", None)])
+        out = self.run_loop([A, "doctor"]).stdout.decode()
+        self.assertEqual(self.lane_block(out), ["    no local lane is set up here, so the router, "
+                                                "the upstream and the backends were not asked"])
 
 
 if __name__ == "__main__":

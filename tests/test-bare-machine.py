@@ -4,9 +4,9 @@
 `git archive HEAD plugin`, the whole plugin, goes into a temp home as a marketplace's cache would
 hold it, and runs with the env exactly HOME, PATH=/usr/bin:/bin, CLAUDE_PLUGIN_ROOT and
 CLAUDE_PLUGIN_DATA, from a cwd holding decoys: no clone path, no venv, no launcher. The verbs go
-through plugin/bin/agentik-agents; then install-cli writes a launcher, the door and the four old
-names' links under the temp home, never the real one, and `make install` does the same from a
-committed copy of HEAD. `route --check` and `doctor` probe the router, the upstream and the local
+through plugin/bin/agentik-agents; then install-cli writes a launcher and the door under the temp
+home, never the real one, and an old name's link only where one stands (packet ia1-new-machine),
+and `make install` does the same from a committed copy of HEAD. `route --check` and `doctor` probe the router, the upstream and the local
 backend, so they run under a sandbox that denies the network: nothing reaches a model server.
 """
 
@@ -22,6 +22,8 @@ REPO = os.path.realpath(os.path.join(os.path.dirname(os.path.abspath(__file__)),
 OLD = ("agentroute", "claude-agents", "claude-local", "localrig")
 SANDBOX = ["/usr/bin/sandbox-exec", "-p", "(version 1)(allow default)(deny network*)"]
 DECOYS = ("agentik_install.py", "agents_install.py", "json.py", "argparse.py")
+# packet ia1-new-machine R4: status's one line where the session plugin's folder is missing
+ABSENT = "no rows: they come from the session plugin, and none of its sessions has run here"
 
 
 def git(*argv, cwd=REPO, **kw):
@@ -80,10 +82,28 @@ class BareMachine(unittest.TestCase):
         return run
 
     def test_1_status(self):
-        # with no session plugin's state, status says which folder it could not read, exit 1
-        run = self.run_tool("status")
+        # ia1 R4: with no session plugin's state, an empty table, exit 0, and the one line
+        run = self.ok(self.run_tool("status"))
+        self.assertTrue(run.stdout.startswith("id"), run.stdout)
+        self.assertEqual(run.stdout.splitlines()[-1], ABSENT)
+        self.assertEqual(run.stderr, "")
+        run = self.ok(self.run_tool("status", "--json"))
+        self.assertEqual(json.loads(run.stdout)["agents"], [])
+        self.assertEqual(run.stderr, ABSENT + "\n")
+        self.assertFalse(os.path.lexists(self.sessions))
+        # a folder that exists and cannot be read stays an error, exit 1
+        home = os.path.join(self.t, "home-unreadable")
+        shut = os.path.join(home, ".local", "state", "agentik-session", "sessions")
+        os.makedirs(shut)
+        os.chmod(shut, 0)
+        try:
+            if os.access(shut, os.R_OK):
+                self.skipTest("a folder at mode 0 is readable here (root)")
+            run = self.run_tool("status", home=home)
+        finally:
+            os.chmod(shut, 0o700)
         self.assertEqual(run.returncode, 1, run.stdout + run.stderr)
-        self.assertIn("cannot read the sessions dir %s" % self.sessions, run.stderr)
+        self.assertIn("cannot read the sessions dir %s" % shut, run.stderr)
         # with the folder the session plugin writes, empty, it reads once and exits 0
         os.makedirs(self.sessions, exist_ok=True)
         self.ok(self.run_tool("status"))
@@ -99,8 +119,10 @@ class BareMachine(unittest.TestCase):
 
     def test_3_doctor(self):
         out = self.ok(self.run_tool("doctor", net=True)).stdout
-        for name in OLD + ("agentik-agents", "agentik"):
+        for name in ("agentik-agents", "agentik"):
             self.assertRegex(out, r"(?m)^  %s +NOT ON PATH$" % re.escape(name))
+        for name in OLD:            # ia1 R3: the old names are no longer wanted
+            self.assertNotRegex(out, r"(?m)^  %s " % re.escape(name))
         self.assertRegex(out, r"(?m)^  claude +NOT ON PATH \(the local lane runs it\)$")
         self.assertIn("/agents:install-cli", out)
         self.assertRegex(out, r"(?m)^  python3 +/usr/bin/python3 3\.")
@@ -128,14 +150,13 @@ class BareMachine(unittest.TestCase):
         trees = [n for n in os.listdir(share) if not n.startswith(".")]
         self.assertEqual(len(trees), 1, trees)
         tree = os.path.join(share, trees[0])
-        for name in OLD:
-            link = os.path.join(bindir, name)
-            self.assertTrue(os.path.islink(link), link)
-            self.assertEqual(os.readlink(link), os.path.join(tree, name))
-            self.assertTrue(os.access(link, os.X_OK), link)
+        for name in OLD:            # ia1 R1: a new machine gets no old name
+            self.assertFalse(os.path.lexists(os.path.join(bindir, name)), name)
+            self.assertTrue(os.access(os.path.join(tree, name), os.X_OK), name)
+        self.assertEqual(sorted(os.listdir(bindir)), ["agentik", "agentik-agents"])
         self.assertEqual(self.ok(self.run_tool("--version", exe=launcher)).stdout,
                          "agentik-agents %s\n" % self.version)
-        helped = self.ok(self.run_tool("--help", exe=os.path.join(bindir, "agentroute")))
+        helped = self.ok(self.run_tool("route", "--help", exe=launcher))
         self.assertTrue(helped.stdout.startswith("usage: agentroute"), helped.stdout[:200])
         self.ok(self.run_tool("status", exe=launcher))
         # no clone path anywhere the install wrote
@@ -147,18 +168,26 @@ class BareMachine(unittest.TestCase):
                         self.assertNotIn(REPO.encode(), handle.read(), path)
 
     def test_6_install_cli_leaves_a_regular_file(self):
+        # ia1 R1, R2: a person's own file under an old name is left byte for byte and install-cli
+        # exits 0, on every run, saying so in one stderr line; a link of an old name that stands
+        # is ours to refresh; an old name absent stays absent
         home = os.path.join(self.t, "home-with-files")
         bindir, share = self.installed(home)
         os.makedirs(bindir)
-        with open(os.path.join(bindir, "localrig"), "w", encoding="utf-8") as handle:
-            handle.write("mine\n")
+        for name in ("localrig", "claude-local"):
+            with open(os.path.join(bindir, name), "w", encoding="utf-8") as handle:
+                handle.write("mine\n")
         os.symlink("/nowhere/agentroute", os.path.join(bindir, "agentroute"))
-        run = self.run_tool("install-cli", home=home)
-        self.assertEqual(run.returncode, 1, run.stdout + run.stderr)
-        self.assertIn("localrig is not a link, left as it is", run.stderr)
-        with open(os.path.join(bindir, "localrig"), encoding="utf-8") as handle:
-            self.assertEqual(handle.read(), "mine\n")
+        for _ in range(2):
+            run = self.ok(self.run_tool("install-cli", home=home))
+            self.assertEqual(run.stderr, "install-cli: left claude-local, localrig in ~/.local/bin "
+                             "as it is: not a link, so no old name's to refresh\n")
+            for name in ("localrig", "claude-local"):
+                self.assertFalse(os.path.islink(os.path.join(bindir, name)), name)
+                with open(os.path.join(bindir, name), encoding="utf-8") as handle:
+                    self.assertEqual(handle.read(), "mine\n")
         self.assertTrue(os.readlink(os.path.join(bindir, "agentroute")).startswith(share + os.sep))
+        self.assertFalse(os.path.lexists(os.path.join(bindir, "claude-agents")))
         launcher = os.path.join(bindir, "agentik-agents")
         self.assertTrue(os.path.isfile(launcher))
         # a1 F1: the refused name's tool is still executable in the tree, so its verb runs
@@ -200,8 +229,11 @@ class BareMachine(unittest.TestCase):
         make = lambda goal: self.make(home, goal)  # noqa: E731  (a1 F3: never the caller's env)
         bindir, share = self.installed(home)
         self.ok(make("install"))
-        for name in OLD:
-            self.assertTrue(os.readlink(os.path.join(bindir, name)).startswith(share + os.sep))
+        for name in OLD:            # ia1 R1: a new home gets no old name
+            self.assertFalse(os.path.lexists(os.path.join(bindir, name)), name)
+        trees = [n for n in os.listdir(share) if not n.startswith(".")]
+        ours = os.path.join(bindir, "agentroute")
+        os.symlink(os.path.join(share, trees[0], "agentroute"), ours)   # an old link install-cli made
         with open(os.path.join(src, "dirt"), "w", encoding="utf-8") as handle:
             handle.write("x\n")
         refused = make("install")
@@ -209,9 +241,12 @@ class BareMachine(unittest.TestCase):
         self.assertIn("refused, the tree is dirty", refused.stderr)
         os.unlink(os.path.join(src, "dirt"))
         mine = os.path.join(bindir, "claude-local")
-        os.unlink(mine)
         os.symlink("/elsewhere/claude-local", mine)      # not install-cli's: uninstall skips it
-        self.ok(make("uninstall"))
+        run = self.ok(make("uninstall"))
+        self.assertIn("  removed %s\n" % ours, run.stdout)
+        # an old name that is absent is not named (ia1 R1: a new home has none)
+        self.assertEqual(re.findall(r"(?m)^  skipped .*$", run.stdout),
+                         ["  skipped %s (not a link into %s)" % (mine, share)])
         self.assertFalse(os.path.lexists(os.path.join(bindir, "agentik-agents")))
         for name in ("agentroute", "claude-agents", "localrig"):
             self.assertFalse(os.path.lexists(os.path.join(bindir, name)), name)
@@ -373,6 +408,30 @@ class BareMachine(unittest.TestCase):
         self.ok(self.run_tool("install-cli", "--prefix", prefix, home=home))
         self.assertTrue(os.path.islink(link), link)
         self.assertEqual(os.readlink(link), target)
+
+    def test_15_install_cli_refreshes_our_old_links(self):
+        # ia1 R1: where our four links stand (a machine installed before), each is refreshed to
+        # the new tree, as agentik_install._old_link rules it; ag1 R1, R3: to the dispatcher there,
+        # which execs the tool by its real path
+        home = os.path.join(self.t, "home-old-links")
+        prefix = os.path.join(home, "P")
+        bindir = os.path.join(prefix, "bin")
+        share = os.path.join(prefix, "share", "agentik-agents")
+        os.makedirs(bindir)
+        before = os.path.join(share, "0" * 40)
+        for name in OLD:
+            os.symlink(os.path.join(before, name), os.path.join(bindir, name))
+        run = self.ok(self.run_tool("install-cli", "--prefix", prefix, home=home))
+        self.assertEqual(run.stderr, "")
+        self.assertIn("linked %s in %s -> the tree" % (", ".join(OLD), bindir), run.stdout)
+        trees = [n for n in os.listdir(share) if not n.startswith(".")]
+        self.assertEqual(len(trees), 1, trees)
+        for name in OLD:
+            link = os.path.join(bindir, name)
+            self.assertEqual(os.readlink(link), os.path.join(share, trees[0], "agentik-agents"))
+            self.assertTrue(os.access(link, os.X_OK), link)
+        helped = self.ok(self.run_tool("--help", exe=os.path.join(bindir, "agentroute"), home=home))
+        self.assertTrue(helped.stdout.startswith("usage: agentroute"), helped.stdout[:200])
 
 
 if __name__ == "__main__":

@@ -891,8 +891,32 @@ def main() -> int:
               "an empty --json table is agents [], exit 0", f"rc={pe2.returncode} {pe2.stdout[:200]}")
 
         print("== exit codes ==")
-        p = run(["status"], env_for(root, CLAUDE_AGENTS_SESSIONS_DIR="/nonexistent"))
-        check(p.returncode == 1, "an unreadable sessions dir exits 1", f"rc={p.returncode}")
+        # packet ia1-new-machine R4: a missing sessions dir is an empty table, exit 0, one line
+        absent = "no rows: they come from the session plugin, and none of its sessions has run here"
+        gone = root / "no-such-folder"
+        p = run(["status"], env_for(root, CLAUDE_AGENTS_SESSIONS_DIR=gone))
+        lines = p.stdout.splitlines()
+        check(p.returncode == 0 and len(lines) == 2 and lines[0].startswith("id")
+              and lines[1] == absent and p.stderr == "",
+              "a missing sessions dir is the header and the one line, exit 0",
+              f"rc={p.returncode} {lines} {p.stderr!r}")
+        p = run(["status", "--json"], env_for(root, CLAUDE_AGENTS_SESSIONS_DIR=gone))
+        dj = load(p) or {}
+        check(p.returncode == 0 and dj.get("agents") == [] and p.stderr == absent + "\n",
+              "a missing sessions dir under --json is agents [], the line on stderr, exit 0",
+              f"rc={p.returncode} {p.stdout[:200]} {p.stderr!r}")
+        with tempfile.TemporaryDirectory() as other:     # outside HOME: nothing is written there
+            shut = pathlib.Path(other) / "shut"
+            shut.mkdir()
+            shut.chmod(0)
+            try:
+                if not os.access(shut, os.R_OK):
+                    p = run(["status"], env_for(root, CLAUDE_AGENTS_SESSIONS_DIR=shut))
+                    check(p.returncode == 1 and "cannot read the sessions dir" in p.stderr,
+                          "a sessions dir that exists and cannot be read exits 1",
+                          f"rc={p.returncode} {p.stderr!r}")
+            finally:
+                shut.chmod(0o700)
         p = run(["status", "--json"], env_for(root, CLAUDE_AGENTS_SESSIONS_DIR=w["ledger"]))
         check(p.returncode == 1, "a sessions 'dir' that is a file exits 1", f"rc={p.returncode}")
         for args in (["frobnicate"], [], ["status", "--watch", "0"], ["status", "--since", "abc"],

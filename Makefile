@@ -2,8 +2,9 @@
 #
 # The tools are sh, bash and python3; there is nothing to compile. `install` runs the plugin's
 # install-cli under PREFIX (default ~/.local): it freezes plugin/lib/ into
-# PREFIX/share/agentik-agents/<hash>/ and writes PREFIX/bin/agentik-agents (the launcher), the
-# agentik door (agentik-r1 D3) and the four old names as links into the tree, until 2026-12-31.
+# PREFIX/share/agentik-agents/<hash>/ and writes PREFIX/bin/agentik-agents (the launcher) and the
+# agentik door (agentik-r1 D3); each of the four old names' links into the tree it refreshes only
+# where that link already stands (packet ia1-new-machine), until 2026-12-31.
 # It is idempotent and reversible; `uninstall` takes back all but the door. Python, run by the
 # launcher and by these recipes, also leaves $HOME/.cache/agentik/pycache and Apple's
 # $HOME/Library/Caches/com.apple.python; nothing else outside this repo is touched.
@@ -63,7 +64,7 @@ help: ## Show this help
 	  | sed 's/:.*## /\t/' | sort | awk -F'\t' '{printf "  %-12s %s\n", $$1, $$2}'
 
 .PHONY: install
-install: ## Refuse a dirty tree, then the plugin's install-cli under PREFIX (default ~/.local): the launcher, the agentik door, the old names' links into a frozen tree
+install: ## Refuse a dirty tree, then the plugin's install-cli under PREFIX (default ~/.local): the launcher, the agentik door, the old names' links refreshed where they stand, into a frozen tree
 	@if [ "$(origin BINDIR)" = "command line" ]; then \
 	  echo "install: refused, BINDIR is not honoured: install-cli writes into PREFIX/bin; set PREFIX" >&2; exit 2; fi
 	@if [ -n "$$(git status --porcelain 2>/dev/null)" ] || ! git rev-parse --verify --quiet HEAD >/dev/null; then \
@@ -86,6 +87,7 @@ uninstall: ## Remove what install-cli wrote under PREFIX: its launcher, the old 
 	  printf '  skipped %s (not the launcher install-cli wrote)\n' "$$l"; fi; \
 	for t in $(TOOLS); do \
 	  link="$$bin/$$t"; \
+	  [ -e "$$link" ] || [ -L "$$link" ] || continue; \
 	  case "$$(readlink -- "$$link" 2>/dev/null)" in \
 	  "$$share"/*) rm -- "$$link" && printf '  removed %s\n' "$$link" ;; \
 	  *) printf '  skipped %s (not a link into %s)\n' "$$link" "$$share" ;; \
@@ -118,7 +120,7 @@ test: ## Run every test suite (stub-driven, they spend nothing), then the 3.9 fl
 	  printf '=== %s ===\n' "$$t"; bash "$$t" || fail=1; \
 	done; \
 	for t in tests/test-route.py tests/test-status.py tests/test-plug.py tests/test-hygiene.py tests/test-bare-machine.py tests/test-descriptions.py \
-	  tests/test_al1_run.py tests/test_al2_wall.py tests/test_al2b_argv.py tests/test_al2b_linux.py tests/test_al3_fanout.py tests/test_al4_report.py tests/test_al4_off_golden.py tests/test_al6_join.py tests/test_al7_detach.py; do \
+	  tests/test_al1_run.py tests/test_al2_wall.py tests/test_al2b_argv.py tests/test_al2b_linux.py tests/test_al3_fanout.py tests/test_al4_report.py tests/test_al4_off_golden.py tests/test_al6_join.py tests/test_al7_detach.py tests/test_ag1_old_names.py; do \
 	  printf '=== %s ===\n' "$$t"; $(PY) "$$t" || fail=1; \
 	done; \
 	if $(FLOOR) -c '' 2>/dev/null; then \
@@ -147,7 +149,7 @@ check-unlocked: test lint doclint hygiene plugin-version-check descriptions vali
 	elif shasum -c --status design/readme/rendered.sha256 2>/dev/null; then echo "readme: fresh"; \
 	else echo "readme: stale, run make readme"; exit 2; fi
 
-lint: ## Syntax-check every tool (sh, bash, python)
+lint: ## Syntax-check every tool (sh, bash, python), then the README's top (GUIDE §10)
 	@sh -n plugin/lib/agentik-agents && echo "  plugin/lib/agentik-agents: sh syntax OK"
 	@for f in plugin/hooks/api-lane plugin/lib/apilane/prefilter.sh plugin/lib/claude-fanout; do \
 	  sh -n "$$f" && echo "  $$f: sh syntax OK" || exit 1; done
@@ -158,6 +160,7 @@ lint: ## Syntax-check every tool (sh, bash, python)
 	  plugin/lib/agents_plug.py plugin/lib/apilane/*.py \
 	  && echo "  python tools: syntax OK"
 	@bash -n scripts/readme-render && echo "  scripts/readme-render: bash syntax OK"
+	@$(PY) scripts/readme-top
 
 doclint: ## The doc gate (conventions §5): scripts/doclint against DOCLINT_SHA, then the script, then scripts/recordlint on HANDOFF.md and NICE_TO_HAVE.md (hq design/05 §4)
 	@printf '%s  scripts/doclint\n' '$(DOCLINT_SHA)' | shasum -a 256 -c --status - \
