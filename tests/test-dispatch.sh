@@ -77,7 +77,7 @@ done
 # the API lane's two verbs (al4): a copy beside apilane/, under HOME at this temp folder, so the
 # real user file is never read; the lane refuses there in one stderr line that names HOME, never
 # the usage line. fanout reaches the lane only where a wall is proved; elsewhere, with no file
-# under this HOME, it is main's usage error
+# under this HOME, it exits 2 with nothing on stdout (its line is the platform's, below)
 mkdir "$D/lane"
 cp "$REPO/plugin/lib/agentik-agents" "$D/lane/"
 cp -R "$REPO/plugin/lib/apilane" "$D/lane/apilane"
@@ -110,107 +110,61 @@ else
   fail=$((fail + 1)); echo "FAIL the usage's verbs line (describe among them, ak7)"
 fi
 
-# fanout (packet al0): a stub verb that hands the call to the claude-fanout on PATH, unchanged
-# but for each --yes before a --; with none on PATH, or one that resolves inside the dispatcher's
-# own folder, exit 2 and nothing run; its help alone, as the only argument, runs nothing. From
-# al6 the stub is the verb only where no wall is proved, so these cases run on N, a copy beside
-# apilane/ whose walled.sh says no wall, under HOME at a temp folder with no file; one runs once
-# more on A, which has no apilane/
+# fanout where no wall is proved (packet al2b-linux-wall, the stub's removal): the verb runs
+# nothing, on any platform and whatever the file says: exit 2, nothing on stdout, one line on
+# stderr that is no usage line, and a claude-fanout first on PATH, a marker that writes a file,
+# never starts. N is a copy beside apilane/ whose walled.sh says no wall, under HOME at a temp
+# folder; A has no apilane/ beside it. With no file under that HOME the line is the lane's
+# platform line; with one, the lane names HOME first, since the temp HOME is not the account's
 N="$F/nowall"
-mkdir -p "$N" "$F/home" "$F/stub" "$F/none" "$F/own"
+mkdir -p "$N" "$F/home/.config/agentik/agents" "$F/none" "$F/mark"
 cp "$REPO/plugin/lib/agentik-agents" "$N/"
 cp -R "$REPO/plugin/lib/apilane" "$N/apilane"
 echo 'apilane_walled() { return 1; }' > "$N/apilane/walled.sh"
-printf '#!/bin/sh\necho "argc=$#"; for a; do printf "[%%s]\\n" "$a"; done\nexit 7\n' > "$F/stub/claude-fanout"
-chmod +x "$F/stub/claude-fanout"
-printf '#!/bin/sh\n: > "%s/ran"\nexit 9\n' "$F" > "$N/own-forward"
-chmod +x "$N/own-forward"
-ln -s "$N/own-forward" "$F/own/claude-fanout"
-NO_TOOL='agentik agents fanout: the API lane is not in this version yet, and no claude-fanout is on PATH to hand the call to.'
-OWN='agentik agents fanout: the claude-fanout on PATH is this tool'"'"'s own forward, and the API lane is not in this version yet.'
-fan_help() {
-  printf '%s\n' 'usage: agentik agents fanout [--yes] ARGS...' \
-    'For now it hands ARGS to the claude-fanout on PATH, each --yes before a -- dropped.' \
-    "The API lane's own fan-out takes this name in a later version." \
-    "claude-fanout on PATH: $1"
-}
-# fan NAME OUT ERR CODE DIR ARGS...: `A fanout ARGS` with DIR first on PATH prints exactly OUT on
-# stdout and ERR on stderr, and exits CODE
-fan() {
-  local name=$1 wout=$2 werr=$3 wcode=$4 dir=$5 out err code
-  shift 5
-  out="$(HOME="$F/home" PATH="$dir:/usr/bin:/bin" "${EXE:-$N/agentik-agents}" fanout "$@" 2>"$F/err")"; code=$?
+printf '#!/bin/sh\n: > "%s/mark/ran"\nexit 7\n' "$F" > "$F/mark/claude-fanout"
+chmod +x "$F/mark/claude-fanout"
+CONF="$F/home/.config/agentik/agents/config.yaml"
+PLATFORM="$(/usr/bin/python3 -I -c 'import platform, sys; sys.path.insert(0, sys.argv[1])
+from apilane import messages; print(messages.say("wall.platform", platform=platform.system()))' "$REPO/plugin/lib")"
+NO_LANE='agentik agents fanout: the API lane is not in this copy of the tool (no apilane/ beside it); nothing ran.'
+# unrun NAME WANT EXE ARGS...: `EXE fanout ARGS`, the marker first on PATH, exits 2 with nothing
+# on stdout and one stderr line, WANT where it is not empty, else any line but a usage line; the
+# marker is absent after
+unrun() {
+  local name=$1 want=$2 exe=$3 out err code
+  shift 3
+  rm -f "$F/mark/ran"
+  out="$(HOME="$F/home" XDG_CACHE_HOME="$F/cache" PATH="$F/mark:/usr/bin:/bin" "$exe" fanout "$@" 2>"$F/err")"; code=$?
   err="$(cat "$F/err")"
-  if [ "$out" = "$wout" ] && [ "$err" = "$werr" ] && [ "$code" = "$wcode" ]; then
+  if [ "$code" = 2 ] && [ -z "$out" ] && [ -n "$err" ] && [ "$(printf '%s\n' "$err" | wc -l | tr -d ' ')" = 1 ] \
+     && { [ -z "$want" ] || [ "$err" = "$want" ]; } && ! printf '%s\n' "$err" | grep -q '^usage:' \
+     && [ ! -e "$F/mark/ran" ]; then
     pass=$((pass + 1))
   else
     fail=$((fail + 1))
-    printf 'FAIL fanout %s: exit %s stdout [%s] stderr [%s], want exit %s [%s] [%s]\n' \
-      "$name" "$code" "$out" "$err" "$wcode" "$wout" "$werr"
+    printf 'FAIL fanout, %s: exit %s stdout [%s] stderr [%s] marker %s, want exit 2 [] [%s] and no marker\n' \
+      "$name" "$code" "$out" "$err" "$([ -e "$F/mark/ran" ] && echo ran || echo absent)" "${want:-one line}"
   fi
 }
-fan "args as given" "$(printf 'argc=5\n[--budget-usd]\n[2]\n[a b]\n[]\n[-x]')" "" 7 "$F/stub" \
-  --budget-usd 2 'a b' '' -x
-fan "--yes before --" "$(printf 'argc=5\n[--budget-usd]\n[2]\n[p]\n[--]\n[--yes]')" "" 7 "$F/stub" \
-  --yes --budget-usd 2 p --yes -- --yes
-fan "--yes alone" "argc=0" "" 7 "$F/stub" --yes
-fan "no args" "argc=0" "" 7 "$F/stub"
-fan "--yes= kept" "$(printf 'argc=2\n[--yes=1]\n[-yes]')" "" 7 "$F/stub" --yes=1 -yes
-fan "--help not alone" "$(printf 'argc=2\n[--help]\n[x]')" "" 7 "$F/stub" --help x
-# packet al7: where no wall is proved the detached forms reach the old tool unchanged
-fan "--detach" "$(printf 'argc=2\n[--detach]\n[x]')" "" 7 "$F/stub" --detach x
-fan "wait" "$(printf 'argc=4\n[wait]\n[x]\n[--timeout]\n[540]')" "" 7 "$F/stub" wait x --timeout 540
-fan "none on PATH" "" "$NO_TOOL" 2 "$F/none" x
-fan "own forward" "" "$OWN" 2 "$F/own" x
-if [ ! -e "$F/ran" ]; then pass=$((pass + 1)); else fail=$((fail + 1)); echo "FAIL fanout: the own forward ran"; fi
-# n17: a claude-fanout outside D that forwards back to the verb is refused on re-entry, exit 2;
-# the forward counts its runs and gives up past 20, and perl's alarm walls the call at 10 s, so
-# the pin's dispatcher shows the loop (exit 99) where it still loops, and none can hang the suite
-mkdir -p "$F/loop"
-printf '#!/bin/sh
-echo x >> "%s/loop.n"
-[ "$(wc -l < "%s/loop.n")" -le 20 ] || exit 99
-exec "${LOOP_EXE:?}" fanout "$@"
-' \
-  "$F" "$F" > "$F/loop/claude-fanout"
-chmod +x "$F/loop/claude-fanout"
-LOOP="agentik agents fanout: the claude-fanout it handed the call to ($F/loop/claude-fanout) called it back, and the API lane is not in this version yet."
-loop() {
-  rm -f "$F/loop.n"
-  HOME="$F/home" LOOP_EXE="$1" PATH="$F/loop:/usr/bin:/bin" /usr/bin/perl -e 'alarm 10; exec @ARGV or exit 127' \
-    "$1" fanout x >/dev/null 2>"$F/err"
-}
-loop "$N/agentik-agents"; code=$?
-if [ "$code" = 2 ] && [ "$(cat "$F/err")" = "$LOOP" ] && [ "$(wc -l < "$F/loop.n" | tr -d ' ')" = 1 ]; then
-  pass=$((pass + 1))
-else
-  fail=$((fail + 1)); printf 'FAIL fanout, a forward back: exit %s [%s], runs %s\n' "$code" "$(cat "$F/err")" "$(wc -l < "$F/loop.n")"
-fi
-if git -C "$REPO" cat-file -e 070ef2d:plugin/lib/agentik-agents 2>/dev/null; then
-  mkdir -p "$F/loop-pin" && git -C "$REPO" show 070ef2d:plugin/lib/agentik-agents > "$F/loop-pin/agentik-agents"
-  chmod +x "$F/loop-pin/agentik-agents"
-  loop "$F/loop-pin/agentik-agents"; code=$?
-  if [ "$code" = 99 ]; then pass=$((pass + 1)); else fail=$((fail + 1)); echo "FAIL fanout, the pin's loop: exit $code, want 99"; fi
-fi
-fan "--help" "$(fan_help "$F/stub/claude-fanout")" "" 0 "$F/stub" --help
-fan "-h" "$(fan_help "$F/stub/claude-fanout")" "" 0 "$F/stub" -h
-fan "--help, none on PATH" "$(fan_help none)" "" 0 "$F/none" --help
-EXE="$A" fan "args as given, no apilane/" "$(printf 'argc=5\n[--budget-usd]\n[2]\n[a b]\n[]\n[-x]')" "" 7 \
-  "$F/stub" --budget-usd 2 'a b' '' -x
-# in the no-wall copy, a file that says on: one line, exit 2, and the old tool is not run (under a
-# temp HOME the lane names HOME first; the platform's own line is test_al4_report's PlatformTest)
-mkdir -p "$F/home/.config/agentik/agents" "$F/mark"
-printf 'api:\n  enabled: true\n' > "$F/home/.config/agentik/agents/config.yaml"
-printf '#!/bin/sh\n: > "%s/mark/ran"\n' "$F" > "$F/mark/claude-fanout"
-chmod +x "$F/mark/claude-fanout"
-err="$(HOME="$F/home" XDG_CACHE_HOME="$F/cache" PATH="$F/mark:/usr/bin:/bin" "$N/agentik-agents" fanout x 2>&1 >/dev/null)"; code=$?
-if [ "$code" = 2 ] && [ "$(printf '%s\n' "$err" | wc -l | tr -d ' ')" = 1 ] && [ ! -e "$F/mark/ran" ] \
-   && ! printf '%s\n' "$err" | grep -q '^usage:'; then
-  pass=$((pass + 1))
-else
-  fail=$((fail + 1)); printf 'FAIL fanout, no wall, file on: exit %s [%s]\n' "$code" "$err"
-fi
-rm -f "$F/home/.config/agentik/agents/config.yaml"
+rm -f "$CONF"
+unrun "no wall, no file" "$PLATFORM" "$N/agentik-agents" --budget-usd 2 'a b' '' -x
+unrun "no wall, no args" "$PLATFORM" "$N/agentik-agents"
+unrun "no wall, --yes" "$PLATFORM" "$N/agentik-agents" --yes x
+unrun "no wall, --help" "$PLATFORM" "$N/agentik-agents" --help
+unrun "no wall, -h" "$PLATFORM" "$N/agentik-agents" -h
+unrun "no wall, --detach" "$PLATFORM" "$N/agentik-agents" --detach x
+unrun "no wall, wait" "$PLATFORM" "$N/agentik-agents" wait x --timeout 540
+printf 'api:\n  enabled: false\n' > "$CONF"
+unrun "no wall, file off" "" "$N/agentik-agents" x
+printf 'api:\n  enabled: true\n' > "$CONF"
+unrun "no wall, file on" "" "$N/agentik-agents" x
+rm -f "$CONF"
+unrun "no apilane/" "$NO_LANE" "$A" --budget-usd 2 'a b' '' -x
+unrun "no apilane/, --help" "$NO_LANE" "$A" --help
+unrun "no apilane/, no args" "$NO_LANE" "$A"
+printf 'api:\n  enabled: true\n' > "$CONF"
+unrun "no apilane/, file on" "$NO_LANE" "$A" x
+rm -f "$CONF"
 # R6: the table and every usage line stay byte for byte what they were at the pin, stdout,
 # stderr and exit; skipped where the pin's object is not in this clone. The pin was c0193bd; it
 # moved, by ak7-plug-agents's merge of main, to that row's last commit before the merge, whose

@@ -39,6 +39,21 @@ def backend():
     return wall.backend()
 
 
+# The bubblewrap wall leaves no unwalled writable folder for the fake's records, as the Mac's
+# user temp root is: where a class runs there, its records folder is named in this variable and
+# every shard's wall gets it as one more write folder, in this process and in a detached driver.
+RECORDS_WRITE = "AL6_RECORDS_WRITE"
+
+
+def widen(wall, extra):
+    """A wall.wrap that adds `extra` to every call's write folders; the real one does the rest."""
+    real = wall.wrap
+
+    def wrap(argv, *, read, write, net, home):
+        return real(argv, read=read, write=list(write) + [extra], net=net, home=home)
+    return wrap
+
+
 def user_temp():
     """The user's own temp root (`getconf DARWIN_USER_TEMP_DIR`), real, or None where it is
     missing or under a root the wall denies (review 1, R1-F3): the fake behind the wall writes
@@ -507,11 +522,15 @@ class Lane(Temp):
     """A temp home with the lane on, its key stored by a fake sops, the fake CLI copied into a
     PATH built from nothing, and a job dir outside the home."""
 
+    # True in a class that also runs on the bubblewrap wall, its records through a write folder
+    bwrap_records = False
+
     def setUp(self):
         if backend() is None:
             self.skipTest("no wall is proved on this platform: the lane cannot run here")
         self.root = user_temp()
-        if self.root is None:
+        through = self.root is None and self.bwrap_records and backend() == "bwrap"
+        if self.root is None and not through:
             self.skipTest("the user's own temp root is missing or the wall denies it: the fake "
                           "behind the wall could not write its records")
         super().setUp()
@@ -541,6 +560,12 @@ class Lane(Temp):
         self.env = dict(self.env_secrets, PATH=self.bin + os.pathsep + "/usr/bin:/bin",
                         CLAUDE_CODE_SESSION_ID=SESSION,
                         SOPS_AGE_KEY_FILE=os.path.join(self.t, "age", "keys.txt"))
+        if through:
+            from apilane import wall
+            self.env[RECORDS_WRITE] = self.records
+            patch = mock.patch.object(wall, "wrap", widen(wall, self.records))
+            patch.start()
+            self.addCleanup(patch.stop)
         with mock.patch.dict(os.environ, self.env):
             key.store(self.key, roots=self.roots)
 

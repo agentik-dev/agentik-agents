@@ -1,7 +1,7 @@
 #!/usr/bin/python3
 """The probe's loopback stub of the provider's messages endpoint.
 
-`Stub(reads)` binds `127.0.0.1` on a port the system picks and answers `POST /v1/messages`,
+`Stub(reads)` binds `127.0.0.1` on a port the system picks (or the one `start` is given) and answers `POST /v1/messages`,
 streamed or whole as the request asks, with a script: one turn a path of `reads`, each asking for
 one `Read` of it, then a closing text. The turn is the number of assistant messages the request
 carries, so a resent conversation gets the same answer. For each request it records the header
@@ -46,8 +46,8 @@ class Stub:
     def url(self):
         return "http://%s:%d" % self.address
 
-    def start(self):
-        server = http.server.ThreadingHTTPServer((HOST, 0), _Handler)
+    def start(self, port=0):
+        server = http.server.ThreadingHTTPServer((HOST, port), _Handler)
         server.daemon_threads = True
         server.stub = self
         self._server = server
