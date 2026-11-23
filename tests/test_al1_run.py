@@ -365,7 +365,8 @@ class FindClaudeTest(World):
 
 
 class EnvTest(World):
-    BASE = {"PATH", "HOME", "LANG", "TERM", "TMPDIR", "CLAUDE_CONFIG_DIR",
+    # al10-probe-tmp: this list gains one name, CLAUDE_CODE_TMPDIR, and no other.
+    BASE = {"PATH", "HOME", "LANG", "TERM", "TMPDIR", "CLAUDE_CODE_TMPDIR", "CLAUDE_CONFIG_DIR",
             "ANTHROPIC_API_KEY"}
 
     def build(self, **kw):
@@ -393,6 +394,13 @@ class EnvTest(World):
         self.assertEqual(e["PATH"], self.bin)
         self.assertTrue(e["TMPDIR"].startswith(rd + os.sep))
         self.assertTrue(e["CLAUDE_CONFIG_DIR"].startswith(rd + os.sep))
+
+    def test_the_cli_temp_parent_is_the_run_folder(self):
+        # al10-probe-tmp R1: the CLI makes a folder of its own under CLAUDE_CODE_TMPDIR; behind
+        # the wall /tmp is denied, so it is the run folder (the probe makes no run/tmp).
+        rd = os.path.join(self.root, "run")
+        got = self.build()["CLAUDE_CODE_TMPDIR"]
+        self.assertTrue(got == rd or got.startswith(rd + os.sep), got)
 
     def test_base_url_only_when_given(self):
         self.assertNotIn("ANTHROPIC_BASE_URL", self.build())
