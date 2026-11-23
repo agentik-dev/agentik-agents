@@ -181,9 +181,11 @@ class WriterProbeTest(al2b.ProbeCase):
 
 
 def widen_out(argv, *, read, write, net, home):
-    """The stand-in under bwrap: the real wall, with the temp folder, /var/tmp and the read dir
-    bound writable, so an outside write lands on the disk."""
-    out = [os.path.realpath(tempfile.gettempdir()), os.path.realpath("/var/tmp")] + list(read[:1])
+    """The stand-in under bwrap: the real wall, with the temp folder and /var/tmp alone bound
+    writable, so the direct attempt's write there lands on the disk. The read dir stays as the
+    wall has it: writable, the refusing fake's own write would land there and the CLI's attempt
+    would be named, where the case means to prove the direct one."""
+    out = [os.path.realpath(tempfile.gettempdir()), os.path.realpath("/var/tmp")]
     return wall.wrap(argv, read=read, write=list(write) + out, net=net, home=home)
 
 

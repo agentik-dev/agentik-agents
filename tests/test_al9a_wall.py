@@ -499,6 +499,7 @@ class WriterPassTest(WriterCase):
         print("\nthe writer object: " + json.dumps(w))
 
     def test_a_wall_that_lets_one_through_fails_writewalled(self):
+        self.need_wall()    # the macOS wall alone: under bwrap its stub is out of reach
         rec = self.run_writer("good", wrap=widen_to_read)
         c = self.wchecks(rec)["writewalled"]
         self.assertEqual((c["ok"], c["detail"]),
