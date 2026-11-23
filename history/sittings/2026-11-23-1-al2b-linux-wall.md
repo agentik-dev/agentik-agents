@@ -14,12 +14,16 @@
 - [x] act 3: R2's test, `/run` emptied with the resolver back under `net="all"`, the root's own folders, the three flags (2505e67); 4 argv tests new, 22 OK here; 4 Linux classes, skipped here.
 - [x] act 4: al6's `Lane` through a write folder, for `WorkLinesTest` alone (cfb3f1a); unseen on Linux.
 - [x] act 5: three wish-list rows, n67 to n69 (R8).
-- [ ] act 6: 1.10.0 (R9), the lints, the check queued once.
+- [x] act 6: 1.10.0 (R9), alone in the last commit under `plugin/`; lint, doclint, hygiene (and over `main..HEAD`) at 0; every suite of `test` green by hand under both interpreters; the check queued once on this commit.
 
 ## Handover
 - If cut: the first unticked line above.
+- Unseen here: every Linux class (R2, R4 to R6) and R7's `WorkLinesTest` on the bubblewrap wall; the owner's second run proves them.
+- Not built, by the brief: the stub's removal (the first brief's R6), a small change after the second run's green.
+- decide, owner: the coordinator: the packet still reads as the first round (its size is at the doc gate's ceiling); consumer: the landing.
 
 ## Next act
-Act 6.
+The check's result; the owner's second run on Linux; review; then the stub's removal.
 
 ## Exit
+R1 to R9 built and committed; the Linux classes written and not seen to run; the check queued on the head.
