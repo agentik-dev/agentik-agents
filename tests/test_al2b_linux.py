@@ -183,11 +183,18 @@ class DoubtTest(BwrapCase):
         self.assertNotEqual(run.returncode, 0, run.stdout)
 
     def test_the_runtime_folder_is_empty(self):
-        folder = "/run/user/%d" % os.getuid()
+        # R2 of the second round: absent is stricter than empty, and holds too (the first run
+        # saw `/run/user` covered, so the uid's folder absent); a name in it still fails
+        uid = str(os.getuid())
+        folder = "/run/user/" + uid
         if not os.path.isdir(folder):
             self.skipTest("no %s on this machine" % folder)
+        listing = self.walled(["/bin/ls", "-A", "/run/user"])
+        self.assertNotIn(uid, listing.stdout.split(), listing.stdout)
         run = self.walled(["/bin/ls", "-A", folder])
-        self.assertEqual((run.returncode, run.stdout), (0, ""), run.stderr)
+        self.assertEqual(run.stdout, "", "a name of %s shows inside the wall" % folder)
+        if run.returncode != 0:
+            self.assertIn("No such file", run.stderr, run.stderr)
 
     def test_killing_the_wall_ends_its_child(self):
         out = self.home.mkdir("out")
@@ -230,6 +237,119 @@ except socket.timeout:
 except OSError as e:
     print("outside refused %.2f" % (time.time() - t))
 '''
+
+
+SOCK_CHILD = r'''
+import socket, sys
+s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+s.settimeout(3)
+try:
+    s.connect(sys.argv[1])
+    print("reached")
+except OSError as e:
+    print("refused %s" % type(e).__name__)
+'''
+
+
+class Listener:
+    """A path socket outside the wall that answers every connect; stopped at the test's end."""
+
+    def __init__(self, test, path):
+        import socket
+        import threading
+        self.path = path
+        self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self.sock.bind(path)
+        test.addCleanup(self.stop)
+        self.sock.listen(4)
+        self.sock.settimeout(0.2)
+        self.done = False
+        threading.Thread(target=self.serve, daemon=True).start()
+
+    def serve(self):
+        while not self.done:
+            try:
+                conn, _ = self.sock.accept()
+                conn.close()
+            except OSError:
+                continue
+
+    def stop(self):
+        self.done = True
+        self.sock.close()
+        try:
+            os.unlink(self.path)
+        except OSError:
+            pass
+
+
+class RunSocketTest(BwrapCase):
+    """L1: a socket file under `/run`, which the first wall left readable, is not reached."""
+
+    def test_a_socket_under_run_is_refused_and_one_in_a_write_folder_is_reached(self):
+        self.holds()
+        lock = "/run/lock"   # world-writable on the target, and not emptied by the first wall
+        if not (os.path.isdir(lock) and os.access(lock, os.W_OK)):
+            self.skipTest("no writable %s on this machine" % lock)
+        outside = Listener(self, os.path.join(lock, "al2b-%d.sock" % os.getpid()))
+        out = self.home.mkdir("out")
+        inside = Listener(self, os.path.join(out, "al2b.sock"))
+        for net in ("loopback", "all"):
+            run = self.walled([al2.FAKE_PY, "-I", "-c", SOCK_CHILD, outside.path], net=net)
+            self.assertEqual(run.returncode, 0, run.stderr)
+            self.assertTrue(run.stdout.startswith("refused"), (net, run.stdout))
+        run = self.walled([al2.FAKE_PY, "-I", "-c", SOCK_CHILD, inside.path], write=[out],
+                          net="loopback")
+        self.assertEqual(run.stdout.strip(), "reached", run.stderr)
+
+
+class ResolverTest(BwrapCase):
+    """L1: `/run` is emptied whole; under net="all" alone the resolver's folder is back."""
+
+    def test_the_resolver_under_all_alone(self):
+        folder = wall._bwrap_resolver()
+        if folder is None:
+            self.skipTest("/etc/resolv.conf does not point into /run on this machine")
+        name = os.path.basename(os.path.realpath("/etc/resolv.conf"))
+        run = self.walled(["/bin/cat", "/etc/resolv.conf"], net="all")
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertIn("nameserver", run.stdout)
+        run = self.walled(["/bin/ls", "-A", folder], net="loopback")
+        self.assertNotIn(name, run.stdout.split(), run.stdout)
+        run = self.walled(["/bin/ls", "-A", "/run"], net="all")
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertEqual(run.stdout.split(), [folder.split("/")[2]], run.stdout)
+
+
+class RootTest(BwrapCase):
+    """L2: every real folder directly under `/` off the system list is empty inside the wall."""
+
+    def test_the_roots_own_folders_are_empty_and_the_system_stays(self):
+        self.assertEqual(wall._bwrap_top(["al2b-made-up-data", "usr", "opt", "etc"]),
+                         ["/al2b-made-up-data"])
+        top = wall._bwrap_top()
+        self.assertIn("/tmp", top)
+        bound = os.path.realpath(self.home.root)   # the fake's folder is in it, bound back
+        for folder in top:
+            with self.subTest(folder=folder):
+                # empty, but for the first step on the way to the one folder bound inside it
+                way = bound[len(folder):].strip("/").split("/")[:1] if wall._within(bound, folder) else []
+                run = self.walled(["/bin/ls", "-A", folder], net="loopback")
+                self.assertEqual((run.returncode, run.stdout.split()), (0, way), run.stderr)
+        run = self.walled(["/bin/ls", "/usr/bin"])
+        self.assertIn("python3", run.stdout.split(), run.stderr)
+
+
+class NamespaceTest(BwrapCase):
+    """L3: the command's IPC, host-name and cgroup namespaces are not the host's."""
+
+    def test_ipc_uts_and_cgroup_are_its_own(self):
+        for ns in ("ipc", "uts", "cgroup"):
+            with self.subTest(ns=ns):
+                here = os.readlink("/proc/self/ns/" + ns)
+                run = self.walled(["/usr/bin/readlink", "/proc/self/ns/" + ns])
+                self.assertEqual(run.returncode, 0, run.stderr)
+                self.assertNotEqual(run.stdout.strip(), here)
 
 
 class NetTest(BwrapCase):

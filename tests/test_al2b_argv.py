@@ -32,8 +32,11 @@ LIB = os.path.join(REPO, "plugin", "lib")
 APILANE = os.path.join(LIB, "apilane")
 wall = al2.load("wall")
 probe = al2.load("probe")
+TOP = wall._bwrap_top   # the root's scan, before a test stands in for it
 
+THREE = ("--unshare-ipc", "--unshare-uts", "--unshare-cgroup-try")
 ARITY = {"--die-with-parent": 0, "--new-session": 0, "--unshare-pid": 0, "--unshare-net": 0,
+         "--unshare-ipc": 0, "--unshare-uts": 0, "--unshare-cgroup-try": 0,
          "--ro-bind": 2, "--bind": 2, "--tmpfs": 1, "--dev": 1, "--proc": 1}
 
 
@@ -65,7 +68,11 @@ class BwrapArgvTest(unittest.TestCase):
         self.home = al2.Home(self)
         self.fake = self.home.write("tools/fake", "#!/bin/sh\nexec \"$@\"\n", 0o755)
         patches = [mock.patch.object(wall, "backend", lambda: "bwrap"),
-                   mock.patch.object(wall, "_BWRAP_EMPTY_IF", ())]
+                   mock.patch.object(wall, "_BWRAP_EMPTY_IF", ()),
+                   # the root's own folders and the resolver are the machine's: none here but
+                   # where a test names them
+                   mock.patch.object(wall, "_bwrap_top", lambda: []),
+                   mock.patch.object(wall, "_RESOLV", self.home.path("no-resolv.conf"))]
         for p in patches:
             p.start()
             self.addCleanup(p.stop)
@@ -80,7 +87,7 @@ class BwrapArgvTest(unittest.TestCase):
         pairs, rest = ops(cmd)
         self.assertEqual(rest, [self.fake, "/bin/echo", "a b", "it's"])
         names = [n for n, _ in pairs]
-        for flag in ("--die-with-parent", "--new-session", "--unshare-pid"):
+        for flag in ("--die-with-parent", "--new-session", "--unshare-pid") + THREE:
             self.assertEqual(names.count(flag), 1, flag)
         self.assertNotIn("--unshare-net", names)
         self.assertEqual(pairs[names.index("--ro-bind")], ("--ro-bind", ("/", "/")))
@@ -158,6 +165,68 @@ class BwrapArgvTest(unittest.TestCase):
         self.assertNotIn(self.home.path(".ssh"), dests)   # hidden by the empty home already
         self.assertNotIn(link, dests)                      # covered by its real path
 
+    def test_the_three_namespaces_under_both_nets(self):
+        for net in ("all", "loopback"):
+            names = [n for n, _ in ops(self.wrap(net=net))[0]]
+            for flag in THREE:
+                self.assertEqual(names.count(flag), 1, (net, flag))
+
+    def test_run_is_emptied_whole_before_any_bind_inside(self):
+        m = mounts(ops(self.wrap(net="loopback"))[0])
+        self.assertIn(("empty", "/run"), m)
+        self.assertGreater(m.index(("empty", "/run")), m.index(("ro", "/")))
+        self.assertEqual([d for k, d in m if d != "/run" and within(d, "/run")], [], m)
+
+    def test_the_resolver_is_bound_back_under_all_alone(self):
+        run = os.path.realpath(tempfile.mkdtemp(prefix="al2b-run-"))
+        self.addCleanup(shutil.rmtree, run, True)
+        res = os.path.join(run, "systemd", "resolve")
+        os.makedirs(res)
+        with open(os.path.join(res, "stub-resolv.conf"), "w") as fh:
+            fh.write("nameserver 127.0.0.53\n")
+        link = self.home.path("resolv.conf")
+        os.symlink(os.path.join(res, "stub-resolv.conf"), link)
+        with mock.patch.object(wall, "_BWRAP_RUN", run), mock.patch.object(wall, "_RESOLV", link):
+            m_all = mounts(ops(self.wrap(net="all"))[0])
+            m_lo = mounts(ops(self.wrap(net="loopback"))[0])
+        self.assertLess(m_all.index(("empty", run)), m_all.index(("ro", res)))
+        self.assertIn(("empty", run), m_lo)
+        self.assertNotIn(("ro", res), m_lo)
+        self.assertEqual([d for k, d in m_lo if d != run and within(d, run)], [])
+        # a resolv.conf that is a file of its own, or points outside the runtime folder: no bind
+        plain = self.home.write("plain-resolv.conf", "nameserver 192.0.2.1\n")
+        other = self.home.mkdir("elsewhere")
+        out = self.home.path("out-resolv.conf")
+        os.symlink(self.home.write("elsewhere/r.conf", "x\n"), out)
+        for conf in (plain, out):
+            with mock.patch.object(wall, "_BWRAP_RUN", run), mock.patch.object(wall, "_RESOLV", conf):
+                m = mounts(ops(self.wrap(net="all"))[0])
+            self.assertNotIn(("ro", res), m, conf)
+            self.assertNotIn(("ro", other), m, conf)
+
+    def test_the_roots_own_folders_are_emptied(self):
+        top = TOP
+        self.assertEqual(top(["made-up-data", "usr", "etc", "opt", "snap", "nix", "var", "sys",
+                              "dev", "proc", "bin", "lib", "lib64", "srv", "boot", "root",
+                              "home", "tmp", "run", "mnt"]),
+                         ["/boot", "/home", "/made-up-data", "/mnt", "/root", "/run", "/srv",
+                          "/tmp"])
+        for path in top():   # this machine's own listing: real folders, never a link, off the list
+            self.assertTrue(os.path.isdir(path) and not os.path.islink(path), path)
+            self.assertNotIn(os.path.basename(path), wall._BWRAP_KEEP)
+        with mock.patch.object(wall, "_bwrap_top", lambda: top(["made-up-data", "usr"])):
+            m = mounts(ops(self.wrap())[0])
+        self.assertIn(("empty", "/made-up-data"), m)
+        self.assertNotIn(("empty", "/usr"), m)
+        # what is bound inside an emptied folder of the root comes back after it
+        outer = os.path.realpath(tempfile.mkdtemp(prefix="al2b-top-"))
+        self.addCleanup(shutil.rmtree, outer, True)
+        job = os.path.join(outer, "job")
+        os.makedirs(job)
+        with mock.patch.object(wall, "_bwrap_top", lambda: [outer]):
+            m = mounts(ops(self.wrap(read=[job]))[0])
+        self.assertLess(m.index(("empty", outer)), m.index(("ro", job)))
+
     def test_no_backend_still_raises(self):
         with mock.patch.object(wall, "backend", lambda: None):
             with self.assertRaises(wall.WallError) as cm:
@@ -203,7 +272,7 @@ class TrialTest(unittest.TestCase):
         self.assertTrue(self.ready(path))
         with open(self.log) as handle:
             asked = handle.read().splitlines()
-        for flag in ("--unshare-net", "--unshare-pid", "--die-with-parent", "--new-session"):
+        for flag in ("--unshare-net", "--unshare-pid", "--die-with-parent", "--new-session") + THREE:
             self.assertIn(flag, asked)
         at = asked.index("--ro-bind")
         self.assertEqual(asked[at:at + 3], ["--ro-bind", "/", "/"])
