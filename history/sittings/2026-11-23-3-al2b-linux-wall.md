@@ -10,7 +10,7 @@
 
 ## Done-ness
 - [x] act 1: R1, R2, R4: the stub gone from the dispatcher; its cases in `tests/test-dispatch.sh` replaced (11 of 13 red at 6836375, the two with a file pass there through the temp HOME's line), `test-bare-machine.py`'s test 13 and `test_al4_report.py`'s `test_launcher` mended, red at the old dispatcher; `plugin.json` at 1.9.11.
-- [ ] act 2: R8: `tests/test-rig.sh`'s chmod and stat cases, each proved red and green under a stand-in.
+- [x] act 2: R8: `tests/test-rig.sh`'s chmod and stat cases; under a GNU-like `chmod` and `stat` first on PATH, 77 passed, 2 failed before, 79 passed after; 79 passed here plainly. No other `stat -f` pair in `tests/`, `plugin/lib/` or `scripts/`.
 - [ ] act 3: R5, R6: two wish-list rows; the packet's "Not built" line and the guides current.
 - [ ] act 4: R7: 1.10.0 alone in the last commit under `plugin/`; lint, doclint, hygiene at 0; the check queued once.
 
@@ -18,7 +18,7 @@
 - If cut: the first unticked line above.
 
 ## Next act
-Act 2.
+Act 3.
 
 ## Exit
 Open.

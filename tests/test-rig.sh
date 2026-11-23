@@ -74,9 +74,14 @@ for _ in $(seq 1 40); do curl -fsS -m 1 -o /dev/null "http://127.0.0.1:$STUB_POR
 export LOCALRIG_OLLAMA_URL="http://127.0.0.1:$STUB_PORT"
 
 echo "== BSD portability: the idioms that broke a cold start =="
+# BSD's chmod rejects a bare --, GNU's accepts it: where it is accepted the idiom never broke here,
+# and the case after this one still holds every tool to the form both take
 mkdir -p "$TMP/p"; err="$( { chmod 700 -- "$TMP/p"; } 2>&1 )"; chmod_rc=$?
-check "$( [ "$chmod_rc" != "0" ] && echo 0 || echo 1 )" \
-  "this platform's chmod really does reject a bare -- (so the cold-start bug was real here)" "rc=$chmod_rc: $err"
+if [ "$chmod_rc" = "0" ]; then
+  check 0 "this platform's chmod accepts a bare -- (GNU), so the cold-start bug never broke here"
+else
+  check 0 "this platform's chmod really does reject a bare -- (so the cold-start bug was real here)"
+fi
 if grep -q 'chmod 700 -- ' "$CLAUDE_LOCAL" "$LOCALRIG"; then check 1 "no tool still calls chmod with a bare --"; else check 0 "no tool still calls chmod with a bare --"; fi
 
 echo "== dead ports must not read as alive =="
@@ -95,7 +100,8 @@ echo "== up mlx: registration, permissions, atomicity =="
 out="$("$LOCALRIG" up mlx 2>&1)"; rc=$?
 check "$rc" "up mlx succeeds against a reachable Ollama" "$out"
 check "$( [ -f "$BACKENDS" ] && echo 0 || echo 1 )" "backends.json is written"
-mode=$(stat -f '%Lp' "$BACKENDS" 2>/dev/null || stat -c '%a' "$BACKENDS" 2>/dev/null)
+# GNU's form first: there `stat -f` is the file system's report, printed before it fails
+mode=$(stat -c '%a' "$BACKENDS" 2>/dev/null || stat -f '%Lp' "$BACKENDS" 2>/dev/null)
 check "$( [ "$mode" = "600" ] && echo 0 || echo 1 )" "backends.json is mode 600 (it holds an API key)" "mode $mode"
 /usr/bin/python3 -c "import json,sys; d=json.load(open('$BACKENDS')); sys.exit(0 if d['mlx']['url']=='$LOCALRIG_OLLAMA_URL' else 1)"
 check "$?" "the mlx entry points at the configured Ollama, not an injected host"
