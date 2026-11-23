@@ -6,7 +6,8 @@ in the key (made up, new each run), the base URL (the stub's) and the prompt, an
 `wrap(..., net="loopback")`: no request can leave the machine, so the probe spends nothing. The
 stub asks for three reads: a file in the job dir, a canary in a walled folder, and a canary in
 the system's temp folder, outside both. Five checks: `key` (each request carried the made-up key
-and no bearer token), `tools` (exactly Read, Grep and Glob offered), `walled` (the walled canary's
+and no bearer token), `tools` (no tool beyond Read, Grep and Glob offered: the CLI offers Read
+alone under `--bare`, and that passes), `walled` (the walled canary's
 read was refused and its text came back in no request), `restricted` (whether the outside
 canary stayed out; recorded, never deciding `ok`) and `read` (the job file's text came back).
 A CLI that refuses `--restricted` beside `--bare` is run once more without it, and `restricted`
@@ -21,13 +22,24 @@ wall, plants a hook in the worktree's `.claude/settings.json`, a `CLAUDE.md` and
 run folder's config folder, then runs the writer's argv in the worktree with the worktree and its
 own run folder as the `write` folders; the stub asks for six writes (the worktree's top, three
 new folders deep in it, a read dir, the account's temp folder, `/var/tmp`, the worktree's
-`.git`) and one read of the walled canary. Four checks of its own: `write` (both worktree files
-hold the stub's text), `writewalled` (none of the three outside writes landed and `.git` is
-unchanged), `inert` (no plant took effect: no mark written, the `CLAUDE.md` in no request) and
-`tools` (exactly the type's tools offered), with `key`, `walled` and `restricted` as the
-reader's. It is the record's `writer` object (`version`, `ok`, `checks`); the reader's checks and
-verdict are unchanged, so `passed(roots, version)` never waits on it, and `passed(roots,
-version, writer=True)` holds only where both do. The repo is removed after, whatever the result.
+`.git`) and one read of the walled canary. A CLI may refuse a write before it tries it, so the
+pass then proves the wall itself, the CLI aside: a direct attempt, `/bin/sh` through the same
+`wrap` call (the writer's read, write, net and home), writes a new file in the worktree, one in
+each of the three outside folders, and the worktree's `.git`, overwritten then removed, each on
+its own; each outside file is the probe's own name, removed after whatever it found. Four checks
+of its own: `write` (both worktree files hold the stub's text), `writewalled` (the CLI's outside
+writes left nothing; the direct attempt ran, its worktree file landed with its text, each of its
+outside writes was refused and left nothing, and `.git`'s bytes are unchanged; on bwrap a write
+the wall's own tmpfs took, into the temp folder or `/var/tmp`, holds once nothing is left of it;
+else the detail names the first that did not hold and its attempt), `inert` (no plant took
+effect: no mark written, the `CLAUDE.md` in no request) and `tools` (exactly the type's tools
+offered, no tool more and none less), with `key`, `walled` and `restricted` as the reader's. It
+is the record's `writer` object (`version`, `ok`, `type`, `tools` sorted, `checks`); the reader's
+checks and verdict are unchanged, so `passed(roots, version)` never waits on it. `passed(roots,
+version, writer=True, writer_type=...)` holds only where the reader's does and the writer
+object, counted from its checks, not its `ok` alone: its version this one, each name of
+WRITER_CHECKS there once, each true but `restricted`, its `ok` true, and its `type` and `tools`
+those of the writing type asked about. The repo is removed after, whatever the result.
 
 Where the wall gives the command a network namespace of its own (bwrap), a stub outside cannot be
 reached from inside, so the stub starts inside the wall: `run` picks a port, hands the builders
@@ -61,6 +73,24 @@ GIT_FLAGS = ("-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", "--
 GIT_WHO = ("-c", "user.name=agentik-probe", "-c", "user.email=agentik-probe@localhost",
            "-c", "commit.gpgsign=false")
 PLANTS = ("worktree-settings", "worktree-claude-md", "config-settings")
+# The writer's direct attempt, as `/bin/sh -c _DIRECT_SH probe-direct <text> <inside> <three
+# outside> <.git>`: one line `<i> written|refused` for each, `.git` overwritten (4) then removed
+# (5), then the end line, which a wall that starts nothing never prints.
+_DIRECT_SH = (
+    't=$1; shift; i=0\n'
+    'for p in "$1" "$2" "$3" "$4"; do\n'
+    '  if printf %s "$t" > "$p" 2>/dev/null; then echo "$i written"; else echo "$i refused"; fi\n'
+    '  i=$((i + 1))\n'
+    'done\n'
+    'if printf "gitdir: /made/up/elsewhere\\n" > "$5" 2>/dev/null; then echo "4 written"; '
+    'else echo "4 refused"; fi\n'
+    'if rm -f -- "$5" 2>/dev/null && [ ! -e "$5" ] && [ ! -L "$5" ]; then echo "5 written"; '
+    'else echo "5 refused"; fi\n'
+    'echo "end of the attempt"\n')
+HELD = {False: "neither attempt's outside writes landed, the direct attempt's were each refused "
+               "and .git is unchanged",
+        True: "neither attempt's outside writes landed, the direct attempt's were each refused "
+              "or taken by the wall's own tmpfs, and .git is unchanged"}
 _DEFAULT = object()
 CEILING_USD = 0.05
 TIMEOUT = 60
@@ -112,15 +142,35 @@ def _passes(rec, version):
             and rec.get("cli_version") == version)
 
 
-def _writer_passes(rec, version):
-    """The record holds a writer's pass for this version."""
+def _writer_type(wtype):
+    """The writing type asked about: the table's `implement` by default, None where none."""
+    if wtype is _DEFAULT:
+        from apilane import types as _types
+        return _types.TYPES.get("implement")
+    return wtype
+
+
+def _writer_passes(rec, version, wtype):
+    """The record holds a writer's pass for this version and this type, counted from its checks:
+    each of WRITER_CHECKS once, each true but `restricted`, the type's name and tools its own."""
     w = rec.get("writer") if isinstance(rec, dict) else None
-    return isinstance(w, dict) and w.get("version") == version and w.get("ok") is True
+    if wtype is None or not isinstance(w, dict) or w.get("ok") is not True:
+        return False
+    if (w.get("version") != version or w.get("type") != wtype.name
+            or w.get("tools") != sorted(wtype.tools)):
+        return False
+    checks = w.get("checks")
+    if not isinstance(checks, list) or not all(isinstance(c, dict) for c in checks):
+        return False
+    if sorted(str(c.get("name")) for c in checks) != sorted(WRITER_CHECKS):
+        return False
+    return all(c.get("ok") is True for c in checks if c.get("name") != "restricted")
 
 
-def passed(roots, version, writer=False):
+def passed(roots, version, writer=False, writer_type=_DEFAULT):
     rec = read(roots)
-    return _passes(rec, version) and (not writer or _writer_passes(rec, version))
+    return _passes(rec, version) and (
+        not writer or _writer_passes(rec, version, _writer_type(writer_type)))
 
 
 def ensure(*, claude, roots, build_argv=None, build_env=None, wrap=None, emit=None, inside=None,
@@ -129,7 +179,9 @@ def ensure(*, claude, roots, build_argv=None, build_env=None, wrap=None, emit=No
     With `writer`, the record must hold a writer's pass too; no writing type is a fail."""
     version = cli_version(claude)
     rec = read(roots)
-    if _passes(rec, version) and (not writer or _writer_passes(rec, version)):
+    if writer:
+        writer_type = _writer_type(writer_type)
+    if _passes(rec, version) and (not writer or _writer_passes(rec, version, writer_type)):
         return rec
     if emit is not None:
         emit("probe.start", cli_version=version)
@@ -154,9 +206,8 @@ def run(*, claude, roots, build_argv=None, build_env=None, wrap=None, inside=Non
     """Run the CLI once behind the wall; write and return the record. A fail is ok false.
     `inside` puts the stub inside the wall; None is `_stub_inside(wrap)`. `writer` runs the
     writer's pass after, for `writer_type` (the table's `implement`); with none it is not run."""
-    if writer and writer_type is _DEFAULT:
-        from apilane import types as _types
-        writer_type = _types.TYPES.get("implement")
+    if writer:
+        writer_type = _writer_type(writer_type)
     if build_argv is None:
         from apilane.argv import build as build_argv
     if build_env is None:
@@ -250,7 +301,8 @@ def _attempt(*, claude, roots, build_argv, build_env, wrap, job, run_dir, stub_d
         rc, output = _spawn(cmd, env, cwd, shard.prompt)
     finally:
         stub.stop()
-    return {"key": key, "rc": rc, "output": output, "requests": list(stub.requests)}
+    return {"key": key, "rc": rc, "output": output, "requests": list(stub.requests),
+            "wall": {"read": [job], "write": list(write)}}
 
 
 def _attempt_inside(*, claude, roots, build_argv, build_env, wrap, job, run_dir, stub_dir,
@@ -274,10 +326,11 @@ def _attempt_inside(*, claude, roots, build_argv, build_env, wrap, job, run_dir,
     read = [job, LIB, os.path.dirname(os.path.realpath(argv[0]))]
     if python != os.path.realpath(LAUNCH_PY):
         read.append(os.path.realpath(sys.base_prefix))
-    cmd = wrap(launcher, read=read, write=list(write) + [stub_dir], net="loopback",
-               home=roots.home)
+    write = list(write) + [stub_dir]
+    cmd = wrap(launcher, read=read, write=write, net="loopback", home=roots.home)
     rc, output = _spawn(cmd, env, cwd, shard.prompt)
-    return {"key": key, "rc": rc, "output": output, "requests": _requests(out)}
+    return {"key": key, "rc": rc, "output": output, "requests": _requests(out),
+            "wall": {"read": read, "write": write}}
 
 
 def _requests(path):
@@ -380,11 +433,12 @@ def _record(version, got, texts, flag, home=None):
             "restricted": restricted, "checks": checks}
 
 
-def _tools(check, reqs, allowed, said):
-    """`tools`: exactly the type's tools offered, no tool more and none less."""
+def _tools(check, reqs, allowed, said, exact=False):
+    """`tools`: no tool beyond the type's offered (the reader's, as at the pin); `exact`, the
+    writer's, also none less."""
     offered = sorted({t for r in reqs for t in r["tools"]}, key=str)
     extra = [str(t) for t in offered if t not in allowed]
-    lacking = [t for t in allowed if t not in offered]
+    lacking = [t for t in allowed if t not in offered] if exact else []
     if not reqs:
         check("tools", False, "no request reached the stub")
     elif extra:
@@ -466,16 +520,13 @@ def _writer(version, step, wtype, base, *, walled, walled_text, restricted, flag
         except (OSError, subprocess.SubprocessError) as e:
             for name in WRITER_CHECKS:
                 check(name, False, "the throwaway repo was not made: %s" % type(e).__name__)
-            return {"version": version, "ok": False, "checks": checks}
+            return {"version": version, "ok": False, "type": wtype.name,
+                    "tools": sorted(wtype.tools), "checks": checks}
         tag = secrets.token_hex(8)
         texts = {"top": "probe-write-top-%s" % tag, "deep": "probe-write-deep-%s" % tag}
         inside = {"top": os.path.join(tree, "probe-top.txt"),
                   "deep": os.path.join(tree, "probe-a", "probe-b", "probe-c", "probe-deep.txt")}
-        leaf = "agentik-probe-writer-%s.txt" % tag
-        outside = {"the read dir": os.path.join(step["job"], leaf),
-                   "the account's temp folder": os.path.join(
-                       os.path.realpath(tempfile.gettempdir()), leaf),
-                   "/var/tmp": os.path.join(os.path.realpath("/var/tmp"), leaf)}
+        outside = _outside(step["job"], "agentik-probe-writer-%s.txt" % tag)
         git = os.path.join(tree, ".git")
         git_bytes = _bytes(git)
         marks = {p: os.path.join(run_dir, "mark-%s" % p) for p in PLANTS}
@@ -496,14 +547,14 @@ def _writer(version, step, wtype, base, *, walled, walled_text, restricted, flag
                            dirs=[tree, step["job"]], write=[run_dir, tree], cwd=tree,
                            calls=calls, **dict(step, run_dir=run_dir, reads=[]))
         finally:
-            landed = [name for name, p in outside.items() if os.path.lexists(p)]
-            for p in outside.values():
-                if os.path.lexists(p):
-                    os.unlink(p)
+            landed = _sweep(outside)
+        landed += [".git"] if _bytes(git) != git_bytes else []
+        direct = _direct(step["wrap"], got["wall"], tree, git, step["job"], tag,
+                         step["roots"].home)
         reqs = got["requests"]
         bodies = [r["body"] for r in reqs]
         _key(check, got, step["roots"].home)
-        _tools(check, reqs, tuple(wtype.tools), ", ".join(wtype.tools))
+        _tools(check, reqs, tuple(wtype.tools), ", ".join(wtype.tools), exact=True)
         furthest = max([r["turn"] for r in reqs] or [-1])
         if any(walled_text in b for b in bodies):
             check("walled", False, "the walled canary's text came back")
@@ -519,12 +570,8 @@ def _writer(version, step, wtype, base, *, walled, walled_text, restricted, flag
                 for k in wrote))
         else:
             check("write", True, "both worktree files hold the stub's text")
-        git_now = _bytes(git)
-        through = landed + ([".git"] if git_now != git_bytes else [])
-        if through:
-            check("writewalled", False, "landed: %s" % ", ".join(through))
-        else:
-            check("writewalled", True, "no outside write landed and .git is unchanged")
+        held = _walled_writes(landed, direct, _bytes(git) == git_bytes)
+        check("writewalled", held is None, HELD[direct["tmpfs"]] if held is None else held)
         took = [p for p in PLANTS if os.path.lexists(marks[p])]
         if any(token in b for b in bodies) and "worktree-claude-md" not in took:
             took.append("worktree-claude-md")
@@ -533,10 +580,88 @@ def _writer(version, step, wtype, base, *, walled, walled_text, restricted, flag
         else:
             check("inert", True, "no plant took effect")
         ok = all(c["ok"] is True for c in checks if c["name"] != "restricted")
-        return {"version": version, "ok": ok, "checks": checks}
+        return {"version": version, "ok": ok, "type": wtype.name, "tools": sorted(wtype.tools),
+                "checks": checks}
     finally:
         shutil.rmtree(folder, ignore_errors=True)
         shutil.rmtree(run_dir, ignore_errors=True)
+
+
+def _outside(read_dir, leaf):
+    """The three outside files a writer's attempt tries, by name: `leaf` in each folder."""
+    return {"the read dir": os.path.join(read_dir, leaf),
+            "the account's temp folder": os.path.join(os.path.realpath(tempfile.gettempdir()),
+                                                      leaf),
+            "/var/tmp": os.path.join(os.path.realpath("/var/tmp"), leaf)}
+
+
+def _sweep(outside):
+    """The names whose file is there, each removed, whatever it was."""
+    landed = [name for name, p in outside.items() if os.path.lexists(p)]
+    for p in outside.values():
+        try:
+            if os.path.isdir(p) and not os.path.islink(p):
+                shutil.rmtree(p, ignore_errors=True)
+            elif os.path.lexists(p):
+                os.unlink(p)
+        except OSError:
+            pass
+    return landed
+
+
+def _on_bwrap():
+    try:
+        from apilane import wall
+    except ImportError:
+        return False
+    return wall.backend() == "bwrap"
+
+
+def _direct(wrap, walled_at, tree, git, read_dir, tag, home):
+    """The writer's direct attempt: `/bin/sh`, not the CLI, through the same `wrap` call (the
+    writer's read, write, net and home), tries a file in the worktree, the three outside files
+    and the worktree's `.git`, overwritten then removed, each on its own; what each did."""
+    text = "probe-direct-%s" % tag
+    inside = os.path.join(tree, "probe-direct-%s.txt" % tag)
+    outside = _outside(read_dir, "agentik-probe-direct-%s.txt" % tag)
+    argv = [os.path.realpath("/bin/sh"), "-c", _DIRECT_SH, "probe-direct", text, inside] \
+        + list(outside.values()) + [git]
+    out = ""
+    try:
+        cmd = wrap(argv, read=walled_at["read"], write=walled_at["write"], net="loopback",
+                   home=home)
+        done = subprocess.run(cmd, env={"PATH": PATH, "LANG": "C"}, cwd=tree,
+                              stdin=subprocess.DEVNULL, capture_output=True, timeout=TIMEOUT)
+        out = done.stdout.decode("utf-8", "replace")
+    except (OSError, ValueError, subprocess.SubprocessError):
+        pass
+    finally:
+        left = _sweep(outside)
+    said = dict(ln.split(" ", 1) for ln in out.splitlines() if " " in ln)
+    names = ["inside"] + list(outside) + [".git, overwritten", ".git, removed"]
+    return {"ran": said.get("end") == "of the attempt" and all(str(i) in said
+                                                                for i in range(len(names))),
+            "inside": _text(inside) == text,
+            "refused": {n: said.get(str(i)) == "refused" for i, n in enumerate(names) if i},
+            "left": left, "tmpfs": _on_bwrap()}
+
+
+def _walled_writes(landed, direct, git_same):
+    """`writewalled`'s detail where one write did not hold, the first, and its attempt; else None.
+    On bwrap a write the wall's own tmpfs took counts as held once nothing is left of it."""
+    if landed:
+        return "the CLI's attempt: landed: %s" % ", ".join(landed)
+    if not direct["ran"]:
+        return "the direct attempt: it did not run"
+    if not direct["inside"]:
+        return "the direct attempt: the worktree's file did not land with its text"
+    for name, refused in direct["refused"].items():
+        tmpfs = direct["tmpfs"] and name in ("the account's temp folder", "/var/tmp")
+        if not refused and not tmpfs:
+            return "the direct attempt: not refused: %s" % name
+        if name in direct["left"] or (name.startswith(".git") and not git_same):
+            return "the direct attempt: landed: %s" % name.split(",")[0]
+    return None
 
 
 def _bytes(path):
