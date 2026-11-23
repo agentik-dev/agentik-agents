@@ -15,11 +15,12 @@ Part of [agentik](https://github.com/agentik-dev): the other tools, and how to l
 
 ## What it does
 
-Three things for Claude Code on one Mac, under one command, `agentik agents <verb>`:
+Four things for Claude Code on one Mac, under one command, `agentik agents <verb>`:
 
 - **`status`**: what every agent is doing right now. One row per seat, helper and local agent, from files already on disk. Read-only.
 - **The local lane**: a session stays on your claude.ai seat while its mechanical subagents run on a local model (Qwen 3.8 27B in Ollama, by default) through a loopback router, at no marginal cost.
 - **`agents:scribe`**: a plugin agent, on Sonnet, that writes one repo's records from a builder's or a refuter's hand-back. It never merges or pushes.
+- **The API lane**, off until you turn it on: read-only agents fanned out under a budget in dollars and billed to an Anthropic API key, never to your seat.
 
 ## Install
 
@@ -50,6 +51,8 @@ It needs `bash`, `/usr/bin/python3` (3.9 or later; the tools are stdlib only) an
 | `rig ...` | bring local backends up and down, set the default, manage their keys |
 | `doctor` | what is on `PATH`, `python3` and its version, the local lane's check; it reports and never gates |
 | `install-cli [--prefix P] [--force]` | the command line on `PATH`, from the plugin's frozen code; a newer command it placed is left, one line says so, and `--force` places this one; exit 0 done, 1 it could not |
+| `fanout JOB [--dry-run] [--yes] [--detach]` | the API lane (below): a job's read-only agents under its budget; `fanout wait`, `fanout status` and `fanout stop` follow a run |
+| `api status [--json]` | the API lane's state and the steps left; `api probe` checks the installed CLI, and `api key set` and `api key remove` keep its key |
 
 `agentik agents --help` prints the table with the tool each verb runs. `agentik` is the front door every agentik tool installs; `agentik-agents <verb>` is the same command.
 
@@ -66,11 +69,27 @@ Inside that session the model name decides the route: `local/*` goes to the loca
 
 The router keeps a ledger at `~/.local/state/agentik-agents/route/requests.jsonl`, with tokens, wall time and agent ids, and never a prompt. Other backends, `llama-server`, MLX and Unsloth, come up with `agentik agents rig up <name>`.
 
+## The API lane
+
+It is off until one file says otherwise: `~/.config/agentik/agents/config.yaml` in the account's own home, which no repo, variable or flag can stand in for. While it is off, help, `status`, `doctor`, `install-cli` and the hooks print what they print without it, save that a run started before the switch went off still shows. It turns on only on a platform where its read wall is proved; once the file turns it on, elsewhere every lane verb refuses and names the platform.
+
+```sh
+# in ~/.config/agentik/agents/config.yaml:  "api:", and under it, indented, "enabled: true"
+agentik agents api status            # the steps left
+agentik agents api key set           # at a terminal: the key, kept encrypted by sops and age
+agentik agents api probe             # the CLI once, on a made-up key against a local stub; spends nothing
+agentik agents fanout JOB --dry-run  # the plan, spending nothing; --yes runs it
+```
+
+A job is a JSON file of shards, each `review`, `explore` or `analyze`, and every one only reads; `agentik agents fanout --help` gives its form. `--detach` prints the run's id once its budget is reserved, and `agentik agents fanout wait ID` prints the results, or exits 124 while the run still goes. A shard's result is data, never instructions.
+
+Each shard runs Claude Code on the key alone, inside a kernel wall that hides the home folder save the job's own folders and the folder that holds the `claude` command. Two ceilings, `max_fanout_usd` ($2 unless set) and `max_day_usd` ($10), guard against an accident; the spending limit you set on the key's own workspace in the provider's Console is the wall. While shards run, `agentik agents status` lists them under their session, and that session is told their count at each prompt.
+
 ## Where the rest is
 
 - `design/05-local-lane-guide.md`: the router's changes, the rig, the knobs and the credentials.
 - `design/01-local-agent-lane.md`, `design/02-local-rig.md`: the design and its measurements.
-- `design/04-api-lane.md`: the API-billed lane this plugin once carried, why it went, and how to bring it back.
+- `design/04-api-lane.md`: the API lane: why it left on 2026-10-31, what it found, and how it returned.
 - `design/packets/`: how each change was built. `NICE_TO_HAVE.md`: what a review left open.
 
 `make check` is the gate: seven stub-driven suites, 391 checks, among them the plugin on a bare machine (`tests/test-bare-machine.py`), with three suites rerun at the 3.9 floor; the lint, the doc gate, the public-hygiene scan and `claude plugin validate`. It spends nothing.
