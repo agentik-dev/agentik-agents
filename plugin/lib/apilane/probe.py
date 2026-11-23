@@ -10,7 +10,9 @@ and no bearer token), `tools` (only Read, Grep and Glob offered), `walled` (the 
 read was refused and its text came back in no request), `restricted` (whether the outside
 canary stayed out; recorded, never deciding `ok`) and `read` (the job file's text came back).
 A CLI that refuses `--restricted` beside `--bare` is run once more without it, and `restricted`
-is null. The record is `<roots.state>/probe.json`; a pass holds for one CLI version.
+is null. Where the CLI ended with no request at the stub, the `key` check's detail ends with the
+CLI's last line that is not blank, the key out, the home as `~`, cut to 160. The record is
+`<roots.state>/probe.json`; a pass holds for one CLI version.
 
 Where the wall gives the command a network namespace of its own (bwrap), a stub outside cannot be
 reached from inside, so the stub starts inside the wall: `run` picks a port, hands the builders
@@ -143,7 +145,7 @@ def run(*, claude, roots, build_argv=None, build_env=None, wrap=None, inside=Non
         if (got["rc"] != 0 and not got["requests"] and "restricted" in got["output"].lower()):
             got = _attempt(restricted=False, **step)
             flag = None
-        rec = _record(version, got, texts, flag)
+        rec = _record(version, got, texts, flag, roots.home)
     finally:
         shutil.rmtree(base, ignore_errors=True)
         shutil.rmtree(outside, ignore_errors=True)
@@ -271,7 +273,7 @@ def _spawn(cmd, env, cwd, prompt):
     return rc, (out + b"\n" + err).decode("utf-8", "replace")[-4000:]
 
 
-def _record(version, got, texts, flag):
+def _record(version, got, texts, flag, home=None):
     reqs, key = got["requests"], got["key"]
     bodies = [r["body"] for r in reqs]
     came_back = {name: any(text in b for b in bodies) for name, text in texts.items()}
@@ -282,7 +284,8 @@ def _record(version, got, texts, flag):
         checks.append({"name": name, "ok": ok, "detail": detail})
 
     if not reqs:
-        check("key", False, "no request reached the stub (exit %s)" % got["rc"])
+        check("key", False, "no request reached the stub (exit %s)%s"
+              % (got["rc"], _last_line(got["output"], key, home)))
     else:
         lacking = [i for i, r in enumerate(reqs) if key not in r["credentials"].values()]
         bearer = [i for i, r in enumerate(reqs)
@@ -327,6 +330,18 @@ def _record(version, got, texts, flag):
     return {"schema": SCHEMA, "cli_version": version,
             "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "ok": ok,
             "restricted": restricted, "checks": checks}
+
+
+def _last_line(output, key, home):
+    """`: <the CLI's last line that is not blank>`, the key out, the home as `~`, cut to 160; else ''."""
+    lines = [ln.strip() for ln in output.splitlines() if ln.strip()]
+    if not lines:
+        return ""
+    line = lines[-1].replace(key, "<key>")
+    for h in {home, os.path.realpath(home)} if home else ():
+        if h and h != os.sep:
+            line = line.replace(h, "~")
+    return ": " + line[:160]
 
 
 def _private_dir(path):

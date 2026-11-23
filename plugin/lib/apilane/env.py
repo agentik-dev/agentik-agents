@@ -4,6 +4,11 @@ Billing follows the credential: under --bare the CLI reads only ANTHROPIC_API_KE
 since nothing of the caller's environment is copied, no OAuth token, auth token, caller's
 base URL or Node variable can arrive. ANTHROPIC_BASE_URL appears only when the caller hands
 one in, which only the probe does (its loopback stub).
+
+The CLI makes a temp folder of its own under CLAUDE_CODE_TMPDIR, else under /tmp, which the
+wall denies: it stops there with EEXIST before any request. So CLAUDE_CODE_TMPDIR is the run
+folder itself: the shard makes `tmp` in it, but the probe makes none, and this builder serves
+both.
 """
 import os
 
@@ -20,6 +25,7 @@ def build(*, key, run_dir, home, path, proxy=None, ca_file=None, base_url=None):
         "LANG": LANG,
         "TERM": TERM,
         "TMPDIR": os.path.join(run_dir, "tmp"),
+        "CLAUDE_CODE_TMPDIR": run_dir,
         "CLAUDE_CONFIG_DIR": os.path.join(run_dir, "config"),
         "ANTHROPIC_API_KEY": key,
     }

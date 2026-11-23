@@ -530,6 +530,13 @@ if RECORD:
     with open(os.path.join(RECORD, "%%d.json" %% os.getpid()), "w") as handle:
         json.dump({"argv": sys.argv, "env": dict(os.environ)}, handle)
 restricted = "--restricted" in args
+if MODE in ("died", "diedlong", "diedhome", "diedkey"):
+    sys.stderr.write("first line\n")
+    last = {"died": "EEXIST: file already exists\n", "diedlong": "x" * 300 + "\n",
+            "diedhome": "mkdir '" + os.environ["HOME"] + "/tmp' failed\n",
+            "diedkey": "bad key " + os.environ["ANTHROPIC_API_KEY"] + " given\n"}[MODE]
+    sys.stderr.write(last + "  \n\n")
+    sys.exit(1)
 if MODE == "noflag" and restricted:
     sys.stderr.write("error: unknown option '--restricted'\n")
     sys.exit(1)
@@ -596,6 +603,12 @@ def build_env(*, key, run_dir, home, path, proxy=None, ca_file=None, base_url=No
 def open_wrap(argv, *, read, write, net, home):
     """A stand-in that walls nothing."""
     return list(argv)
+
+
+# al10-probe-tmp: the five details of a run that reached the stub, as measured at the pin
+GOOD_DETAILS = ["4 requests, each on the made-up key alone", "offered: Glob, Grep, Read",
+                "the walled canary's read was refused", "the outside canary stayed out",
+                "the job file's text came back"]
 
 
 class ProbeCase(WallCase):
@@ -671,6 +684,41 @@ class ProbeTest(ProbeCase):
         rec = self.run_probe("noread")
         self.assertIs(self.checks(rec)["read"], False)
         self.assertIs(rec["ok"], False)
+
+
+class ProbeLastLineTest(ProbeCase):
+    """al10-probe-tmp R2: a CLI that ends with no request at the stub says its last line."""
+
+    def key_detail(self, mode):
+        rec = self.run_probe(mode, wrap=open_wrap)
+        self.assertIs(rec["ok"], False)
+        return rec["checks"][0]["detail"]
+
+    def test_the_second_line_ends_the_detail(self):
+        d = self.key_detail("died")
+        self.assertEqual(d, "no request reached the stub (exit 1): EEXIST: file already exists")
+
+    def test_a_long_line_is_cut_at_160(self):
+        d = self.key_detail("diedlong")
+        self.assertEqual(d, "no request reached the stub (exit 1): " + "x" * 160)
+
+    def test_the_home_shows_as_a_tilde(self):
+        d = self.key_detail("diedhome")
+        self.assertNotIn(self.roots.home, d)
+        self.assertEqual(d, "no request reached the stub (exit 1): mkdir '~/tmp' failed")
+
+    def test_the_key_is_never_in_it(self):
+        d = self.key_detail("diedkey")
+        self.assertNotIn("agentik-probe-", d)
+        self.assertTrue(d.startswith("no request reached the stub (exit 1): bad key "), d)
+
+    def test_a_request_at_the_stub_keeps_every_detail(self):
+        rec = self.run_probe("good", wrap=open_wrap)
+        self.assertEqual([c["detail"] for c in rec["checks"]], GOOD_DETAILS)
+        rec = self.run_probe("bearer", wrap=open_wrap)
+        self.assertEqual(rec["checks"][0]["detail"], "request 1 carried a bearer token")
+        rec = self.run_probe("noread", wrap=open_wrap)
+        self.assertEqual(rec["checks"][4]["detail"], "the job file's text never came back (exit 0)")
 
 
 class ProbeArgvTest(ProbeCase):
