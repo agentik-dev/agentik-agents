@@ -732,22 +732,34 @@ def order(sides, n):
     return sides if n % 2 == 0 else list(reversed(sides))
 
 
+CANARY_TRIES = 5
+
+
 def make_canary(home):
+    """The made-up folder under the home: made with a call that fails when the name exists,
+    another random part tried then, five tries; only a folder this call made is ever removed."""
     if not home or not os.path.isdir(home):
         raise Refused("measure: the home is not a folder, so its canary cannot be made")
-    path = os.path.join(home, ".measure-canary-" + secrets.token_hex(4))
-    try:
-        os.mkdir(path, 0o700)
-        probe = os.path.join(path, "probe")
-        os.mkdir(probe)
-        os.rmdir(probe)
-    except OSError:
+    for _try in range(CANARY_TRIES):
+        path = os.path.join(home, ".measure-canary-" + secrets.token_hex(4))
         try:
-            os.rmdir(path)
+            os.mkdir(path, 0o700)
+        except FileExistsError:
+            continue
         except OSError:
-            pass
-        raise Refused("measure: cannot make and remove a folder under the home; nothing ran")
-    return path
+            raise Refused("measure: cannot make and remove a folder under the home; nothing ran")
+        try:
+            probe = os.path.join(path, "probe")
+            os.mkdir(probe)
+            os.rmdir(probe)
+        except OSError:
+            try:
+                os.rmdir(path)
+            except OSError:
+                pass
+            raise Refused("measure: cannot make and remove a folder under the home; nothing ran")
+        return path
+    raise Refused("measure: %d names under the home were taken; nothing ran" % CANARY_TRIES)
 
 
 def main(argv, out=sys.stdout, err=sys.stderr):

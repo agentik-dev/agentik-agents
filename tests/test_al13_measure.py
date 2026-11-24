@@ -766,5 +766,65 @@ class ResultTest(Base):
                 self.assertNotIn("$inf", got.stdout)
 
 
+# Runs the script's main with `secrets.token_hex` pinned to a list of answers, the home's
+# folder names; argv[1] is a JSON list of names, the rest the script's line.
+PINNED = r'''
+import importlib.machinery, importlib.util, json, sys
+names = json.loads(sys.argv[1])
+loader = importlib.machinery.SourceFileLoader("measure_under_test", %(measure)r)
+spec = importlib.util.spec_from_loader("measure_under_test", loader)
+m = importlib.util.module_from_spec(spec)
+loader.exec_module(m)
+real = m.secrets.token_hex
+
+
+def pinned(n=None):
+    if n == 4 and names:
+        return names.pop(0)
+    return real(n)
+
+
+m.secrets.token_hex = pinned
+sys.exit(m.main(sys.argv[2:]))
+'''
+
+
+class CanaryTest(Base):
+    def pinned(self, names, *args):
+        runner = os.path.join(self.t, "pinned.py")
+        with open(runner, "w") as fh:
+            fh.write(PINNED % {"measure": MEASURE})
+        return subprocess.run([sys.executable, runner, json.dumps(names)] + list(args), env=self.env(),
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                              stdin=subprocess.DEVNULL, timeout=300)
+
+    def test_x8_a_name_that_exists_is_never_removed(self):
+        """X8 (F8): the home's folder name taken: the script picks another, keeps the one it found,
+        and removes only its own."""
+        theirs = os.path.join(self.home, ".measure-canary-deadbeef")
+        os.makedirs(os.path.join(theirs, "inside"))
+        lane, lout = self.stand("honest")
+        got = self.pinned(["deadbeef", "cafef00d"], "--lane", lane, "--budget-usd", "1",
+                          "--only", "wall", "--repeat", "1")
+        self.assertEqual(got.returncode, 0, got.stderr)
+        self.assertEqual(sorted(os.listdir(self.home)), [".measure-canary-deadbeef", "Library", "keep.txt"])
+        self.assertEqual(os.listdir(theirs), ["inside"])
+        with open(os.path.join(lout, "jobs.jsonl")) as fh:
+            self.assertIn(".measure-canary-cafef00d", fh.read())
+
+    def test_x8_five_names_taken_refuses_to_start(self):
+        """X8: five names taken in a row: exit 2 with one line, no adapter started, each kept."""
+        names = ["%08x" % n for n in range(1, 6)]
+        for name in names:
+            os.makedirs(os.path.join(self.home, ".measure-canary-" + name))
+        lane, lout = self.stand("writer")
+        got = self.pinned(names, "--lane", lane, "--budget-usd", "1")
+        self.assertEqual(got.returncode, 2, got.stderr)
+        self.assertEqual(len(got.stderr.splitlines()), 1, got.stderr)
+        self.assertFalse(os.path.exists(os.path.join(lout, "called")))
+        for name in names:
+            self.assertTrue(os.path.isdir(os.path.join(self.home, ".measure-canary-" + name)), name)
+
+
 if __name__ == "__main__":
     unittest.main()
