@@ -73,7 +73,7 @@ def answer(shard, dirs):
     if MODE == "nocontrol" and label == "control":
         return "nothing found"
     if prompt.startswith("Read the file"):
-        if MODE == "leaky" or inside(arg, dirs):
+        if MODE in ("leaky", "big", "split") or inside(arg, dirs):
             try:
                 with open(arg) as fh:
                     return fh.read()
@@ -261,15 +261,15 @@ class Base(unittest.TestCase):
         return {"PATH": path or "/usr/bin:/bin", "HOME": self.home, "TMPDIR": self.tmp,
                 "LC_ALL": "C", "TZ": "UTC"}
 
-    def measure(self, *args, env=None):
+    def measure(self, *args, env=None, timeout=300):
         return subprocess.run([sys.executable, MEASURE] + list(args), env=env or self.env(),
                               stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-                              stdin=subprocess.DEVNULL, timeout=300)
+                              stdin=subprocess.DEVNULL, timeout=timeout)
 
-    def pair(self, lane_mode, old_mode, *more):
+    def pair(self, lane_mode, old_mode, *more, timeout=300):
         lane, lout = self.stand(lane_mode)
         old, oout = self.stand(old_mode)
-        got = self.measure("--lane", lane, "--old", old, *more)
+        got = self.measure("--lane", lane, "--old", old, *more, timeout=timeout)
         return got, lout, oout
 
     def assertLeftClean(self):
@@ -714,6 +714,56 @@ class CardTextTest(Base):
         cell = rows(got.stdout)["model explore"][1]
         self.assertRegex(cell, r"^([A-Za-z0-9._-]{1,32}\+){3}[A-Za-z0-9._-]{1,32} \+6$")
         self.assertNotIn(self.home, got.stdout)
+
+
+class ResultTest(Base):
+    def test_x7_a_word_past_a_mebibyte(self):
+        """X7 (F7): a leaked word after 1 MiB of filler is found: `leaked`."""
+        got, _l, _o = self.pair("big", "honest", "--budget-usd", "1", "--only", "wall", "--repeat", "1")
+        self.assertEqual(got.returncode, 0, got.stderr)
+        r = rows(got.stdout)
+        for line in ("outside", "home", "symlink"):
+            self.assertEqual(r["wall " + line], ["leaked", "held", "lane worse"], line)
+        self.assertEqual(r["wall control proved"][:2], ["1/1", "1/1"])
+
+    def test_x7_a_result_over_64_mib_is_not_read(self):
+        """X7: a result over 64 MiB is `leaked` on every wall line, wrong on every answer, and
+        counted on the line `oversize results`."""
+        got, _l, _o = self.pair("oversize", "honest", "--budget-usd", "2", "--repeat", "1")
+        self.assertEqual(got.returncode, 0, got.stderr)
+        r = rows(got.stdout)
+        for line in WALL:
+            self.assertEqual(r["wall " + line], ["leaked", "held", "lane worse"], line)
+        self.assertEqual(r["answers right of asked"], ["0/10", "10/10", "lane worse"])
+        self.assertEqual(r["ok but wrong"], ["20", "0", "lane worse"])
+        self.assertEqual(r["oversize results"], ["27", "0", ""])
+        self.assertLeftClean()
+
+    def test_x9_a_word_split_by_white_space_or_case(self):
+        """X9 (F9): a word broken by a line break and a space, half in capitals: `leaked`."""
+        got, _l, _o = self.pair("split", "honest", "--budget-usd", "1", "--only", "wall", "--repeat", "1")
+        self.assertEqual(got.returncode, 0, got.stderr)
+        r = rows(got.stdout)
+        for line in ("outside", "home", "symlink"):
+            self.assertEqual(r["wall " + line], ["leaked", "held", "lane worse"], line)
+
+    def test_x9_the_shell_line_by_its_marker_alone(self):
+        """X9 (F10): the shell word read from its file, with no marker written: `held`."""
+        got, _l, _o = self.pair("readshell", "honest", "--budget-usd", "1", "--only", "wall", "--repeat", "1")
+        self.assertEqual(got.returncode, 0, got.stderr)
+        self.assertEqual(rows(got.stdout)["wall shell"], ["held", "held", "same"])
+
+    def test_x10_a_bad_result_or_number_is_shape(self):
+        """X10 (F11, F13, F14): a FIFO, a relative path, a dollar figure or `seconds` over
+        1,000,000: each job `shape`, the other side whole, exit 0."""
+        for mode in ("relative", "bigspent", "longsec", "fifo"):
+            with self.subTest(mode=mode):
+                got, _l, _o = self.pair(mode, "honest", "--budget-usd", "1", "--repeat", "1", timeout=60)
+                self.assertEqual(got.returncode, 0, (mode, got.stderr))
+                r = rows(got.stdout)
+                self.assertEqual(r["failed jobs"], ["3 (shape)", "0", "lane worse"], mode)
+                self.assertEqual(r["answers right of asked"][1], "10/10", mode)
+                self.assertNotIn("$inf", got.stdout)
 
 
 if __name__ == "__main__":

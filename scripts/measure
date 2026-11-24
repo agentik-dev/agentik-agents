@@ -20,6 +20,7 @@ Exit 0 with a card; 2 for a refused line (one line on stderr); 1 when no job of 
 returned a result object. A signal removes what the script made, then exits 128 + its number.
 Stdlib only; 3.9 and later. It starts no `claude` and reads no key.
 """
+import codecs
 import json
 import math
 import os
@@ -27,6 +28,7 @@ import secrets
 import shlex
 import shutil
 import signal
+import stat
 import statistics
 import string
 import subprocess
@@ -43,7 +45,9 @@ STATES = ("ok", "failed", "skipped")
 ERRORS = ("tool",)                  # an object's `error`: the tool refused the job before a shard
 MEASURES = ("wall", "answers", "money")
 CALL_SEC = 3600                     # one adapter call, at most
-RESULT_CAP = 1 << 20
+OVERSIZE = 64 << 20                 # a result over this is not read: `leaked` on a wall line, wrong on an answer
+CHUNK = 1 << 20                     # a result is searched whole, a piece at a time
+MAX_NUM = 1000000                   # a dollar figure or `seconds` over this is `shape`
 SEED = 33                           # the corpus's layout: the same questions every run
 WALL = ("outside", "home", "symlink", "shell", "write", "fetch")
 NOT_MEASURED = ("not measured: months of running; the other tool's queue and cost tool, which "
@@ -365,7 +369,12 @@ def call(adapter, obj):
 
 def _num(v):
     return v is None or (isinstance(v, (int, float)) and not isinstance(v, bool)
-                         and math.isfinite(v) and v >= 0)
+                         and math.isfinite(v) and 0 <= v <= MAX_NUM)
+
+
+def _result(v):
+    """Null, or the absolute path of a regular file, its links followed."""
+    return v is None or (isinstance(v, str) and os.path.isabs(v) and os.path.isfile(v))
 
 
 def check(got, labels):
@@ -387,20 +396,48 @@ def check(got, labels):
             return "unknown-label"
         if (s["label"] in seen or s.get("state") not in STATES or not _num(s.get("cost_usd"))
                 or not _num(s.get("seconds")) or not isinstance(s.get("model"), (str, type(None)))
-                or not isinstance(s.get("result"), (str, type(None)))):
+                or not _result(s.get("result"))):
             return "shape"
         seen.add(s["label"])
     return None if seen == set(labels) else "missing-label"
 
 
-def read_result(path):
-    if not isinstance(path, str) or not os.path.isabs(path):
-        return ""
+def fold(text):
+    """White space taken out, case folded: the form a word is matched in."""
+    return "".join(text.split()).casefold()
+
+
+def scan(path, w):
+    """(found, empty, oversize) for one result: searched whole, in pieces with an overlap as
+    long as the word, each folded; over OVERSIZE it is not read."""
+    if path is None:
+        return False, True, False
+    w = fold(w)
     try:
-        with open(path, "rb") as fh:
-            return fh.read(RESULT_CAP).decode("utf-8", "replace")
+        fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK)
     except OSError:
-        return ""
+        return False, True, False
+    with os.fdopen(fd, "rb") as fh:
+        st = os.fstat(fh.fileno())
+        if not stat.S_ISREG(st.st_mode):
+            return False, True, False
+        if st.st_size > OVERSIZE:
+            return False, False, True
+        dec = codecs.getincrementaldecoder("utf-8")("replace")
+        tail, empty, seen = "", True, 0
+        while True:
+            chunk = fh.read(CHUNK)
+            seen += len(chunk)
+            if seen > OVERSIZE:
+                return False, False, True
+            hay = tail + fold(dec.decode(chunk, final=not chunk))
+            if len(hay) > len(tail):
+                empty = False
+            if w and w in hay:
+                return True, False, False
+            tail = hay[max(0, len(hay) - len(w) + 1):]
+            if not chunk:
+                return False, empty, False
 
 
 def evidence(view, listeners):
@@ -425,19 +462,20 @@ def run_one(adapter, job, side, jid, listeners):
             rec["reason"] = "shape"
     if rec["reason"] is None:
         try:
-            take(rec, got)
+            take(rec, got, view["check"]["words"])
         except Exception:
             rec.update(reason="shape", shards={}, spent=None, tool=None)
     return rec
 
 
-def take(rec, got):
-    """A whole object's fields into the job's record."""
+def take(rec, got, words):
+    """A whole object's fields into the job's record; each result searched for its word."""
     rec["tool"] = got["tool"]
     for s in got["shards"]:
+        found, empty, oversize = scan(s.get("result"), words.get(s["label"], ""))
         rec["shards"][s["label"]] = {"state": s["state"], "cost": s.get("cost_usd"),
                                      "model": s.get("model"), "seconds": s.get("seconds"),
-                                     "text": read_result(s.get("result"))}
+                                     "found": found, "empty": empty, "oversize": oversize}
     spent = got.get("spent_usd")
     costs = [s["cost"] for s in rec["shards"].values() if s["cost"] is not None]
     rec["spent"] = spent if spent is not None else (sum(costs) if costs else None)
@@ -454,10 +492,6 @@ def late_effects(recs, jobs, listeners):
 
 # -- the card -----------------------------------------------------------------------------------
 
-def _in(w, text):
-    return w.lower() in (text or "").lower()
-
-
 def summary(recs, jobs, side):
     """One side's numbers, from its records."""
     if recs is None:
@@ -473,20 +507,21 @@ def summary(recs, jobs, side):
         for j in walls:
             r = by[j["kind"]]
             ctl = r["shards"].get("control")
-            proofs += bool(ctl and _in(j["views"][side]["check"]["words"]["control"], ctl["text"]))
+            proofs += bool(ctl and ctl["found"])
         s["control"] = "%d/%d" % (proofs, len(walls))
         for line in WALL:
             leaked = False
             for j in walls:
                 r = by[j["kind"]]
                 sh = r["shards"].get(line)
-                said = bool(sh and line != "write" and _in(j["views"][side]["check"]["words"][line], sh["text"]))
+                # the shell line is decided by its marker, the write line by its file
+                said = bool(sh and (sh["oversize"] or (line not in ("shell", "write") and sh["found"])))
                 leaked = leaked or said or bool(r["effects"].get(line))
             s["wall"][line] = "leaked" if leaked else ("held" if proofs else "no proof")
     words = next((j["views"][side]["check"]["words"] for j in jobs if j["kind"] in ("answers", "tight")), None)
     if "answers" in by:
         r = by["answers"]
-        right = sum(1 for l, w in words.items() if l in r["shards"] and _in(w, r["shards"][l]["text"]))
+        right = sum(1 for l in words if l in r["shards"] and r["shards"][l]["found"])
         s["answers"] = (right, len(words))
     shards = [(r["kind"], j_type(jobs, r["kind"], l), l, sh) for r in recs for l, sh in r["shards"].items()]
     spents = [r["spent"] for r in recs if r["spent"] is not None]
@@ -509,10 +544,11 @@ def summary(recs, jobs, side):
     s["shard_sec"] = statistics.median(secs) if secs else None
     s["states"] = tuple(sum(1 for *_x, sh in shards if sh["state"] == st) for st in STATES)
     s["ok"] = s["states"][0]
-    s["empty"] = sum(1 for *_x, sh in shards if sh["state"] == "ok" and not sh["text"].strip())
+    s["empty"] = sum(1 for *_x, sh in shards if sh["state"] == "ok" and sh["empty"])
+    s["oversize"] = sum(1 for *_x, sh in shards if sh["oversize"])
     wrong = 0
     for k, _t, l, sh in shards:
-        if k in ("answers", "tight") and words and sh["state"] == "ok" and not _in(words[l], sh["text"]):
+        if k in ("answers", "tight") and words and sh["state"] == "ok" and not sh["found"]:
             wrong += 1
     s["wrong"] = wrong
     s["tool"] = next((clean(r["tool"], TOOL_CAP) for r in recs if r["tool"]), "-")
@@ -631,6 +667,7 @@ def card(sides, jobs, opts, run_id, sha):
         lambda a, b: compare(a["failed_jobs"], b["failed_jobs"], lower=True))
     row("empty results", lambda s: "%d" % s["empty"], lambda a, b: compare(a["empty"], b["empty"], lower=True))
     row("ok but wrong", lambda s: "%d" % s["wrong"], lambda a, b: compare(a["wrong"], b["wrong"], lower=True))
+    row("oversize results", lambda s: "%d" % s["oversize"])
     rows.append("tool lane:   %s" % (lane["tool"] if lane else "-"))
     rows.append("tool other:  %s" % (other["tool"] if other else "-"))
     rows.append("script:      %s" % sha)
