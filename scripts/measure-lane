@@ -1,0 +1,81 @@
+#!/usr/bin/env python3
+"""measure-lane: the API lane's adapter for scripts/measure (scripts/measure-adapter.md).
+
+It reads one job (`agentik.fanout.job/1`) on stdin and hands it, unchanged, to the lane as a
+user would: `agentik agents fanout - --yes --json`, found by PATH, in the foreground, so the call
+returns when the run has ended. From the one object the verb prints (`agentik.fanout/1`) it
+writes one `agentik.measure.result/1` object on stdout: the job's `spent_usd`; for each shard its
+`label`, its `state` (`ok` and `skipped` as the lane says them, every other lane state `failed`),
+`cost_usd`, `model`, and `result`, the `result_path` the verb names. It reads no file of the
+lane's state folder; the verb's own stderr passes through to this one's.
+
+What the verb does not print is null or left out: the lane's version (`tool` says so) and a
+shard's seconds. When the verb exits other than 0 or 1 (2 is the lane's off line and every
+refusal), or prints no object of its schema, the object is `error: "tool"` with no shards.
+Stdlib only; 3.9 and later.
+"""
+import json
+import subprocess
+import sys
+
+RESULT_SCHEMA = "agentik.measure.result/1"
+LANE_SCHEMA = "agentik.fanout/1"
+TOOL = "agentik agents fanout, version not printed"
+VERB = ["agentik", "agents", "fanout", "-", "--yes", "--json"]
+
+
+def failed():
+    return {"schema": RESULT_SCHEMA, "tool": TOOL, "spent_usd": None, "error": "tool", "shards": []}
+
+
+def number(v):
+    return v if isinstance(v, (int, float)) and not isinstance(v, bool) else None
+
+
+def text(v):
+    return v if isinstance(v, str) and v else None
+
+
+def lane_object(out):
+    """The last line of the verb's stdout that is an object of its schema, else None."""
+    for line in reversed(out.splitlines()):
+        try:
+            got = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(got, dict) and got.get("schema") == LANE_SCHEMA and isinstance(got.get("shards"), list):
+            return got
+        return None
+    return None
+
+
+def result_of(got):
+    shards = []
+    for s in got["shards"]:
+        if not isinstance(s, dict):
+            continue
+        state = s.get("state")
+        shards.append({"label": s.get("label"),
+                       "state": state if state in ("ok", "skipped") else "failed",
+                       "cost_usd": number(s.get("cost_usd")), "model": text(s.get("model")),
+                       "result": text(s.get("result_path"))})
+    return {"schema": RESULT_SCHEMA, "tool": TOOL, "spent_usd": number(got.get("spent_usd")),
+            "shards": shards}
+
+
+def main(stdin=sys.stdin, stdout=sys.stdout):
+    job = stdin.read()
+    try:
+        got = subprocess.run(VERB, input=job.encode(), stdout=subprocess.PIPE)
+    except OSError:
+        obj = failed()
+    else:
+        found = lane_object(got.stdout.decode("utf-8", "replace")) if got.returncode in (0, 1) else None
+        obj = failed() if found is None else result_of(found)
+    stdout.write(json.dumps(obj) + "\n")
+    stdout.flush()
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
