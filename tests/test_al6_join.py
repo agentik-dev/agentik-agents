@@ -39,9 +39,9 @@ def backend():
     return wall.backend()
 
 
-# The bubblewrap wall leaves no unwalled writable folder for the fake's records, as the Mac's
-# user temp root is: where a class runs there, its records folder is named in this variable and
-# every shard's wall gets it as one more write folder, in this process and in a detached driver.
+# Neither wall leaves an unwalled writable folder for the fake's records (the Mac's user temp
+# root was one until al9a's write rule): its records folder is named in this variable and every
+# shard's wall gets it as one more write folder, in this process and in a detached driver.
 RECORDS_WRITE = "AL6_RECORDS_WRITE"
 
 
@@ -495,8 +495,16 @@ CHILD = r"""
 import sys
 sys.dont_write_bytecode = True
 sys.path.insert(0, sys.argv[1])
+import os
 from apilane import cli, paths
 roots = paths.Roots(*sys.argv[2:6])
+if os.environ.get("AL6_RECORDS_WRITE"):   # al9a: the records folder, a write folder here too
+    from apilane import wall
+    real_wrap = wall.wrap
+    def wrap(argv, *, read, write, net, home):
+        return real_wrap(argv, read=read, write=list(write) + [os.environ["AL6_RECORDS_WRITE"]],
+                         net=net, home=home)
+    wall.wrap = wrap
 sys.exit(cli.main(["fanout", sys.argv[6], "--yes"], roots=roots))
 """
 
@@ -529,7 +537,10 @@ class Lane(Temp):
         if backend() is None:
             self.skipTest("no wall is proved on this platform: the lane cannot run here")
         self.root = user_temp()
-        through = self.root is None and self.bwrap_records and backend() == "bwrap"
+        # al9a: the macOS wall's write rule leaves the temp root unwritable too, so there the
+        # records always go through a write folder, as on the bubblewrap wall
+        through = backend() == "sandbox-exec" or (
+            self.root is None and self.bwrap_records and backend() == "bwrap")
         if self.root is None and not through:
             self.skipTest("the user's own temp root is missing or the wall denies it: the fake "
                           "behind the wall could not write its records")

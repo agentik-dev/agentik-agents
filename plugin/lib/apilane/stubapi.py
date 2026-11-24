@@ -3,10 +3,14 @@
 
 `Stub(reads)` binds `127.0.0.1` on a port the system picks (or the one `start` is given) and answers `POST /v1/messages`,
 streamed or whole as the request asks, with a script: one turn a path of `reads`, each asking for
-one `Read` of it, then a closing text. The turn is the number of assistant messages the request
-carries, so a resent conversation gets the same answer. For each request it records the header
-names that carried a credential and their values, the tools offered, the tool results sent
-back, its turn and its body, all in memory. It serves nothing else and binds no other address.
+one `Read` of it, then a closing text. `Stub(reads, calls=[...])` plays an ordered list of tool
+calls instead, one a turn, each `{"tool": "Write", "path": p, "text": t}` or `{"tool": "Read",
+"path": p}` (the writer's pass of the probe); with no list it replies as before, byte for byte.
+The turn is the number of assistant messages the request carries, so a resent conversation gets
+the same answer. For each request it records the header names that carried a credential and
+their values, the tools offered, the tool results sent back, its turn and its body, all in
+memory; `results` keeps each tool result once, in the order it was first sent. It serves nothing
+else and binds no other address.
 """
 
 import http.server
@@ -33,10 +37,12 @@ def _text_of(content):
 
 
 class Stub:
-    def __init__(self, reads, text="probe done"):
+    def __init__(self, reads, text="probe done", calls=None):
         self.reads = list(reads)
         self.text = text
+        self.calls = None if calls is None else [dict(c) for c in calls]
         self.requests = []
+        self.results = []
         self.address = None
         self._lock = threading.Lock()
         self._server = None
@@ -81,13 +87,35 @@ class Stub:
         with self._lock:
             self.requests.append(rec)
             number = len(self.requests)
+            seen = {r["tool_use_id"] for r in self.results}
+            self.results.extend(r for r in results if r["tool_use_id"] not in seen)
         return number, turn
 
     def reply(self, number, turn, model):
         """The script's message for this turn."""
+        if self.calls is not None:
+            return self._call_reply(number, turn, model)
         if turn < len(self.reads):
             block = {"type": "tool_use", "id": "toolu_stub_%d_%d" % (number, turn),
                      "name": "Read", "input": {"file_path": self.reads[turn]}}
+            stop = "tool_use"
+        else:
+            block = {"type": "text", "text": self.text}
+            stop = "end_turn"
+        return {"id": "msg_stub_%d" % number, "type": "message", "role": "assistant",
+                "model": model, "content": [block], "stop_reason": stop, "stop_sequence": None,
+                "usage": {"input_tokens": 1, "output_tokens": 1}}
+
+
+    def _call_reply(self, number, turn, model):
+        """The list's call for this turn, then the closing text."""
+        if turn < len(self.calls):
+            call = self.calls[turn]
+            data = {"file_path": call["path"]}
+            if call["tool"] == "Write":
+                data["content"] = call["text"]
+            block = {"type": "tool_use", "id": "toolu_stub_%d_%d" % (number, turn),
+                     "name": call["tool"], "input": data}
             stop = "tool_use"
         else:
             block = {"type": "text", "text": self.text}

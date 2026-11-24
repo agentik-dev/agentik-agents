@@ -7,16 +7,22 @@ unwalled. `check_dirs(dirs, home=...)` returns each job dir's real path, or rais
 Callers pass these few things and run what comes back: every wrapper name, profile and
 platform path lives in a backend's section below, so a second backend changes this file alone.
 
-The macOS backend (`sandbox-exec`) allows by default, then denies every read and write under
-`/Users`, `/private/tmp`, `/Volumes` and the home (by real path and by data-volume path), then
-re-allows the `read` folders and the folder of the command's own path for reading and the `write`
-folders for reading and writing, then denies the secret roots under the home last, so a later
-rule keeps a secret root inside a re-allowed folder denied. `net="loopback"` denies the network
-and re-allows loopback alone, so no request can leave the machine.
+The macOS backend (`sandbox-exec`) allows by default, then, by the write rule, denies every write
+anywhere and re-allows writes to `/dev/null`, `/dev/tty` and `/dev/fd` alone; then it denies
+every read and write under `/Users`, `/private/tmp`, `/Volumes` and the home (by real path and by
+data-volume path), then re-allows the `read` folders and the folder of the command's own path for
+reading and the `write` folders for reading and writing, then, by the `.git` rule, denies writes
+to each `write` folder's own `.git` (the path alone where it is a file or a link, the path and
+all under it where it is a folder; read once by `lstat`, never followed), then denies the secret
+roots under the home last, so a later rule keeps a secret root inside a re-allowed folder
+denied. So a shard writes its `write` folders and nothing else, for every type, and cannot
+repoint its worktree's link at another repository. `net="loopback"` denies the network and
+re-allows loopback alone, so no request can leave the machine.
 
 What the wall does not hide, said once: the system's folders, `/opt` and `/Library`, the
-account's temp and cache folders under `/private/var/folders`, a plaintext secret that sits
-inside a job dir, and a hard link inside a job dir to a file outside it (measured: it reads).
+account's temp and cache folders under `/private/var/folders` (readable, no longer writable), a
+plaintext secret that sits inside a job dir, and a hard link inside a job dir to a file outside
+it (measured: it reads). A `.git` made deeper in a `write` folder is not the wall's to stop.
 
 The Linux backend (`bwrap`, bubblewrap) is proved where `/usr/bin/bwrap` is an executable file
 and one trial namespace starts. It gives the command its own mount, process, IPC, host-name and
@@ -27,8 +33,10 @@ their real paths where they exist, and every other real folder directly under `/
 system list below (`_BWRAP_KEEP`); it binds back read-only what a CLI needs inside those (the
 nix store, and a trust file that `/etc/ssl` links into `/var`), the `read` folders and the
 folder of the command's own path, and read-write the `write` folders, at their own paths, the
-shallower mount first, so a deeper one wins; and last it covers each secret root a shard could
-still see by its real path, a folder by an empty one, a file by `/dev/null`. The secret roots are
+shallower mount first, so a deeper one wins; a `write` folder's own `.git`, where one is there,
+is bound read-only over itself after the folder (the `.git` rule); and last it covers each
+secret root a shard could still see by its real path, a folder by an empty one, a file by
+`/dev/null`. The secret roots are
 the list below and the platform's keyring. `net="loopback"` gives the command a network
 namespace whose one interface is its own loopback; `net="all"` shares the host's, and where
 `/etc/resolv.conf` points into `/run` or `/var` binds back read-only its folder, or the file
@@ -43,6 +51,7 @@ job dir to a file outside it. The emptied folders are writable inside and thrown
 """
 
 import os
+import stat
 import subprocess
 import sys
 
@@ -157,21 +166,52 @@ def _both(path):
     return out
 
 
-def _literal(path):
+def _literal(path, kind="subpath"):
     for ch in path:
         if ch in '"\\' or ord(ch) < 0x20 or ord(ch) == 0x7f:
             raise ValueError("wall: a path holding a quote, a backslash or a control character "
                              "is refused: %r" % path)
-    return '(subpath "%s")' % path
+    return '(%s "%s")' % (kind, path)
 
 
-def _filters(paths):
+def _filters(paths, kind="subpath"):
     seen, out = set(), []
     for p in paths:
         for q in _both(p):
             if q not in seen:
                 seen.add(q)
-                out.append(_literal(q))
+                out.append(_literal(q, kind))
+    return " ".join(out)
+
+
+# The write rule's devices, the only paths outside the `write` folders a shard may write.
+_DEVICES = ('(literal "/dev/null")', '(literal "/dev/tty")', '(subpath "/dev/fd")')
+
+
+def _git_kind(folder):
+    """What a `write` folder's own `.git` is, by one `lstat` (a link is never followed): "folder",
+    "file" (a file, a link or any other kind), or None where there is none."""
+    try:
+        st = os.lstat(os.path.join(folder, ".git"))
+    except (FileNotFoundError, NotADirectoryError):
+        return None
+    except OSError:
+        return "folder"
+    return "folder" if stat.S_ISDIR(st.st_mode) else "file"
+
+
+def _git_rules(writes):
+    """The `.git` rule's filters for the `write` folders: a literal for each `.git`, a subpath too
+    where it is a folder; '' where none holds one."""
+    out = []
+    for w in writes:
+        kind = _git_kind(w)
+        if kind is None:
+            continue
+        git = os.path.join(w, ".git")
+        out.append(_filters([git], "literal"))
+        if kind == "folder":
+            out.append(_filters([git]))
     return " ".join(out)
 
 
@@ -180,11 +220,16 @@ def _sandbox_exec_wrap(argv, *, read, write, net, home):
     reads = [_canon(p) for p in read] + [os.path.dirname(argv[0])]
     writes = [_canon(p) for p in write]
     rules = ["(version 1)", "(allow default)",
+             '(deny file-write* (subpath "/"))',
+             "(allow file-write* %s)" % " ".join(_DEVICES),
              "(deny file-read* file-write* %s)" % _filters(list(_DENIED) + [home_real])]
     if reads:
         rules.append("(allow file-read* %s)" % _filters(reads))
     if writes:
         rules.append("(allow file-read* file-write* %s)" % _filters(writes))
+    gits = _git_rules(writes)
+    if gits:
+        rules.append("(deny file-write* %s)" % gits)
     rules.append("(deny file-read* file-write* %s)" % _filters(_secret_paths(home_real)))
     if net == "loopback":
         rules.append("(deny network*)")
@@ -324,7 +369,8 @@ def _bwrap_wrap(argv, *, read, write, net, home):
     # bwrap mounts in argument order: the shallower first, an empty folder before a bind at the
     # same path, a write after a read, so the deeper and the later win
     ops = [(d, 0, "--tmpfs") for d in emptied] + [(d, 1, "--ro-bind") for d in reads] \
-        + [(d, 2, "--bind") for d in writes]
+        + [(d, 2, "--bind") for d in writes] \
+        + [(os.path.join(d, ".git"), 3, "--ro-bind") for d in writes if _git_kind(d)]
     ops.sort(key=lambda op: (_depth(op[0]), op[1]))
     out = [_BWRAP] + list(_BWRAP_FLAGS)
     if net == "loopback":
