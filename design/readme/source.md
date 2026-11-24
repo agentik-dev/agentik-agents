@@ -20,7 +20,7 @@ Four things for Claude Code on one Mac, under one command, `agentik agents <verb
 - **`status`**: what every agent is doing right now. One row per seat, helper and local agent, from files already on disk. Read-only.
 - **The local lane**: a session stays on your claude.ai seat while its mechanical subagents run on a local model (Qwen 3.8 27B in Ollama, by default) through a loopback router, at no marginal cost.
 - **`agents:scribe`**: a plugin agent, on Sonnet, that writes one repo's records from a builder's or a refuter's hand-back. It never merges or pushes.
-- **The API lane**, off until you turn it on: read-only agents fanned out under a budget in dollars and billed to an Anthropic API key, never to your seat.
+- **The API lane**, off until you turn it on: agents fanned out under a budget in dollars and billed to an Anthropic API key, never to your seat. They only read, save one type that you enable repo by repo.
 
 ## Install
 
@@ -51,7 +51,7 @@ It needs `bash`, `/usr/bin/python3` (3.9 or later; the tools are stdlib only) an
 | `rig ...` | bring local backends up and down, set the default, manage their keys |
 | `doctor` | what is on `PATH`, `python3` and its version, the local lane's check; it reports and never gates |
 | `install-cli [--prefix P] [--force]` | the command line on `PATH`, from the plugin's frozen code; a newer command it placed is left, one line says so, and `--force` places this one; exit 0 done, 1 it could not |
-| `fanout JOB [--dry-run] [--yes] [--detach]` | the API lane (below): a job's read-only agents under its budget; `fanout wait`, `fanout status` and `fanout stop` follow a run |
+| `fanout JOB [--dry-run] [--yes] [--detach]` | the API lane (below): a job's agents under its budget; `fanout wait`, `fanout status` and `fanout stop` follow a run |
 | `api status [--json]` | the API lane's state and the steps left; `api probe` checks the installed CLI, and `api key set` and `api key remove` keep its key |
 
 `agentik agents --help` prints the table with the tool each verb runs. `agentik` is the front door every agentik tool installs; `agentik-agents <verb>` is the same command.
@@ -81,9 +81,11 @@ agentik agents api probe             # the CLI once, on a made-up key against a 
 agentik agents fanout JOB --dry-run  # the plan, spending nothing; --yes runs it
 ```
 
-A job is a JSON file of shards, each `review`, `explore` or `analyze`, and every one only reads; `agentik agents fanout --help` gives its form. `--detach` prints the run's id once its budget is reserved, and `agentik agents fanout wait ID` prints the results, or exits 124 while the run still goes. A shard's result is data, never instructions.
+A job is a JSON file of shards, each `review`, `explore` or `analyze`, which only read, or `implement` (below); `agentik agents fanout --help` gives its form. `--detach` prints the run's id once its budget is reserved, and `agentik agents fanout wait ID` prints the results, or exits 124 while the run still goes. A shard's result is data, never instructions.
 
 Each shard runs Claude Code on the key alone, inside a kernel wall that hides the home folder save the job's own folders and the folder that holds the `claude` command. Two ceilings, `max_fanout_usd` ($2 unless set) and `max_day_usd` ($10), guard against an accident; the spending limit you set on the key's own workspace in the provider's Console is the wall. While shards run, `agentik agents status` lists them under their session, and that session is told their count at each prompt.
+
+One type writes: `implement`. It is off until the same file lists a repo under `api.write_repos`, and `api status` then names the probe's second pass, the writer's, as a step left. A job of it holds one shard and names that `repo` and the local branch to start `from`. The lane makes a new worktree of the repo, `.claude/worktrees/<the job's id>` on a new branch of that name; the shard edits files there with no shell, and the wall lets it write nowhere else. At the end the lane, never the agent, commits what changed, under the repo's own git identity, and it never pushes or merges. It refuses the whole commit over a nested `.git`, a file an edit gate names, anything that is not a regular file, or a file that holds a key. The run's line names the branch, its head and the changed paths that a check would run, such as a `Makefile`: read the branch before you run anything from it.
 
 ## Where the rest is
 
