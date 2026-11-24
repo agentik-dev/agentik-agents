@@ -946,7 +946,6 @@ class MovedConfigTest(World):
             with mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": moved}):
                 self.assertEqual(W.user_lines(self.home), [os.path.join(self.repo, "d.txt")])
 
-
 class SmallTest(World):
     """R5: L3, L5, L8 and L9."""
 
