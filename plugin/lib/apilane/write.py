@@ -299,13 +299,26 @@ def gate_lists(repo, home):
     return out
 
 
+def _user_dirs(home):
+    """`<home>/.claude`, always, and `$CLAUDE_CONFIG_DIR` where the lane's own environment sets
+    it, a leading `~` read against the home; a value not absolute then is not read (al11 R1, R2).
+    The only read of the environment for a gate list."""
+    dirs, moved = [os.path.join(home, ".claude")], os.environ.get("CLAUDE_CONFIG_DIR") or ""
+    if moved == "~" or moved.startswith("~/"):
+        moved = home.rstrip("/") + moved[1:]
+    if os.path.isabs(moved) and os.path.realpath(moved) != os.path.realpath(dirs[0]):
+        dirs.append(moved)
+    return dirs
+
+
 def user_lines(home):
-    """The user's own list, `<home>/.claude/edit-gates`: its lines that start with `/` or `~/`,
-    read against the home folder; a relative line there matches nothing."""
+    """The user's own lists, `<home>/.claude/edit-gates` joined with `$CLAUDE_CONFIG_DIR`'s: their
+    lines that start with `/` or `~/`, read against the home folder; a relative line matches
+    nothing."""
     if not home:
         return []
     out = []
-    for line in _gate_lines(os.path.join(home, ".claude", "edit-gates")):
+    for line in (x for d in _user_dirs(home) for x in _gate_lines(os.path.join(d, "edit-gates"))):
         if line.startswith("~/"):
             out.append(os.path.normpath(home.rstrip("/") + "/" + line[2:]))
         elif line.startswith("/"):
