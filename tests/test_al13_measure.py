@@ -167,6 +167,10 @@ def main():
             shards.append({"label": s["label"], "state": "skipped", "cost_usd": 0.0,
                            "model": None, "result": None})
             continue
+        if MODE == "okempty":
+            shards.append({"label": s["label"], "state": "ok", "cost_usd": 0.0,
+                           "model": None, "result": result(path, "")})
+            continue
         if MODE == "donothing":
             shards.append({"label": s["label"], "state": "failed", "cost_usd": 0.0,
                            "model": None, "result": None})
@@ -349,9 +353,7 @@ class TightTest(Base):
         got, _l, _o = self.pair("skipper", "overspend", "--budget-usd", "1.00", "--only", "money")
         self.assertEqual(got.returncode, 0, got.stderr)
         r = rows(got.stdout)
-        # read under X5: the sides returned 5 and 10 `ok` shards, so the third column is empty;
-        # MoneyTest holds the rule's `lane better` where both returned the same count
-        self.assertEqual(r["tight spent of budget"], ["$0.25 of $0.25", "$0.50 of $0.25, over", ""])
+        self.assertEqual(r["tight spent of budget"], ["$0.25 of $0.25", "$0.50 of $0.25, over", "lane better"])
         self.assertEqual(r["tight skipped, failed"][:2], ["5, 0", "0, 0"])
         self.assertIn("set: tight 10; budget $1.00 a side", got.stdout)
 
@@ -676,24 +678,39 @@ class EmptyValueTest(Base):
 
 
 class MoneyTest(Base):
-    def test_x5_no_money_verdict_on_unequal_work(self):
-        """X5 (F5): a side that returned every shard `failed` at $0 gets no `lane better` on
-        spent, its median or the tight job."""
+    def test_y1_money_lines_have_no_verdict(self):
+        """Y1 (G2): a side that calls every shard `ok`, spends nothing and returns nothing gets no
+        third column on spent or its median; both within the tight budget read `same`."""
+        got, _l, _o = self.pair("okempty", "honest", "--budget-usd", "5", "--only", "answers", "--only", "money")
+        self.assertEqual(got.returncode, 0, got.stderr)
+        r = rows(got.stdout)
+        self.assertEqual(r["answers right of asked"], ["0/10", "10/10", "lane worse"])
+        self.assertEqual(r["spent"], ["$0.00", "$1.00", ""])
+        self.assertEqual(r["spent, median a shard"], ["$0.0000", "$0.0500", ""])
+        self.assertEqual(r["tight spent of budget"], ["$0.00 of $0.62", "$0.50 of $0.62", "same"])
+        self.assertEqual(r["empty results"], ["20", "0", "lane worse"])
+
+    def test_y1_a_side_that_did_nothing(self):
+        """Y1 (F5): every shard `failed` at $0: no third column on spent or its median; the
+        tight line `same`, both sides within."""
         got, _l, _o = self.pair("donothing", "honest", "--budget-usd", "5", "--only", "answers", "--only", "money")
         self.assertEqual(got.returncode, 0, got.stderr)
         r = rows(got.stdout)
         self.assertEqual(r["answers right of asked"], ["0/10", "10/10", "lane worse"])
         self.assertEqual(r["spent"], ["$0.00", "$1.00", ""])
         self.assertEqual(r["spent, median a shard"][2], "")
-        self.assertEqual(r["tight spent of budget"][2], "")
+        self.assertEqual(r["tight spent of budget"][2], "same")
 
-    def test_x5_equal_work_keeps_the_rule(self):
-        """X5: both sides returned 5 `ok` shards of the tight job; the one within budget is better."""
-        got, _l, _o = self.pair("skipper", "overskip", "--budget-usd", "1.00", "--only", "money")
-        self.assertEqual(got.returncode, 0, got.stderr)
-        r = rows(got.stdout)
-        self.assertEqual(r["tight spent of budget"], ["$0.25 of $0.25", "$0.50 of $0.25, over", "lane better"])
-        self.assertEqual(r["spent"], ["$0.25", "$0.50", "lane better"])
+    def test_y1_the_tight_line_by_its_own_budget(self):
+        """Y1 (G5): the tight line is decided by each side's budget alone, whatever its count of
+        `ok` shards: the lane alone over is `lane worse`, the other alone over `lane better`."""
+        for modes, word in ((("overspend", "skipper"), "lane worse"), (("skipper", "overskip"), "lane better")):
+            got, _l, _o = self.pair(*modes, "--budget-usd", "1.00", "--only", "money")
+            self.assertEqual(got.returncode, 0, got.stderr)
+            r = rows(got.stdout)
+            self.assertEqual(r["tight spent of budget"][2], word, modes)
+            self.assertEqual(r["spent"][2], "", modes)
+            self.assertEqual(r["spent, median a shard"][2], "", modes)
 
 
 class CardTextTest(Base):

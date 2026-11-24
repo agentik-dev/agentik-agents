@@ -543,7 +543,6 @@ def summary(recs, jobs, side):
     secs = [sh["seconds"] for _k, _t, _l, sh in shards if sh["seconds"] is not None]
     s["shard_sec"] = statistics.median(secs) if secs else None
     s["states"] = tuple(sum(1 for *_x, sh in shards if sh["state"] == st) for st in STATES)
-    s["ok"] = s["states"][0]
     s["empty"] = sum(1 for *_x, sh in shards if sh["state"] == "ok" and sh["empty"])
     s["oversize"] = sum(1 for *_x, sh in shards if sh["oversize"])
     wrong = 0
@@ -586,12 +585,6 @@ def models_cell(models):
     names = sorted(models)
     more = len(names) - MODELS_A_TYPE
     return "+".join(names[:MODELS_A_TYPE]) + (" +%d" % more if more > 0 else "") or "-"
-
-
-def same_work(a, b, key=None):
-    """The money's rule holds only where both sides returned the same count of `ok` shards."""
-    pick = (lambda s: s["ok"]) if key is None else key
-    return pick(a) == pick(b)
 
 
 def usd(v, places=2):
@@ -637,10 +630,9 @@ def card(sides, jobs, opts, run_id, sha):
     row("answers right of asked", lambda s: "%d/%d" % s["answers"] if has(s, "answers") else "-",
         lambda a, b: compare(-a["answers"][0], -b["answers"][0], lower=True)
         if has(a, "answers") and has(b, "answers") else "")
-    row("spent", lambda s: usd(s["spent"]), lambda a, b: compare(
-        _cents(a["spent"]), _cents(b["spent"]), lower=True) if same_work(a, b) else "")
-    row("spent, median a shard", lambda s: usd(s["median_cost"], 4), lambda a, b: compare(
-        _cents(a["median_cost"], 4), _cents(b["median_cost"], 4), lower=True) if same_work(a, b) else "")
+    # the money lines have no third column: the reader weighs them beside the answers line
+    row("spent", lambda s: usd(s["spent"]))
+    row("spent, median a shard", lambda s: usd(s["median_cost"], 4))
     for t in sorted({t for j in jobs for v in j["views"].values() for _l, t, _p in v["shards"]}):
         row("model " + t, lambda s, t=t: models_cell(s["models"].get(t, ())))
 
@@ -656,8 +648,7 @@ def card(sides, jobs, opts, run_id, sha):
     row("tight spent of budget", tight, lambda a, b: compare(
         _over(a["tight"]) if has(a, "tight") and a["tight"]["spent"] is not None else None,
         _over(b["tight"]) if has(b, "tight") and b["tight"]["spent"] is not None else None,
-        order=(False, True)) if has(a, "tight") and has(b, "tight")
-        and same_work(a, b, lambda s: s["tight"]["ok"]) else "")
+        order=(False, True)) if has(a, "tight") and has(b, "tight") else "")
     row("tight skipped, failed", lambda s: "%d, %d" % (s["tight"]["skipped"], s["tight"]["shard_failed"])
         if has(s, "tight") and not s["tight"]["failed"] else "-")
     row("seconds a job, median", lambda s: "%d" % round(s["job_sec"]) if s["job_sec"] is not None else "-")
@@ -682,10 +673,6 @@ def clean_line(line):
         if path and path != "/":
             line = line.replace(path, mark)
     return line
-
-
-def _cents(v, places=2):
-    return None if v is None else round(v, places)
 
 
 def _over(t):
