@@ -370,21 +370,32 @@ class _Run(object):
 def _write_end(slot, w, value, roots, settle):
     """The lane's commit for a writing job's one shard, once its process has ended (R10, R11):
     the record, written into the shard's run.json too."""
+    from apilane import run as _run
+    path = os.path.join(roots.state, "runs", slot.run, "run.json")
     if slot.result is None or slot.result.state == "skipped":
-        return dict(w, head=w["from_sha"], paths=[], ignored=[], commit="none", refused=[],
-                    state="skipped", error=slot.why)
+        rec = dict(w, head=w["from_sha"], paths=[], ignored=[], commit="none", refused=[],
+                   state="skipped", error=slot.why)
+        if os.path.lexists(w["worktree"]):
+            # The worktree step refused after `worktree add` made it (the wall's check, or a
+            # `.git` that is no regular file): the record names the worktree and the branch
+            # left, and the lane removes neither.
+            rec["left"] = True
+            try:
+                os.makedirs(os.path.dirname(path), mode=0o700, exist_ok=True)
+                _run._write_json(path, dict(rec, id=slot.run, type=slot.shard.type))
+            except OSError:
+                pass
+        return rec
     if slot.thread is not None:
         slot.thread.join(60)
     rec = settle(w, state=slot.result.state, label=slot.shard.label, run=slot.run, key=value,
                  home=roots.home)
     if rec["state"] != slot.result.state:
         slot.result = slot.result._replace(state=rec["state"])
-    path = os.path.join(roots.state, "runs", slot.run, "run.json")
     try:
         with open(path) as fh:
             run_rec = json.load(fh)
         run_rec.update(rec)
-        from apilane import run as _run
         _run._write_json(path, run_rec)
     except (OSError, ValueError):
         pass

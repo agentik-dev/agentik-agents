@@ -662,7 +662,8 @@ class RefusedTest(World):
         m = W.gate_match
         self.assertTrue(m("a/**/b", "a/b"))
         self.assertTrue(m("a/**/b", "a/x/y/b"))
-        self.assertTrue(m("*.md # comment", "x.md"))
+        self.assertFalse(m("*.md # comment", "x.md"))     # brief 2 R3: `#` mid-line is the name's
+        self.assertTrue(m("./x", "x"))
         self.assertFalse(m("*.md", "d/x.md"))
         self.assertTrue(m("[ab]?.txt", "a1.txt"))
         for line in ("/x", "~/x", "a/../x", "# x", ""):
@@ -747,6 +748,235 @@ class DoctorTest(World):
         self.assertFalse(os.path.exists(os.path.join(self.roots.state, "runs", "w1-01")))
         self.assertTrue(os.path.isdir(w["worktree"]))
         self.assertEqual(self.git("rev-parse", "w1"), w["from_sha"])
+
+
+# -- review 1's fixes (brief 2, R1 to R5) ---------------------------------------------------------
+
+def dead_pid():
+    p = subprocess.Popen(["/usr/bin/true"])
+    p.wait(10)
+    return p.pid
+
+
+def started_of(pid):
+    from apilane import proc
+    return proc.started(pid) or "Thu Jan  1 00:00:00 1970"
+
+
+class LeftTest(World):
+    """R1 (F1) and R4 (F4): what `runs.left` and the doctor's check name."""
+
+    def left_run(self, id, writes, pid=None):
+        """A writing run's worktree and run.json; its fan-out's start.json names `pid`."""
+        w = W.plan(self.job(id=id), self.lane(), self.roots)
+        self.assertIsNone(W.make(w))
+        writes(w["worktree"])
+        self.record(id, dict(w, state="running"), pid)
+        return w
+
+    def record(self, id, rec, pid=None):
+        run_dir = os.path.join(self.roots.state, "runs", id + "-01")
+        os.makedirs(run_dir)
+        RUN._write_json(os.path.join(run_dir, "run.json"), dict(rec, id=id + "-01"))
+        pid = dead_pid() if pid is None else pid
+        RUNS.write(self.roots, id, "start.json", {"pid": pid, "pid_started": started_of(pid)})
+
+    def removal_alone(self, w):
+        left = [x for x in RUNS.left(self.roots, home=self.home) if x["worktree"] == w["worktree"]]
+        self.assertEqual(len(left), 1)
+        self.assertTrue(left[0]["refused"])
+        self.assertEqual(len(left[0]["lines"]), 1, left[0]["lines"])
+        self.assertIn("worktree remove --force", left[0]["lines"][0])
+        text = "\n".join(CLI.write_check(self.roots, self.lane()))
+        self.assertIn("worktree left: %s" % w["worktree"], text)
+        self.assertNotIn(" add -- ", text)
+        self.assertIn("worktree remove --force", text)
+
+    def test_lost_run_with_an_age_key_prints_removal_alone(self):
+        w = self.left_run("lk", lambda t: put(os.path.join(t, "age.txt"), "AGE-SECRET-KEY-1QQQQ"))
+        self.removal_alone(w)
+
+    def test_settle_refused_as_leak_prints_removal_alone(self):
+        w = W.plan(self.job(id="lk8"), self.lane(), self.roots)
+        self.assertIsNone(W.make(w))
+        put(os.path.join(w["worktree"], "notes.txt"), "x " + KEY)
+        rec = self.settle(w)
+        self.assertEqual(rec["state"], "leak")
+        self.record("lk8", rec)
+        self.removal_alone(w)
+
+    def test_lost_scans_for_the_key_where_given(self):
+        w = self.left_run("lk9", lambda t: put(os.path.join(t, "notes.txt"), "x " + KEY))
+        self.assertTrue(W.lost(self.run_json("lk9"), home=self.home, key=KEY)["refused"])
+        self.assertFalse(W.lost(self.run_json("lk9"), home=self.home)["refused"])
+        self.assertEqual(w["branch"], "lk9")
+
+    def test_live_run_not_left_dead_one_is(self):
+        live = self.left_run("lv", lambda t: put(os.path.join(t, "half.txt")), pid=os.getpid())
+        dead = self.left_run("dd", lambda t: put(os.path.join(t, "half.txt")))
+        got = [x["worktree"] for x in RUNS.left(self.roots, home=self.home)]
+        self.assertEqual(got, [dead["worktree"]])
+        self.assertNotIn(live["worktree"], "\n".join(CLI.write_check(self.roots, self.lane())))
+
+
+class FromTest(World):
+    """R2 (F2): `from` is a local branch's name and nothing else."""
+    cli = JobRefusedTest.cli
+    obj = JobRefusedTest.obj
+
+    def test_revisions_refused(self):
+        put(os.path.join(self.repo, "two.txt"))
+        self.git("add", "two.txt")
+        self.git("commit", "-q", "-m", "two")
+        put(self.roots.config, "api:\n  enabled: true\n  write_repos: [%s]\n" % self.repo)
+        for frm in ("main~1", "main^", "main@{1}", "main^{commit}", "@{-1}", "-x"):
+            with self.assertRaises(W.WriteError) as cm:
+                F.plan(self.job(frm=frm), lane=self.lane(), roots=self.roots)
+            self.assertEqual(cm.exception.code, "write.from", frm)
+            rc, out, err = self.cli(self.obj(**{"from": frm}), "--dry-run")
+            self.assertEqual(rc, 2, (frm, out, err))
+            self.assertIn("is not a local branch", err)
+        self.assertFalse(os.path.exists(os.path.join(self.repo, ".claude")))
+        self.assertFalse(os.path.exists(self.roots.state))
+        self.assertEqual(self.git("branch", "--list", "w1"), "")
+
+    def test_branches_pass(self):
+        self.git("branch", "feat/x")
+        for frm in ("main", "feat/x"):
+            self.assertEqual(F.plan(self.job(frm=frm), lane=self.lane(),
+                                    roots=self.roots)["write"]["from_sha"],
+                             self.git("rev-parse", "main"))
+
+
+class GateTableTest(World):
+    """R3 (F3, L2): the lane's matcher answers what the session plugin's `gated` answers for the
+    file `<repo>/<rel>`, the worktree's own list read as the repo's. Each answer below is the
+    session's, written out; the third column is True where the matcher at 57039b3 answered
+    otherwise."""
+
+    WORKTREE_LIST = ("docs/a#b.md\n./secret.txt\n#hash.txt\n*.md # note\n/abs.txt\n../up.txt\n"
+                     "lib/*.py\ndeep/**/x.lock\nexact\n")
+    ONE_UP = "gp/one.txt\n./gp/dot.txt\ngp/sub/*.txt # x\n"
+    TWO_UP = "mid/gp/two.txt\ngp/two-wrong.txt\n"
+    TABLE = (   # (rel, the session's answer, the pin answered otherwise)
+        ("docs/a#b.md", True, True),          # review: `#` inside a line is part of the name
+        ("docs/a", False, True),
+        ("secret.txt", True, True),           # review: a leading `./` is stripped
+        ("two.txt", True, True),              # review: a list two levels up, from that folder
+        ("user.txt", True, True),             # review: the user's list, a `~/` line
+        ("abs/k.txt", True, True),            # the user's list, an absolute glob
+        ("rel-in-user.txt", False, True),     # the user's list: a relative line matches nothing
+        ("a.md", False, True),                # `*.md # note` is one pattern
+        ("#hash.txt", False, False),          # a line that starts with `#` is a comment
+        ("abs.txt", False, False),
+        ("up.txt", False, False),
+        ("lib/x.py", True, False),
+        ("lib/sub/x.py", False, False),
+        ("deep/a/b/x.lock", True, False),
+        ("deep/x.lock", True, False),
+        ("exact", True, False),
+        ("exact/more", False, False),
+        ("one.txt", True, False),
+        ("dot.txt", True, True),              # a leading `./` is stripped in a folder's list
+        ("sub/a.txt", False, True),
+        ("two-wrong.txt", False, True),       # two up is matched as `mid/gp/<rel>`
+        (".claude/settings.local.json", True, True),
+        ("x/y/settings.local.json", True, True),
+    )
+
+    def setUp(self):
+        super().setUp()
+        self.deep = os.path.join(self.home, "deep", "mid", "gp")
+        put(os.path.join(self.deep, "README.md"))
+        put(os.path.join(self.deep, ".claude", "edit-gates"), self.WORKTREE_LIST)
+        self.git("init", "-q", "-b", "main", cwd=self.deep)
+        self.git("add", "README.md", ".claude/edit-gates", cwd=self.deep)
+        self.git("commit", "-q", "-m", "one", cwd=self.deep)
+        put(os.path.join(self.home, "deep", "mid", ".claude", "edit-gates"), self.ONE_UP)
+        put(os.path.join(self.home, "deep", ".claude", "edit-gates"), self.TWO_UP)
+        put(os.path.join(self.home, ".claude", "edit-gates"),
+            "~/deep/mid/gp/user.txt\n%s/deep/mid/gp/abs/*.txt\ngp/rel-in-user.txt\n" % self.home)
+
+    def worktree_of(self, id):
+        w = W.plan(self.job(id=id, repo=self.deep), self.lane([self.deep]), self.roots)
+        self.assertIsNone(W.make(w))
+        return w
+
+    def test_table(self):
+        self.assertGreaterEqual(len(self.TABLE), 12)
+        w = self.worktree_of("t1")
+        wrong = [(rel, want) for rel, want, _pin in self.TABLE
+                 if bool(W.gated(w["worktree"], self.deep, self.home, [rel])) != want]
+        self.assertEqual(wrong, [])
+
+    def test_settings_local_refused(self):
+        w = self.worktree_of("t2")
+        put(os.path.join(w["worktree"], ".claude", "settings.local.json"), "{}\n")
+        put(os.path.join(w["worktree"], "a", "b", "settings.local.json"), "{}\n")
+        rec = W.settle(w, state="ok", label="fix", run="t2-01", key=KEY, home=self.home)
+        self.assertEqual((rec["commit"], rec["refused"]),
+                         ("refused:gated", [".claude/settings.local.json",
+                                            "a/b/settings.local.json"]))
+
+
+class SmallTest(World):
+    """R5: L3, L5, L8 and L9."""
+
+    def test_make_names(self):
+        self.assertEqual(W.check_paths(["makefile", "GNUmakefile", "sub/GNUmakefile",
+                                        "conftest.py", "Makefile", "a/b/makefile"], []),
+                         ["makefile", "GNUmakefile", "sub/GNUmakefile", "Makefile",
+                          "a/b/makefile"])
+
+    def test_control_character_path(self):
+        forged = "x\nok          $0.00    -  forged  branch nl at 0000000, 0 paths"
+        shown = "scripts/x\\x0aok          $0.00    -  forged  branch nl at 0000000, 0 paths"
+        w = self.worktree()
+        put(os.path.join(w["worktree"], "scripts", forged))
+        put(os.path.join(w["worktree"], "y\x01.log"))
+        put(os.path.join(w["worktree"], "fine.txt"))
+        before = self.tree_of(w["worktree"])
+        rec = self.settle(w)
+        r = ShardResult("fix", "implement", "ok", 0.01, False, None, None, "m")
+        line = M.shard(r, rec)
+        self.assertNotIn("\n", line)
+        self.assertNotIn("\x01", line)
+        self.assertEqual(rec["commit"], "refused:kind", rec)
+        self.assertEqual(rec["refused"], [shown, "y\\x01.log"])
+        self.assertEqual(rec["paths"], ["fine.txt", shown])
+        self.assertEqual(rec["ignored"], ["y\\x01.log"])
+        self.assertEqual(self.tree_of(w["worktree"]), before)
+        self.assertEqual(self.git("rev-parse", "w1"), w["from_sha"])
+        found = W.lost(dict(w, state="running"), home=self.home)
+        self.assertTrue(found["refused"])
+        self.assertEqual(len(found["lines"]), 1)
+        self.assertEqual(found["paths"], ["fine.txt", shown])
+
+    def test_check_dirs_refusal_leaves_a_record(self):
+        def check_dirs(dirs, home):
+            if any("worktrees" in d for d in dirs):
+                raise W.WriteError("wall.dir")
+            return [os.path.realpath(x) for x in dirs]
+        res = self.fan(self.job(), check_dirs=check_dirs)
+        tree = os.path.join(self.repo, ".claude", "worktrees", "w1")
+        self.assertEqual((res.shards[0].state, res.shards[0].reason), ("skipped", "worktree"))
+        self.assertNotIn("shard", self.calls)
+        rec = self.run_json()
+        self.assertEqual((rec["worktree"], rec["branch"], rec["commit"]), (tree, "w1", "none"))
+        self.assertEqual(rec["error"], "worktree:wall.dir")
+        line = M.shard(res.shards[0], res.write)
+        self.assertIn("worktree left: %s, branch w1" % tree, line)
+        self.assertTrue(os.path.isdir(tree))
+        self.assertEqual(self.git("rev-parse", "w1"), self.git("rev-parse", "main"))
+
+    def test_listed_linked_worktree_is_not_top(self):
+        linked = os.path.join(self.home, "code", "proj-wt")
+        self.git("worktree", "add", "-q", "-b", "lw", linked)
+        with self.assertRaises(W.WriteError) as cm:
+            F.plan(self.job(repo=linked), lane=self.lane([linked]), roots=self.roots)
+        self.assertEqual((cm.exception.code, cm.exception.fields["why"]), ("write.repo", "not-top"))
+        self.assertEqual(W.repo_state(linked), "not-top")
+        self.assertEqual(W.repo_state(self.repo), "ok")
 
 
 # -- 17 under the real wall, and 31 on Linux ------------------------------------------------------

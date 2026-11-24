@@ -289,4 +289,6 @@ def write_text(w):
         out.append("ignored, not committed: " + ", ".join(w["ignored"]))
     if c != "ok" and w.get("worktree") and w.get("state") != "skipped":
         out.append("worktree left: " + w["worktree"])
+    elif c != "ok" and w.get("worktree") and w.get("left"):
+        out.append("worktree left: %s, branch %s" % (w["worktree"], w.get("branch")))
     return "; ".join(out)

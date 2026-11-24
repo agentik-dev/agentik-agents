@@ -323,10 +323,14 @@ def _write_rec(roots, fid):
     return rec if isinstance(rec, dict) and rec.get("worktree") else None
 
 
-def left(roots, home=None):
+def left(roots, home=None, alive=None):
     """Each worktree a writing run left uncommitted (design/32 F19), from the lane's own run
-    records while the state folder holds them: a `commit` that is not `ok`, or none at all."""
+    records while the state folder holds them: a `commit` that is not `ok`, or none at all. A
+    run whose fan-out reads `running` or `starting`, by `row`'s liveness, is skipped: only an
+    ended or a lost run has left its worktree. A record whose fan-out folder is gone is read as
+    ended."""
     from apilane import write as _write
+    alive = _alive(alive)
     out = []
     try:
         names = sorted(os.listdir(os.path.join(roots.state, "runs")))
@@ -335,6 +339,10 @@ def left(roots, home=None):
     for name in names:
         rec = _read(os.path.join(roots.state, "runs", name, "run.json"))
         if not isinstance(rec, dict) or not rec.get("worktree") or rec.get("commit") == "ok":
+            continue
+        fid = name.rsplit("-", 1)[0]
+        run = read(roots, fid) if _job.ID_RE.match(fid) else None
+        if run is not None and state(run, alive) in ("running", "starting"):
             continue
         found = _write.lost(rec, home=home)
         if found and found["paths"]:
