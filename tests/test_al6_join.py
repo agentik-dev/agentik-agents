@@ -307,7 +307,9 @@ class PlugTest(Temp):
         api = {s["key"]: s for s in doc["settings"] if s["key"].startswith("api.")}
         self.assertEqual(sorted(api), sorted("api." + k for k in config.KEYS))
         for k in config.KEYS:
-            self.assertEqual(api["api." + k]["value"], getattr(config.DEFAULTS, k), k)
+            want = getattr(config.DEFAULTS, k)
+            want = list(want) if isinstance(want, tuple) else want   # al9b: write_repos, a list
+            self.assertEqual(api["api." + k]["value"], want, k)
             self.assertIn("by hand", api["api." + k]["change"]["note"], k)
         self.write_config("api:\n  enabled: true\n  max_day_usd: 4\n  max_fanout_usd: 2\n")
         doc = self.plug().config(roots=self.roots)

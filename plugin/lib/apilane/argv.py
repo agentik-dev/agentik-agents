@@ -55,8 +55,20 @@ class ClaudeNone(Exception):
         return self.code
 
 
+# A writing type's tools denied by name beside its paths (design/32 D13): no shell, no web, no
+# agent under either of the names the CLI has carried.
+WRITER_DENIED = ("Bash", "WebFetch", "WebSearch", "Agent", "Task")
+
+
 def deny_reads():
     return " ".join("%s(%s)" % (t, p) for p in DENY_PATHS for t in _types.TOOLS)
+
+
+def deny_writes(tools):
+    """A writing type's `--disallowedTools`: the denied paths for each of its tools, then the
+    tools it never has, by name."""
+    return " ".join(["%s(%s)" % (t, p) for p in DENY_PATHS for t in tools]
+                    + list(WRITER_DENIED))
 
 
 def _value(flag, val):
@@ -81,10 +93,12 @@ def build(shard, *, claude, dirs, ceiling_usd, run_dir, restricted=True):
     if not os.path.isabs(_value("claude", claude)) or not os.path.isabs(
             _value("run_dir", run_dir)):
         raise ValueError("claude and run_dir are absolute paths")
+    writes = getattr(t, "writes", False)
+    tools = " ".join(t.tools) if writes else TOOLS
     argv = [claude, "--bare",
-            "--tools", TOOLS,
-            "--allowedTools", TOOLS,
-            "--disallowedTools", deny_reads(),
+            "--tools", tools,
+            "--allowedTools", tools,
+            "--disallowedTools", deny_writes(t.tools) if writes else deny_reads(),
             "--permission-mode", "dontAsk",
             "--permission-prompts", "none",
             "--max-budget-usd", _ceiling(ceiling_usd),

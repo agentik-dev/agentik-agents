@@ -300,12 +300,13 @@ class SpellingTest(Home):
 class LaneKeysTest(Home):
     def test_keys(self):
         from apilane import config
-        self.assertEqual(tuple(config.lane(self.roots)), (False, 2.0, 10.0, None, None, None))
+        self.assertEqual(tuple(config.lane(self.roots)), (False, 2.0, 10.0, None, None, None, ()))
         self.config("api:\n  enabled: true\n  max_fanout_usd: 3\n  max_day_usd: 20.5\n"
                     "  console_limit_usd: 25\n  proxy: proxy-host:3128\n  ca_file: /etc/ca.pem\n"
                     "local:\n  subagent: x\n")
         lane = config.lane(self.roots)
-        self.assertEqual(tuple(lane), (True, 3.0, 20.5, 25.0, "proxy-host:3128", "/etc/ca.pem"))
+        self.assertEqual(tuple(lane), (True, 3.0, 20.5, 25.0, "proxy-host:3128", "/etc/ca.pem",
+                                       ()))
         self.assertEqual(lane.console_limit_usd, 25)
         for text, line in (("api:\n  enabled: true\n  max_shard: 3\n", 3),
                            ("api:\n  max_fanout_usd: 0\n", 2),

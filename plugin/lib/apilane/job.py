@@ -20,7 +20,10 @@ DEFAULT_PROFILE = "review"
 LABEL_MAX = 80
 ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9-]{0,63}\Z")
 KEYS = ("schema", "id", "budget_usd", "dirs", "shards", "max_shard_usd", "jobs",
-        "timeout_sec", "tag")
+        "timeout_sec", "tag", "repo", "from")
+# The keys only a writing job holds (design/32 A4); `from` is `from_branch` on the Job.
+WRITE_KEYS = ("repo", "from")
+DEFAULT_FROM = "main"
 SHARD_KEYS = ("label", "type", "prompt")
 # The old fan-out's flags that the lane does not take, each refused by name.
 REFUSED = ("--model", "--out", "--claude-arg", "--phase", "--stagger-sec")
@@ -29,7 +32,8 @@ VALUED = ("--budget-usd", "--profile", "--tasks", "--add-dir", "-j", "--jobs",
 
 Shard = collections.namedtuple("Shard", "label type prompt")
 Job = collections.namedtuple(
-    "Job", "id budget_usd dirs shards max_shard_usd jobs timeout_sec tag", defaults=(None,))
+    "Job", "id budget_usd dirs shards max_shard_usd jobs timeout_sec tag repo from_branch",
+    defaults=(None, None, None))
 
 
 class JobError(Exception):
@@ -72,6 +76,12 @@ def _positive(obj, key, default):
     if value <= 0:
         raise _shape(key, "range")
     return value
+
+
+def writes(kind):
+    """True when the type of this name is a writing type (design/32 A4)."""
+    from apilane import types as _t
+    return bool(getattr(_t.TYPES.get(kind), "writes", False))
 
 
 def new_id(now=None):
@@ -133,6 +143,20 @@ def from_obj(obj, *, types=None):
         if not isinstance(prompt, str) or not prompt.strip():
             raise _shape(where + ".prompt", "kind" if "prompt" in item else "missing")
         shards.append(Shard(label, kind, prompt))
+    repo = from_branch = None
+    if any(writes(s.type) for s in shards):
+        if len(shards) != 1:
+            raise JobError("write.shape", shards=len(shards))
+        repo = obj.get("repo")
+        if not isinstance(repo, str) or not repo:
+            raise _shape("repo", "kind" if "repo" in obj else "missing")
+        from_branch = obj.get("from", DEFAULT_FROM)
+        if not isinstance(from_branch, str) or not from_branch:
+            raise _shape("from", "kind")
+    else:
+        for key in WRITE_KEYS:
+            if key in obj:
+                raise _shape(key, "unknown")
     max_shard = _positive(obj, "max_shard_usd", None)
     jobs = obj.get("jobs", DEFAULT_JOBS)
     if not isinstance(jobs, int) or isinstance(jobs, bool):
@@ -143,7 +167,8 @@ def from_obj(obj, *, types=None):
     if isinstance(timeout, float) and timeout.is_integer():
         timeout = int(timeout)
     return Job(jid, budget, tuple(dirs), tuple(shards),
-               None if max_shard is None else float(max_shard), jobs, timeout, tag)
+               None if max_shard is None else float(max_shard), jobs, timeout, tag, repo,
+               from_branch)
 
 
 def _decode(text):
@@ -254,6 +279,8 @@ def from_argv(argv, *, types=None):
         raise _shape("budget_usd", "missing")
     obj["budget_usd"] = _value("--budget-usd", opts["--budget-usd"], float)
     profile = opts.get("--profile", DEFAULT_PROFILE)
+    if writes(profile):
+        raise JobError("write.short", profile=profile)
     tasks = _tasks(opts["--tasks"]) if "--tasks" in opts else []
     tasks.extend({"prompt": p} for p in prompts)
     for task in tasks:

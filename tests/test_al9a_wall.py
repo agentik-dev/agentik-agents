@@ -683,6 +683,10 @@ class PassedTest(WriterCase):
             self.assertFalse(self.writer_passed(changed), changed)
 
     def test_no_writing_type_runs_no_writers_pass(self):
+        # al9b adds `implement`; the table at al9a's pin, without it, is this case's
+        saved = apitypes.TYPES.pop("implement", None)
+        if saved is not None:
+            self.addCleanup(apitypes.TYPES.__setitem__, "implement", saved)
         self.assertIsNone(apitypes.TYPES.get("implement"))
         for kw in ({"writer_type": None}, {}):
             seen = []

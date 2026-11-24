@@ -155,7 +155,8 @@ class World(unittest.TestCase):
 
 class TypesTest(unittest.TestCase):
     def test_three_types(self):
-        t = mod("types").TYPES
+        # al9b: the read types, the three; `implement` writes (tests/test_al9b_implement.py)
+        t = {n: ty for n, ty in mod("types").TYPES.items() if not ty.writes}
         self.assertEqual(sorted(t), ["analyze", "explore", "review"])
         for name, ty in t.items():
             self.assertEqual(ty.name, name)
@@ -181,14 +182,17 @@ class TypesTest(unittest.TestCase):
 
     def test_no_writing_type(self):
         for ty in mod("types").TYPES.values():
-            self.assertFalse({"Bash", "Edit", "Write"} & set(ty.tools))
+            if not ty.writes:     # al9b: a read type holds no writing tool
+                self.assertFalse({"Bash", "Edit", "Write"} & set(ty.tools))
+            self.assertNotIn("Bash", ty.tools)
 
     def test_role_prompts_came_back(self):
         tmod = mod("types")
         self.assertIn("reviewing code read-only", tmod.ROLES["review"])
         self.assertIn("investigating a codebase read-only", tmod.ROLES["explore"])
         self.assertIn("analyzing a system read-only", tmod.ROLES["analyze"])
-        self.assertEqual(tmod.EFFORT, {"review": "medium", "explore": "low", "analyze": "high"})
+        self.assertEqual(tmod.EFFORT, {"review": "medium", "explore": "low", "analyze": "high",
+                                       "implement": "high"})
 
 
 class ArgvTest(World):

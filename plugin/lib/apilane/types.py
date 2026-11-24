@@ -1,12 +1,16 @@
-"""The shard types: the old wrapper's three read-only profiles (design/21 item 3).
+"""The shard types: the old wrapper's three read-only profiles (design/21 item 3), and one
+writing type, `implement` (design/32 A1, G23).
 
-Each type's model is a row of the status tool's PRICES, the newest Sonnet for review and
-explore and the newest Opus for analyze; a test fails a type the table does not price.
-There is no writing type. The role prompts and efforts are the old wrapper's, as they were.
+Each type's model is a row of the status tool's PRICES, the newest Sonnet for review, explore
+and implement and the newest Opus for analyze; a test fails a type the table does not price.
+The three read types' role prompts and efforts are the old wrapper's, as they were. A type
+with `writes` edits one new git worktree of a repo the user file's `api.write_repos` lists,
+with Read, Edit and Write and no shell; the lane, never the agent, commits what it wrote on a
+branch of the job's id, and never pushes (apilane/write.py).
 """
 from collections import namedtuple
 
-Type = namedtuple("Type", "name model tools schema")
+Type = namedtuple("Type", "name model tools schema writes", defaults=(False,))
 
 TOOLS = ("Read", "Grep", "Glob")
 
@@ -69,10 +73,23 @@ uncertainty explicitly rather than guessing. Do not propose changes unless
 asked.''' + TOOL_LIMITS,
 }
 
-EFFORT = {"review": "medium", "explore": "low", "analyze": "high"}
+# The writing type's role: what the lane's refusals hold, so none surprises a model that read
+# it (design/32 A1, G23).
+ROLES["implement"] = '''You are making one small, well-specified change to a repository. Your
+working folder is a new git worktree of it: write only there, never outside it. Your tools are
+Read, Edit and Write, by exact file path; there is no shell, no test run and no way to invoke a
+binary, so do not try. Never write a .git, a CLAUDE.md, a DECISIONS.md, a settings.json or a
+file under hooks/: the lane refuses the whole change if you do. Keep it to one change under
+fifty lines. Do not commit; the lane commits what you wrote. End with a short summary of what
+changed and which test proves it.'''
+
+EFFORT = {"review": "medium", "explore": "low", "analyze": "high", "implement": "high"}
+
+WRITE_TOOLS = ("Read", "Edit", "Write")
 
 TYPES = {
     "review": Type("review", "claude-sonnet-5-5", TOOLS, FINDINGS_SCHEMA),
     "explore": Type("explore", "claude-sonnet-5-5", TOOLS, None),
     "analyze": Type("analyze", "claude-opus-5-5", TOOLS, None),
+    "implement": Type("implement", "claude-sonnet-5-5", WRITE_TOOLS, None, writes=True),
 }
