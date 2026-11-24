@@ -349,7 +349,9 @@ class TightTest(Base):
         got, _l, _o = self.pair("skipper", "overspend", "--budget-usd", "1.00", "--only", "money")
         self.assertEqual(got.returncode, 0, got.stderr)
         r = rows(got.stdout)
-        self.assertEqual(r["tight spent of budget"], ["$0.25 of $0.25", "$0.50 of $0.25, over", "lane better"])
+        # read under X5: the sides returned 5 and 10 `ok` shards, so the third column is empty;
+        # MoneyTest holds the rule's `lane better` where both returned the same count
+        self.assertEqual(r["tight spent of budget"], ["$0.25 of $0.25", "$0.50 of $0.25, over", ""])
         self.assertEqual(r["tight skipped, failed"][:2], ["5, 0", "0, 0"])
         self.assertIn("set: tight 10; budget $1.00 a side", got.stdout)
 
@@ -671,6 +673,47 @@ class EmptyValueTest(Base):
             self.assertEqual(len(got.stderr.splitlines()), 1, (args, got.stderr))
             self.assertIn("needs a value", got.stderr)
             self.assertEqual(got.stdout, "", args)
+
+
+class MoneyTest(Base):
+    def test_x5_no_money_verdict_on_unequal_work(self):
+        """X5 (F5): a side that returned every shard `failed` at $0 gets no `lane better` on
+        spent, its median or the tight job."""
+        got, _l, _o = self.pair("donothing", "honest", "--budget-usd", "5", "--only", "answers", "--only", "money")
+        self.assertEqual(got.returncode, 0, got.stderr)
+        r = rows(got.stdout)
+        self.assertEqual(r["answers right of asked"], ["0/10", "10/10", "lane worse"])
+        self.assertEqual(r["spent"], ["$0.00", "$1.00", ""])
+        self.assertEqual(r["spent, median a shard"][2], "")
+        self.assertEqual(r["tight spent of budget"][2], "")
+
+    def test_x5_equal_work_keeps_the_rule(self):
+        """X5: both sides returned 5 `ok` shards of the tight job; the one within budget is better."""
+        got, _l, _o = self.pair("skipper", "overskip", "--budget-usd", "1.00", "--only", "money")
+        self.assertEqual(got.returncode, 0, got.stderr)
+        r = rows(got.stdout)
+        self.assertEqual(r["tight spent of budget"], ["$0.25 of $0.25", "$0.50 of $0.25, over", "lane better"])
+        self.assertEqual(r["spent"], ["$0.25", "$0.50", "lane better"])
+
+
+class CardTextTest(Base):
+    def test_x6_adapter_text_filtered_and_capped(self):
+        """X6 (F6): the tool and model texts keep letters, digits, space, dot, hyphen and
+        underscore, the rest `?`; 40 and 32 characters; four models a type, then `+N`."""
+        got, _l, _o = self.pair("honest", "models", "--budget-usd", "5", "--only", "wall",
+                                "--only", "answers", "--repeat", "1")
+        self.assertEqual(got.returncode, 0, got.stderr)
+        tools = dict(re.findall(r"^tool (lane|other): +(.*)$", got.stdout, re.M))
+        self.assertEqual(tools["lane"], "stand-in 1.0")
+        self.assertRegex(tools["other"], r"^[A-Za-z0-9 ._?-]{1,40}$")
+        key = "-".join(("sk", "ant", "api03", "AAAABBBB"))
+        # the filter is X6's whole rule: what it keeps of a key-shaped word stays, cut to 40
+        self.assertTrue(tools["other"].startswith("x 1.0 %s?" % key), tools["other"])
+        for bad in ("/", "=", "~", "made-up-user"):
+            self.assertNotIn(bad, tools["other"])
+        cell = rows(got.stdout)["model explore"][1]
+        self.assertRegex(cell, r"^([A-Za-z0-9._-]{1,32}\+){3}[A-Za-z0-9._-]{1,32} \+6$")
+        self.assertNotIn(self.home, got.stdout)
 
 
 if __name__ == "__main__":

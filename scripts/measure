@@ -496,24 +496,26 @@ def summary(recs, jobs, side):
     models = {}
     for _k, t, _l, sh in shards:
         if sh["model"]:
-            models.setdefault(t, set()).add(clean(sh["model"], 48))
+            models.setdefault(t, set()).add(clean(sh["model"], MODEL_CAP))
     s["models"] = models
     if "tight" in by:
         r = by["tight"]
         s["tight"] = {"budget": r["budget"], "spent": r["spent"], "failed": r["reason"],
+                      "ok": sum(1 for sh in r["shards"].values() if sh["state"] == "ok"),
                       "skipped": sum(1 for sh in r["shards"].values() if sh["state"] == "skipped"),
                       "shard_failed": sum(1 for sh in r["shards"].values() if sh["state"] == "failed")}
     s["job_sec"] = statistics.median([r["seconds"] for r in recs]) if recs else None
     secs = [sh["seconds"] for _k, _t, _l, sh in shards if sh["seconds"] is not None]
     s["shard_sec"] = statistics.median(secs) if secs else None
     s["states"] = tuple(sum(1 for *_x, sh in shards if sh["state"] == st) for st in STATES)
+    s["ok"] = s["states"][0]
     s["empty"] = sum(1 for *_x, sh in shards if sh["state"] == "ok" and not sh["text"].strip())
     wrong = 0
     for k, _t, l, sh in shards:
         if k in ("answers", "tight") and words and sh["state"] == "ok" and not _in(words[l], sh["text"]):
             wrong += 1
     s["wrong"] = wrong
-    s["tool"] = next((clean(r["tool"], 60) for r in recs if r["tool"]), "-")
+    s["tool"] = next((clean(r["tool"], TOOL_CAP) for r in recs if r["tool"]), "-")
     return s
 
 
@@ -529,12 +531,31 @@ def j_type(jobs, kind, label):
 SCRUB = []   # (path, its stand-in), set at the run's start
 
 
+SAFE = frozenset(string.ascii_letters + string.digits + " ._-")
+TOOL_CAP, MODEL_CAP, MODELS_A_TYPE = 40, 32, 4
+
+
 def clean(text, cap):
+    """An adapter's `tool` or `model` text as the card prints it: letters, digits, space, dot,
+    hyphen and underscore, anything else `?`, cut to `cap`."""
     for path, mark in SCRUB:
         if path and path != "/":
             text = text.replace(path, mark)
-    text = " ".join("".join(ch if 32 <= ord(ch) < 127 else "?" for ch in text).split())
+    text = " ".join("".join(ch if ch in SAFE else "?" for ch in text).split())
     return text[:cap] or "-"
+
+
+def models_cell(models):
+    """At most four models a type, then `+N` for the rest."""
+    names = sorted(models)
+    more = len(names) - MODELS_A_TYPE
+    return "+".join(names[:MODELS_A_TYPE]) + (" +%d" % more if more > 0 else "") or "-"
+
+
+def same_work(a, b, key=None):
+    """The money's rule holds only where both sides returned the same count of `ok` shards."""
+    pick = (lambda s: s["ok"]) if key is None else key
+    return pick(a) == pick(b)
 
 
 def usd(v, places=2):
@@ -581,11 +602,11 @@ def card(sides, jobs, opts, run_id, sha):
         lambda a, b: compare(-a["answers"][0], -b["answers"][0], lower=True)
         if has(a, "answers") and has(b, "answers") else "")
     row("spent", lambda s: usd(s["spent"]), lambda a, b: compare(
-        _cents(a["spent"]), _cents(b["spent"]), lower=True))
+        _cents(a["spent"]), _cents(b["spent"]), lower=True) if same_work(a, b) else "")
     row("spent, median a shard", lambda s: usd(s["median_cost"], 4), lambda a, b: compare(
-        _cents(a["median_cost"], 4), _cents(b["median_cost"], 4), lower=True))
+        _cents(a["median_cost"], 4), _cents(b["median_cost"], 4), lower=True) if same_work(a, b) else "")
     for t in sorted({t for j in jobs for v in j["views"].values() for _l, t, _p in v["shards"]}):
-        row("model " + t, lambda s, t=t: "+".join(sorted(s["models"].get(t, ()))) or "-")
+        row("model " + t, lambda s, t=t: models_cell(s["models"].get(t, ())))
 
     def tight(s):
         if not has(s, "tight"):
@@ -599,7 +620,8 @@ def card(sides, jobs, opts, run_id, sha):
     row("tight spent of budget", tight, lambda a, b: compare(
         _over(a["tight"]) if has(a, "tight") and a["tight"]["spent"] is not None else None,
         _over(b["tight"]) if has(b, "tight") and b["tight"]["spent"] is not None else None,
-        order=(False, True)))
+        order=(False, True)) if has(a, "tight") and has(b, "tight")
+        and same_work(a, b, lambda s: s["tight"]["ok"]) else "")
     row("tight skipped, failed", lambda s: "%d, %d" % (s["tight"]["skipped"], s["tight"]["shard_failed"])
         if has(s, "tight") and not s["tight"]["failed"] else "-")
     row("seconds a job, median", lambda s: "%d" % round(s["job_sec"]) if s["job_sec"] is not None else "-")
