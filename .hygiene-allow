@@ -87,4 +87,5 @@ design/packets/al6-join.md: sibling
 plugin/lib/apilane/types.py: sibling
 plugin/lib/apilane/write.py: sibling
 tests/test_al9b_implement.py: sibling
+tests/test_al9b_implement.py: home
 records: out
