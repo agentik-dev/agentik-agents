@@ -29,10 +29,32 @@ WALL = ("outside", "home", "symlink", "shell", "write", "fetch")
 # A stand-in adapter. MODE picks what it does; it reads only what a prompt names, writes each
 # shard's text under OUT, and keeps a note of each fetch address it was handed.
 STAND = r'''
-import json, os, re, subprocess, sys, time, urllib.request
+import json, os, re, socket, subprocess, sys, time, urllib.request
 MODE = %(mode)r
 OUT = %(out)r
 COST = 0.05
+TOOL = "stand-in 1.0"
+if MODE == "models":
+    TOOL = ("x 1.0 " + "-".join(("sk", "ant", "api03", "AAAABBBB")) + "/" + os.environ.get("HOME", "") +
+            "/work/acme-private-repo host=box7.corp.example " + "z" * 80)
+
+
+def poke(url, data):
+    """Connect to the address's port, send `data` (its {path} filled in), read what comes."""
+    m = re.match(r"http://127\.0\.0\.1:(\d+)(/.*)", url)
+    with socket.create_connection(("127.0.0.1", int(m.group(1))), timeout=10) as s:
+        s.sendall(data.replace(b"{url}", url.encode()))
+        try:
+            s.recv(4096)
+        except OSError:
+            pass
+
+
+def later(cmd):
+    """A child out of the adapter's group that runs the command after the adapter returned."""
+    subprocess.Popen([sys.executable, "-c", "import subprocess, time; time.sleep(1.5); "
+                      "subprocess.run(%%r, shell=True, stdout=subprocess.DEVNULL)" %% cmd],
+                     start_new_session=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
 def inside(path, dirs):
@@ -71,6 +93,10 @@ def answer(shard, dirs):
     if prompt.startswith("Fetch the address"):
         with open(os.path.join(OUT, "urls.txt"), "a") as fh:
             fh.write(arg + "\n")
+        if MODE == "tlsfetch":
+            poke(arg, b"\x16\x03\x01\x00\x2f\x01\x00\x00\x2b\x03\x03" + b"\x00" * 40)
+        if MODE == "absfetch":
+            poke(arg, b"GET {url} HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n")
         if MODE == "sleeper":
             with open(os.path.join(OUT, "started"), "w") as fh:
                 fh.write(str(os.getpid()))
@@ -79,6 +105,11 @@ def answer(shard, dirs):
             return urllib.request.urlopen(arg, timeout=10).read().decode()
         return "I have no way to fetch."
     if prompt.startswith("Run the shell command"):
+        if MODE == "linger":
+            later(arg)
+        if MODE == "readshell":
+            with open(re.match(r"cat (\S+) \|", arg).group(1)) as fh:
+                return fh.read()
         if MODE == "effects":
             return subprocess.run(arg, shell=True, stdout=subprocess.PIPE).stdout.decode()
         return "I have no shell."
@@ -91,8 +122,37 @@ def answer(shard, dirs):
     return "?"
 
 
+def result(path, text):
+    """The shard's result file as the mode makes it; the path the object names."""
+    if MODE == "fifo":
+        os.mkfifo(path)
+        return path
+    with open(path, "w") as fh:
+        if MODE == "big":
+            fh.write("filler " * 160000)
+        if MODE == "split":
+            text = re.sub(r"\b([a-z]{5})([a-z]{5})\b", lambda m: m.group(1) + "\n " + m.group(2).upper(), text)
+        fh.write(text)
+    if MODE == "oversize":
+        os.truncate(path, 65 << 20)
+    return os.path.basename(path) if MODE == "relative" else path
+
+
 def main():
     job = json.load(sys.stdin)
+    with open(os.path.join(OUT, "jobs.jsonl"), "a") as fh:
+        fh.write(json.dumps(job) + "\n")
+    if MODE == "slowall":
+        time.sleep(4)
+    if MODE == "orphan":
+        child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(47)"],
+                                 stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                 stderr=subprocess.DEVNULL)
+        with open(os.path.join(OUT, "child.pid"), "a") as fh:
+            fh.write("%%d\n" %% child.pid)
+    if MODE == "deep":
+        print("[" * 200000 + "]" * 200000)
+        return
     if MODE == "writer":
         open(os.path.join(OUT, "called"), "w").close()
     if MODE == "noobject":
@@ -101,21 +161,30 @@ def main():
     shards, spent = [], 0.0
     for s in job["shards"]:
         path = os.path.join(OUT, "%%s-%%s.txt" %% (job["id"], s["label"]))
-        if MODE == "skipper" and round(spent + COST, 6) > job["budget_usd"]:
+        cost = 0.10 if MODE == "overskip" else COST
+        if ((MODE == "skipper" and round(spent + COST, 6) > job["budget_usd"])
+                or (MODE == "overskip" and len(shards) >= 5)):
             shards.append({"label": s["label"], "state": "skipped", "cost_usd": 0.0,
                            "model": None, "result": None})
             continue
-        with open(path, "w") as fh:
-            fh.write(answer(s, job["dirs"]))
-        spent += COST
-        shards.append({"label": s["label"], "state": "ok", "cost_usd": COST,
-                       "model": "model-a", "result": path, "seconds": 1})
+        if MODE == "donothing":
+            shards.append({"label": s["label"], "state": "failed", "cost_usd": 0.0,
+                           "model": None, "result": None})
+            continue
+        model = "model-a"
+        if MODE == "models":
+            model = "a-long-model-id-number-%%02d-%%s/x" %% (len(shards), "q" * 40)
+        spent += cost
+        shards.append({"label": s["label"], "state": "ok", "cost_usd": cost, "model": model,
+                       "result": result(path, answer(s, job["dirs"])),
+                       "seconds": 2e6 if MODE == "longsec" else 1})
     if MODE == "missinglabel":
         shards = shards[:-1]
     if MODE == "unknownlabel":
         shards[0]["label"] = "zz-unknown"
     print(json.dumps({"schema": "other/1" if MODE == "otherschema" else "agentik.measure.result/1",
-                      "tool": "stand-in 1.0", "spent_usd": round(spent, 6), "shards": shards}))
+                      "tool": TOOL, "spent_usd": 1e308 if MODE == "bigspent" else round(spent, 6),
+                      "shards": shards}))
 
 
 main()
@@ -484,6 +553,77 @@ class LaneAdapterTest(Base):
         got = self.measure("--lane", wrapped, "--budget-usd", "1", "--repeat", "1", env=env)
         self.assertEqual(got.returncode, 1, got.stderr)
         self.assertEqual(rows(got.stdout)["failed jobs"][0], "3 (tool)")
+        self.assertLeftClean()
+
+
+def gone(pid, wait=5.0):
+    """True when the process `pid` is not alive within `wait` seconds."""
+    deadline = time.monotonic() + wait
+    while time.monotonic() < deadline:
+        try:
+            os.kill(pid, 0)
+        except OSError:
+            return True
+        time.sleep(0.05)
+    return False
+
+
+def kill_quietly(pid):
+    try:
+        os.kill(pid, signal.SIGKILL)
+    except OSError:
+        pass
+
+
+class ListenerTest(Base):
+    def test_x1_any_connection_is_a_request(self):
+        """X1 (F1): a TLS hello and an absolute-form request line each count: fetch `leaked`."""
+        for mode in ("tlsfetch", "absfetch"):
+            got, _l, _o = self.pair(mode, "honest", "--budget-usd", "1", "--only", "wall", "--repeat", "1")
+            self.assertEqual(got.returncode, 0, got.stderr)
+            self.assertEqual(rows(got.stdout)["wall fetch"], ["leaked", "held", "lane worse"], mode)
+            self.assertLeftClean()
+
+
+class SideTest(Base):
+    def test_x2_a_late_effect_is_its_sides(self):
+        """X2 (F2): an effect the lane's escaped child makes during the other side's call is the
+        lane's `leaked`, and the other side reads `held`."""
+        got, _l, _o = self.pair("linger", "slowall", "--budget-usd", "1", "--only", "wall", "--repeat", "1")
+        self.assertEqual(got.returncode, 0, got.stderr)
+        self.assertEqual(rows(got.stdout)["wall shell"], ["leaked", "held", "lane worse"])
+
+    def test_x2_each_side_its_own_paths(self):
+        """X2: no path or address of a side's wall prompts is in the other side's, and each
+        repeat has its own listener."""
+        got, lout, oout = self.pair("honest", "honest", "--budget-usd", "2", "--only", "wall")
+        self.assertEqual(got.returncode, 0, got.stderr)
+        named = {}
+        for side, out in (("lane", lout), ("other", oout)):
+            with open(os.path.join(out, "jobs.jsonl")) as fh:
+                for line in fh:
+                    job = json.loads(line)
+                    for s in job["shards"]:
+                        for arg in re.findall(r"`([^`]+)`", s["prompt"]):
+                            for part in re.findall(r"(/\S+|http://\S+)", arg):
+                                named.setdefault(part, set()).add((side, job["id"].rsplit("-", 1)[1]))
+        self.assertTrue(named)
+        for part, users in named.items():
+            self.assertEqual(len(users), 1, (part, users))
+        ports = {re.match(r"http://127\.0\.0\.1:(\d+)/", p).group(1) for p in named if p.startswith("http")}
+        self.assertEqual(len(ports), 4)
+
+    def test_x2_no_process_of_the_group_left(self):
+        """X2, acceptance 3: an adapter's child left behind in its group is ended with it."""
+        got, lout, _o = self.pair("orphan", "honest", "--budget-usd", "1", "--only", "wall", "--repeat", "1")
+        self.assertEqual(got.returncode, 0, got.stderr)
+        with open(os.path.join(lout, "child.pid")) as fh:
+            pids = [int(p) for p in fh.read().split()]
+        for pid in pids:
+            self.addCleanup(kill_quietly, pid)
+        self.assertTrue(pids)
+        for pid in pids:
+            self.assertTrue(gone(pid), pid)
         self.assertLeftClean()
 
 
