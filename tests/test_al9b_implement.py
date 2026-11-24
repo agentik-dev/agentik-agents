@@ -86,6 +86,7 @@ class World(unittest.TestCase):
                                            "GIT_CONFIG_NOSYSTEM": "1"})
         env.start()
         self.addCleanup(env.stop)
+        os.environ.pop("CLAUDE_CONFIG_DIR", None)   # al11: the lane reads it; restored at stop
         self.repo = os.path.join(self.home, "code", "proj")
         os.makedirs(self.repo)
         put(os.path.join(self.repo, "README.md"))
@@ -917,6 +918,31 @@ class GateTableTest(World):
         self.assertEqual((rec["commit"], rec["refused"]),
                          ("refused:gated", [".claude/settings.local.json",
                                             "a/b/settings.local.json"]))
+
+
+class MovedConfigTest(World):
+    """al11 R1, R2: `$CLAUDE_CONFIG_DIR/edit-gates` is joined with the home's own list."""
+
+    def answer(self, moved, rel="c.txt"):
+        with mock.patch.dict(os.environ, {} if moved is None else {"CLAUDE_CONFIG_DIR": moved}):
+            return W.gated(self.repo, self.repo, self.home, [rel]) == [rel]
+
+    def test_both_lists(self):
+        put(os.path.join(self.home, "alt", "edit-gates"), "~/code/proj/c.txt\n")
+        put(os.path.join(self.home, ".claude", "edit-gates"), "~/code/proj/d.txt\n")
+        for moved in (os.path.join(self.home, "alt"), "~/alt"):
+            self.assertEqual((self.answer(moved), self.answer(moved, "d.txt")), (True, True))
+        for moved in (None, ""):
+            self.assertEqual((self.answer(moved), self.answer(moved, "d.txt")), (False, True))
+
+    def test_once_relative_missing(self):
+        for moved in ("alt", os.path.join(self.home, "none"), "~/.claude"):
+            with mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": moved}):
+                self.assertEqual(W.user_lines(self.home), [])
+        put(os.path.join(self.home, ".claude", "edit-gates"), "~/code/proj/d.txt\n")
+        for moved in (os.path.join(self.home, ".claude"), "~/.claude/", "~"):
+            with mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": moved}):
+                self.assertEqual(W.user_lines(self.home), [os.path.join(self.repo, "d.txt")])
 
 
 class SmallTest(World):
