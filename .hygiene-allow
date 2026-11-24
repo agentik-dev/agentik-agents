@@ -12,6 +12,9 @@ history/NICE-2026-11-01.md: sibling
 .claude/respeak/config.yaml: sibling
 # This file names the old names its rows except, and the sibling tools.
 .hygiene-allow: renamed,sibling
+# This tool's ledger, and its edit-gates list, name the ledger tool that writes them.
+DECISIONS.md: sibling
+.claude/edit-gates: sibling
 # The Makefile's alias install lines: the eight tools keep their names until 2026-12-31;
 # its readme lines find the renderer plugin that renders the README (a-s8).
 Makefile: renamed,sibling
