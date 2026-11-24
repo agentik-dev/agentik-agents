@@ -44,7 +44,10 @@ HELP = (
     'JOB is a JSON file, or - for stdin: {"schema": "agentik.fanout.job/1", "id", "tag", '
     '"budget_usd", "dirs": [],\n'
     '"shards": [{"label", "type", "prompt"}], "max_shard_usd", "jobs", "timeout_sec"}.\n'
-    "The types are review, explore and analyze; each only reads. --dry-run prints the plan and "
+    # al9b (R16): the help names the writing type and its key
+    "The types are review, explore and analyze, which only read, and implement, which edits one "
+    "new worktree of a\n"
+    'repo api.write_repos lists (the job names "repo" and "from"). --dry-run prints the plan and '
     "spends nothing;\n"
     "off a terminal, --yes runs it.\n"
     "--detach starts the run in a process of its own, prints its id once its budget is reserved, "

@@ -83,4 +83,8 @@ design/packets/ak7-plug-agents.md: sibling
 # al6's packet quotes the old tool's name, which the join forwards and keeps where no wall is proved.
 design/packets/al6-join.md: renamed
 design/packets/al6-join.md: sibling
+# The lane's writing type must name the ledger's file among the names it never writes or commits (al9b).
+plugin/lib/apilane/types.py: sibling
+plugin/lib/apilane/write.py: sibling
+tests/test_al9b_implement.py: sibling
 records: out

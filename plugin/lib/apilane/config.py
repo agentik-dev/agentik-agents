@@ -4,7 +4,9 @@
 alone says on, off or refused. The parser below (`Fault`, `_uncomment`, `_split`, `_scalar`,
 `_value`, `parse`) is ported whole from agentik-commons
 `plugins/suite/lib/agentik_suite/settings.py` at d795d4a; no other reader is written here.
-Keys outside `api` are not this reader's and are left alone.
+Keys outside `api` are not this reader's and are left alone. `api.write_repos` (design/32 A2) is
+the one key that turns the writing type on and names where: a list of absolute paths, read from
+this file alone; no repo's layer, variable or flag supplies it, and empty is off.
 """
 import collections
 import json
@@ -14,9 +16,10 @@ import re
 import stat
 
 Lane = collections.namedtuple(
-    "Lane", "enabled max_fanout_usd max_day_usd console_limit_usd proxy ca_file")
-DEFAULTS = Lane(False, 2.0, 10.0, None, None, None)
-KEYS = ("enabled", "max_fanout_usd", "max_day_usd", "console_limit_usd", "proxy", "ca_file")
+    "Lane", "enabled max_fanout_usd max_day_usd console_limit_usd proxy ca_file write_repos")
+DEFAULTS = Lane(False, 2.0, 10.0, None, None, None, ())
+KEYS = ("enabled", "max_fanout_usd", "max_day_usd", "console_limit_usd", "proxy", "ca_file",
+        "write_repos")
 MONEY = ("max_fanout_usd", "max_day_usd", "console_limit_usd")
 
 
@@ -179,13 +182,13 @@ def parse(text):
 # -- the lane's reading of the tree -------------------------------------------------------------
 
 def lane(roots):
-    """Lane(enabled, max_fanout_usd, max_day_usd, console_limit_usd, proxy, ca_file).
+    """Lane(enabled, max_fanout_usd, max_day_usd, console_limit_usd, proxy, ca_file, write_repos).
 
     No file is the defaults. Refused, as `config.fault`: a path that is not a regular file (never
     opened), a file that cannot be read, any line outside the subset, an `api` that is not a
     mapping, an unknown key under `api`, an `enabled` other than true, True, false or False, a
     ceiling or `console_limit_usd` that is not a number above 0, a `proxy` or `ca_file` that is
-    not a string."""
+    not a string, a `write_repos` that is not a list of absolute paths."""
     path = roots.config
     try:
         st = os.stat(path)
@@ -238,4 +241,11 @@ def lane(roots):
             if not isinstance(api[key], str) or not api[key]:
                 raise ConfigFault(path, line(key), "api.%s is a string" % key)
             values[key] = api[key]
+    if "write_repos" in api:
+        v = api["write_repos"]
+        if not isinstance(v, list) or not all(
+                isinstance(p, str) and p and os.path.isabs(p) for p in v):
+            raise ConfigFault(path, line("write_repos"),
+                              "api.write_repos is a list of absolute paths")
+        values["write_repos"] = tuple(v)
     return Lane(**values)

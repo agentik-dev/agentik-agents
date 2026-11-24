@@ -500,7 +500,8 @@ def read_backends(row, route, state):
 
 
 API_NOTE = "The file is edited by hand; no verb writes it, and a running fan-out keeps what it read."
-API_TYPES = {"enabled": "boolean", "proxy": "string", "ca_file": "path"}
+API_TYPES = {"enabled": "boolean", "proxy": "string", "ca_file": "path",
+             "write_repos": "list"}   # of absolute paths; the suite's type words
 
 
 def api_roots(roots=None):
@@ -551,7 +552,9 @@ def api_settings(roots):
     change = {"kind": "file", "command": None, "path": path, "block": "api", "note": API_NOTE}
     out = []
     for k in lane_config.KEYS:
-        default, value = getattr(lane_config.DEFAULTS, k), getattr(lane, k)
+        default, value = getattr(lane_config.DEFAULTS, k), getattr(lane, k, None)
+        if isinstance(default, tuple):      # api.write_repos: a list, as the file writes it
+            default, value = list(default), list(value or ())
         line = lines.get("api." + k)
         source = {"layer": "user", "path": path, "line": line} if line is not None else DEFAULT
         out.append(setting("api." + k, value, default, API_TYPES.get(k, "number"), source, change))

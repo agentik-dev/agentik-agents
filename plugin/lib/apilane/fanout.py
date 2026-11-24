@@ -2,7 +2,8 @@
 
 design/21 items 18, 20, 24 to 26. The order: the plan (the job, both
 ceilings, the dirs), the probe, the key, the reservation, synced, and only
-then the first shard. A fan-out that dies after its reservation has already
+then the first shard. A writing job (design/32 B6) makes its worktree after the reservation and
+before its one shard, and the lane's commit runs once that shard's process has ended. A fan-out that dies after its reservation has already
 counted whole for its day; a stop's handler only makes the figure smaller.
 Nothing here prints: it calls the `emit` it was handed, returns a value, or
 raises an error with a `code` (seams section 2). Another row's function is a
@@ -26,7 +27,8 @@ STOP_GRACE_SEC = 2
 SESSION_RE = re.compile(r"^[A-Za-z0-9-]{1,128}\Z")
 STOP_SIGNALS = ("SIGINT", "SIGTERM", "SIGHUP")
 
-FanoutResult = collections.namedtuple("FanoutResult", "id rc spent_usd budget_usd shards")
+FanoutResult = collections.namedtuple("FanoutResult", "id rc spent_usd budget_usd shards write",
+                                      defaults=(None,))
 ShardResult = collections.namedtuple(
     "ShardResult", "label type state cost_usd estimated result_path reason model")
 
@@ -58,6 +60,10 @@ def plan(job, *, lane, roots, models=None, check_dirs=None, now=None):
     nothing, opens no key, runs no probe, writes no file and makes no folder."""
     if lane.enabled is not True:
         raise FanoutError("lane.off", config=roots.config)
+    w = None
+    from apilane import write as _write
+    if _write.writing(job):
+        w = _write.plan(job, lane, roots)     # write.* before the money checks (design/32 A4)
     if check_dirs is None:
         from apilane import wall
         check_dirs = wall.check_dirs
@@ -81,8 +87,11 @@ def plan(job, *, lane, roots, models=None, check_dirs=None, now=None):
         shards.append({"label": s.label, "type": s.type, "model": models.get(s.type),
                        "grant_usd": round(grant, 6),
                        "ceiling_usd": round(grant / pools.OVERSHOOT, 6)})
-    return {"id": job.id, "budget_usd": job.budget_usd, "day_sum_usd": day_sum,
-            "worst_usd": round(worst.settled, 6), "dirs": dirs, "shards": shards}
+    out = {"id": job.id, "budget_usd": job.budget_usd, "day_sum_usd": day_sum,
+           "worst_usd": round(worst.settled, 6), "dirs": dirs, "shards": shards}
+    if w is not None:
+        out["write"] = w
+    return out
 
 
 class _Slot(object):
@@ -96,6 +105,8 @@ class _Slot(object):
         self.booked = False
         self.result = None
         self.signalled = None
+        self.thread = None
+        self.why = None
 
 
 class _Run(object):
@@ -115,6 +126,7 @@ class _Run(object):
         self.signame = None
         self.closed = False
         self.last_write = 0.0
+        self.prepare = None     # a writing job's worktree step: None when made, else a reason
         folder = os.path.join(roots.state, "live", session)
         self.live = os.path.join(folder, job.id + ".json")
 
@@ -299,6 +311,14 @@ class _Run(object):
                 self._end(slot, result)
                 continue
             slot.grant = grant
+            if self.prepare is not None:
+                why = self.prepare(slot)
+                if why:
+                    self.pool.settle(grant, 0.0)
+                    slot.booked, slot.why = True, why
+                    self._end(slot, ShardResult(slot.shard.label, slot.shard.type, "skipped",
+                                                0.0, False, None, "worktree", slot.model))
+                    continue
             with self.cond:
                 slot.state = "running"
                 self.write_live()
@@ -307,6 +327,7 @@ class _Run(object):
             t = threading.Thread(target=self._work, args=(slot, run_shard, kwargs),
                                  name="shard-" + slot.run)
             t.daemon = True
+            slot.thread = t
             t.start()
         self.wait(lambda: not any(s.state == "running" for s in slots))
         if self.stop.is_set():
@@ -346,9 +367,44 @@ class _Run(object):
             self.cond.notify_all()
 
 
+def _write_end(slot, w, value, roots, settle):
+    """The lane's commit for a writing job's one shard, once its process has ended (R10, R11):
+    the record, written into the shard's run.json too."""
+    from apilane import run as _run
+    path = os.path.join(roots.state, "runs", slot.run, "run.json")
+    if slot.result is None or slot.result.state == "skipped":
+        rec = dict(w, head=w["from_sha"], paths=[], ignored=[], commit="none", refused=[],
+                   state="skipped", error=slot.why)
+        if os.path.lexists(w["worktree"]):
+            # The worktree step refused after `worktree add` made it (the wall's check, or a
+            # `.git` that is no regular file): the record names the worktree and the branch
+            # left, and the lane removes neither.
+            rec["left"] = True
+            try:
+                os.makedirs(os.path.dirname(path), mode=0o700, exist_ok=True)
+                _run._write_json(path, dict(rec, id=slot.run, type=slot.shard.type))
+            except OSError:
+                pass
+        return rec
+    if slot.thread is not None:
+        slot.thread.join(60)
+    rec = settle(w, state=slot.result.state, label=slot.shard.label, run=slot.run, key=value,
+                 home=roots.home)
+    if rec["state"] != slot.result.state:
+        slot.result = slot.result._replace(state=rec["state"])
+    try:
+        with open(path) as fh:
+            run_rec = json.load(fh)
+        run_rec.update(rec)
+        _run._write_json(path, run_rec)
+    except (OSError, ValueError):
+        pass
+    return rec
+
+
 def run(job, *, lane, roots, session, claude, run_shard=None, wrap=None, key=None,
         ensure_probe=None, started=None, emit=None, now=None, check_dirs=None,
-        models=None):
+        models=None, settle_write=None):
     """Plan, probe, key, reserve, then the shards; settle at the end."""
     emit = emit or _quiet
     session = session_name(session)
@@ -357,10 +413,15 @@ def run(job, *, lane, roots, session, claude, run_shard=None, wrap=None, key=Non
     if wrap is None:
         from apilane import wall
         wrap = wall.wrap
+    w = p.get("write")
     if ensure_probe is None:
         from apilane import probe
 
         def ensure_probe(c):
+            if w is not None:     # a writing job spends nothing before a writer's pass (C12)
+                from apilane import types as _types
+                return probe.ensure(claude=c, roots=roots, wrap=wrap, emit=emit, writer=True,
+                                    writer_type=_types.TYPES[job.shards[0].type])
             return probe.ensure(claude=c, roots=roots, wrap=wrap, emit=emit)
     record = ensure_probe(claude) or {}
     restricted = record.get("restricted") is not None
@@ -389,6 +450,15 @@ def run(job, *, lane, roots, session, claude, run_shard=None, wrap=None, key=Non
     kwargs = dict(session=session, roots=roots, lane=lane, claude=claude,
                   dirs=p["dirs"], timeout_sec=job.timeout_sec, restricted=restricted,
                   wrap=wrap, key=lambda: value)
+    wrec = None
+    if w is not None:
+        from apilane import write as _write
+        if check_dirs is None:
+            from apilane import wall
+            check_dirs = wall.check_dirs
+        state.prepare = lambda slot: _write.make(w, check_dirs, roots.home)
+        settle_write = settle_write or _write.settle
+        kwargs["write"] = w
     previous = {}
     if threading.current_thread() is threading.main_thread():
         for name in STOP_SIGNALS:
@@ -396,6 +466,9 @@ def run(job, *, lane, roots, session, claude, run_shard=None, wrap=None, key=Non
             previous[sig] = signal.signal(sig, state.on_signal)
     try:
         state.go(slots, run_shard, kwargs)
+        if w is not None:
+            wrec = _write_end(slots[0], w, value, roots, settle_write)
+            emit("write.end", run=slots[0].run, write=wrec)
         spent = round(state.pool.settled, 6)
         ledger.settle(roots, fanout=job.id, spent_usd=spent, now=now)
         state.close_live()
@@ -406,5 +479,5 @@ def run(job, *, lane, roots, session, claude, run_shard=None, wrap=None, key=Non
     ok = sum(1 for r in shards if r.state == "ok")
     emit("done", fanout=job.id, ok=ok, failed=len(shards) - ok, spent_usd=spent,
          budget_usd=job.budget_usd)
-    return FanoutResult(job.id, 0 if ok == len(shards) else 1, spent,
-                        job.budget_usd, shards)
+    rc = 0 if ok == len(shards) and (wrec is None or wrec["commit"] == "ok") else 1
+    return FanoutResult(job.id, rc, spent, job.budget_usd, shards, wrec)
