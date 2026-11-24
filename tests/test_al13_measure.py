@@ -34,9 +34,14 @@ MODE = %(mode)r
 OUT = %(out)r
 COST = 0.05
 TOOL = "stand-in 1.0"
-if MODE == "models":
-    TOOL = ("x 1.0 " + "-".join(("sk", "ant", "api03", "AAAABBBB")) + "/" + os.environ.get("HOME", "") +
-            "/work/acme-private-repo host=box7.corp.example " + "z" * 80)
+KEY = "-".join(("sk", "ant", "api03", "AAAABBBBCCCCDDDD"))
+BAD = ("box7.corp.example", KEY, os.environ.get("HOME", "") + "/work/acme-private-repo")
+if MODE == "hostile":
+    TOOL = " ".join(BAD)
+if MODE == "ctrltext":
+    TOOL = "x\x1b[2J 1.0\r\nforged extra words"
+if MODE == "plain":
+    TOOL = "name 1.2.3"
 
 
 def poke(url, data):
@@ -177,7 +182,12 @@ def main():
             continue
         model = "model-a"
         if MODE == "models":
-            model = "a-long-model-id-number-%%02d-%%s/x" %% (len(shards), "q" * 40)
+            model = "mdl-%%02d" %% len(shards)
+        if MODE in ("hostile", "ctrltext"):
+            model = (BAD[0], BAD[2], KEY + "EEEEFFFFGGGGHHHH", "mdl\x1b[2J", "mdl 1.0", "mdl.v2",
+                     "mdl-3.5-20260101")[len(shards) %% 7]
+        if MODE == "plain":
+            model = "mdl-3.5-20260101"
         spent += cost
         shards.append({"label": s["label"], "state": "ok", "cost_usd": cost, "model": model,
                        "result": result(path, answer(s, job["dirs"])),
@@ -713,24 +723,65 @@ class MoneyTest(Base):
             self.assertEqual(r["spent, median a shard"][2], "", modes)
 
 
+def load_measure():
+    """The script as a module, in this process: its top level defines and starts nothing."""
+    import importlib.machinery
+    import importlib.util
+    loader = importlib.machinery.SourceFileLoader("measure_under_test", MEASURE)
+    spec = importlib.util.spec_from_loader("measure_under_test", loader)
+    m = importlib.util.module_from_spec(spec)
+    loader.exec_module(m)
+    return m
+
+
 class CardTextTest(Base):
-    def test_x6_adapter_text_filtered_and_capped(self):
-        """X6 (F6): the tool and model texts keep letters, digits, space, dot, hyphen and
-        underscore, the rest `?`; 40 and 32 characters; four models a type, then `+N`."""
-        got, _l, _o = self.pair("honest", "models", "--budget-usd", "5", "--only", "wall",
+    BAD_PARTS = ("box7", "corp", "example", "sk-ant", "api03", "AAAABBBB", "acme", "private",
+                 "made-up-user", "work", "\x1b", "2J", "mdl.v2")
+
+    def test_y2_adapter_text_cut_to_two_shapes(self):
+        """Y2 (G1): a dotted host name, a key-shaped word, a path below the home, a control
+        character and a line break: none of them, nor any part of them, is on the card; the
+        `tool` line prints at most three words. On the model line the key is a key's length:
+        a word of 32 characters or fewer fits the model's shape as Y2 rules it."""
+        got, _l, _o = self.pair("hostile", "ctrltext", "--budget-usd", "5", "--only", "wall",
                                 "--only", "answers", "--repeat", "1")
         self.assertEqual(got.returncode, 0, got.stderr)
         tools = dict(re.findall(r"^tool (lane|other): +(.*)$", got.stdout, re.M))
-        self.assertEqual(tools["lane"], "stand-in 1.0")
-        self.assertRegex(tools["other"], r"^[A-Za-z0-9 ._?-]{1,40}$")
-        key = "-".join(("sk", "ant", "api03", "AAAABBBB"))
-        # the filter is X6's whole rule: what it keeps of a key-shaped word stays, cut to 40
-        self.assertTrue(tools["other"].startswith("x 1.0 %s?" % key), tools["other"])
-        for bad in ("/", "=", "~", "made-up-user"):
-            self.assertNotIn(bad, tools["other"])
-        cell = rows(got.stdout)["model explore"][1]
-        self.assertRegex(cell, r"^([A-Za-z0-9._-]{1,32}\+){3}[A-Za-z0-9._-]{1,32} \+6$")
+        self.assertEqual(tools, {"lane": "? ? ?", "other": "? 1.0 forged"})
+        cells = rows(got.stdout)["model explore"]
+        self.assertEqual(cells[:2], ["?+mdl-3.5-20260101", "?+mdl-3.5-20260101"])
+        for part in self.BAD_PARTS:
+            self.assertNotIn(part, got.stdout, part)
         self.assertNotIn(self.home, got.stdout)
+        self.assertNotIn("\r", got.stdout)
+        self.assertFalse([l for l in got.stdout.splitlines() if l.startswith("forged")])
+
+    def test_y2_a_plain_name_and_model_print_whole(self):
+        """Y2: `name 1.2.3` prints whole, and a model id with digits, hyphens and a digit-dot-digit."""
+        got, _l, _o = self.pair("plain", "models", "--budget-usd", "5", "--only", "wall",
+                                "--only", "answers", "--repeat", "1")
+        self.assertEqual(got.returncode, 0, got.stderr)
+        tools = dict(re.findall(r"^tool (lane|other): +(.*)$", got.stdout, re.M))
+        self.assertEqual(tools, {"lane": "name 1.2.3", "other": "stand-in 1.0"})
+        cells = rows(got.stdout)["model explore"]
+        self.assertEqual(cells[:2], ["mdl-3.5-20260101", "mdl-00+mdl-01+mdl-02+mdl-03 +6"])
+
+    def test_y2_the_shapes_at_their_edges(self):
+        """Y2: each shape at its length's edge, and the words it refuses."""
+        m = load_measure()
+        name20, ver16, model32 = "a" + "b" * 19, "v1" + ".2" * 7 + "3", "m" + "1" * 31
+        for text, want in ((name20, name20), (name20 + "c", "?"), ("v" + ver16[1:], "v" + ver16[1:]),
+                           (ver16 + "3", "?"), ("1" + "2" * 15, "1" + "2" * 15), ("v", "v"),
+                           ("a.b", "?"), ("1.2", "1.2"), ("x/y", "?"), ("~", "?"), ("a b c d", "a b c"),
+                           ("", "-"), ("   ", "-"), ("na\u00efve", "?"), ("_x", "?"), ("-x", "?")):
+            self.assertEqual(m.tool_text(text), want, text)
+        for text, want in ((model32, model32), (model32 + "1", "?"), ("m-1.5", "m-1.5"),
+                           ("m-1.5.6", "m-1.5.6"), ("m.5", "?"), ("m-1.", "?"), ("m1..2", "?"),
+                           ("m[1m]", "m[1m]"), (" m-1 ", "m-1"), ("m 1", "?"), ("1m", "?"),
+                           ("m\x1b", "?"), ("m/x", "?"), ("", "?")):
+            self.assertEqual(m.model_text(text), want, text)
+        m.SCRUB[:] = [("/made/home", "~")]
+        self.assertEqual(m.tool_text("x /made/home/acme 2.0"), "x ? 2.0")
 
 
 class ResultTest(Base):

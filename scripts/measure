@@ -13,8 +13,8 @@ planted facts and a question each, the wall's battery of seven shards run `--rep
 (2 by default), and the tight job, the questions again under a quarter of their share of the
 budget. The questions and prompts are fixed text, the words fresh each run. For each job one
 side runs, then the other, the first side alternating job by job. The card, on stdout, holds
-counts, dollars, seconds, model ids and each side's tool text, never a prompt, a result's text,
-a path below the home, a host name or a key.
+counts, dollars, seconds, and each side's tool and model words cut to two shapes (a name or a
+version), never a prompt, a result's text or a path.
 
 Exit 0 with a card; 2 for a refused line (one line on stderr); 1 when no job of either side
 returned a result object. A signal removes what the script made, then exits 128 + its number.
@@ -24,6 +24,7 @@ import codecs
 import json
 import math
 import os
+import re
 import secrets
 import shlex
 import shutil
@@ -531,7 +532,7 @@ def summary(recs, jobs, side):
     models = {}
     for _k, t, _l, sh in shards:
         if sh["model"]:
-            models.setdefault(t, set()).add(clean(sh["model"], MODEL_CAP))
+            models.setdefault(t, set()).add(model_text(sh["model"]))
     s["models"] = models
     if "tight" in by:
         r = by["tight"]
@@ -550,7 +551,7 @@ def summary(recs, jobs, side):
         if k in ("answers", "tight") and words and sh["state"] == "ok" and not sh["found"]:
             wrong += 1
     s["wrong"] = wrong
-    s["tool"] = next((clean(r["tool"], TOOL_CAP) for r in recs if r["tool"]), "-")
+    s["tool"] = next((tool_text(r["tool"]) for r in recs if r["tool"]), "-")
     return s
 
 
@@ -566,18 +567,29 @@ def j_type(jobs, kind, label):
 SCRUB = []   # (path, its stand-in), set at the run's start
 
 
-SAFE = frozenset(string.ascii_letters + string.digits + " ._-")
-TOOL_CAP, MODEL_CAP, MODELS_A_TYPE = 40, 32, 4
+NAME = re.compile(r"[A-Za-z][A-Za-z0-9_-]{0,19}\Z")      # a name: no dot
+VERSION = re.compile(r"v?[0-9][0-9.]{0,15}\Z")
+MODEL = re.compile(r"[A-Za-z][A-Za-z0-9_.\[\]-]{0,31}\Z")  # and each dot between two digits
+TOOL_WORDS, MODELS_A_TYPE = 3, 4
 
 
-def clean(text, cap):
-    """An adapter's `tool` or `model` text as the card prints it: letters, digits, space, dot,
-    hyphen and underscore, anything else `?`, cut to `cap`."""
-    for path, mark in SCRUB:
-        if path and path != "/":
-            text = text.replace(path, mark)
-    text = " ".join("".join(ch if ch in SAFE else "?" for ch in text).split())
-    return text[:cap] or "-"
+def tool_text(text):
+    """An adapter's `tool` text as the card prints it: the home replaced first, then word by
+    word (white space separates), a name or a version kept, any other word `?`; three words."""
+    words = clean_line(text).split()[:TOOL_WORDS]
+    return " ".join(w if NAME.match(w) or VERSION.match(w) else "?" for w in words) or "-"
+
+
+def model_text(text):
+    """A model's text as the card prints it: one word of the model's shape, else `?`."""
+    words = clean_line(text).split()
+    if len(words) != 1 or not MODEL.match(words[0]):
+        return "?"
+    w = words[0]
+    for i, ch in enumerate(w):
+        if ch == "." and not (0 < i < len(w) - 1 and w[i - 1] in string.digits and w[i + 1] in string.digits):
+            return "?"
+    return w
 
 
 def models_cell(models):
