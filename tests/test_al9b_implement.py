@@ -928,8 +928,9 @@ class MovedConfigTest(World):
             return W.gated(self.repo, self.repo, self.home, [rel]) == [rel]
 
     def test_both_lists(self):
-        put(os.path.join(self.home, "alt", "edit-gates"), "~/code/proj/c.txt\n")
-        put(os.path.join(self.home, ".claude", "edit-gates"), "~/code/proj/d.txt\n")
+        u = "~%s/" % self.repo[len(self.home):]   # the repo's path as a `~/` line
+        put(os.path.join(self.home, "alt", "edit-gates"), u + "c.txt\n")
+        put(os.path.join(self.home, ".claude", "edit-gates"), u + "d.txt\n")
         for moved in (os.path.join(self.home, "alt"), "~/alt"):
             self.assertEqual((self.answer(moved), self.answer(moved, "d.txt")), (True, True))
         for moved in (None, ""):
@@ -939,7 +940,8 @@ class MovedConfigTest(World):
         for moved in ("alt", os.path.join(self.home, "none"), "~/.claude"):
             with mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": moved}):
                 self.assertEqual(W.user_lines(self.home), [])
-        put(os.path.join(self.home, ".claude", "edit-gates"), "~/code/proj/d.txt\n")
+        u = "~%s/" % self.repo[len(self.home):]
+        put(os.path.join(self.home, ".claude", "edit-gates"), u + "d.txt\n")
         for moved in (os.path.join(self.home, ".claude"), "~/.claude/", "~"):
             with mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": moved}):
                 self.assertEqual(W.user_lines(self.home), [os.path.join(self.repo, "d.txt")])
