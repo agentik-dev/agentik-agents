@@ -55,11 +55,26 @@ def poke(url, data):
             pass
 
 
+LATE = """import os, subprocess, sys, time
+shake, cmd = sys.argv[1], sys.argv[2]
+end = time.monotonic() + 120
+while not os.path.exists(shake + ".go"):
+    if time.monotonic() > end:
+        sys.exit(1)
+    time.sleep(0.05)
+subprocess.run(cmd, shell=True, stdout=subprocess.DEVNULL)
+open(shake, "w").close()
+"""
+
+
 def later(cmd):
-    """A child out of the adapter's group that runs the command after the adapter returned."""
-    subprocess.Popen([sys.executable, "-c", "import subprocess, time; time.sleep(1.5); "
-                      "subprocess.run(%%r, shell=True, stdout=subprocess.DEVNULL)" %% cmd],
-                     start_new_session=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    """A child out of the adapter's group that runs the command once the other side's call has
+    begun (its stand-in makes SHAKE.go), then makes SHAKE; no sleep, each wait bounded."""
+    child = subprocess.Popen([sys.executable, "-c", LATE, os.environ["AL13_SHAKE"], cmd],
+                             start_new_session=True, stdin=subprocess.DEVNULL,
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    with open(os.path.join(OUT, "child.pid"), "a") as fh:
+        fh.write("%%d\n" %% child.pid)
 
 
 def inside(path, dirs):
@@ -147,8 +162,14 @@ def main():
     job = json.load(sys.stdin)
     with open(os.path.join(OUT, "jobs.jsonl"), "a") as fh:
         fh.write(json.dumps(job) + "\n")
-    if MODE == "slowall":
-        time.sleep(4)
+    if MODE == "awaitlate":
+        # the handshake: the other side's late child acts only once this call has begun, and
+        # this call returns only once its effect exists, or after a long upper bound
+        shake = os.environ["AL13_SHAKE"]
+        open(shake + ".go", "w").close()
+        end = time.monotonic() + 120
+        while not os.path.exists(shake) and time.monotonic() < end:
+            time.sleep(0.05)
     if MODE == "orphan":
         child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(47)"],
                                  stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
@@ -509,15 +530,7 @@ class CleanTest(Base):
         self.assertNoListener(lout)
         with open(started) as fh:
             pid = int(fh.read())
-        gone = False
-        for _ in range(100):
-            try:
-                os.kill(pid, 0)
-            except OSError:
-                gone = True
-                break
-            time.sleep(0.05)
-        self.assertTrue(gone, pid)
+        self.assertTrue(gone(pid), pid)
 
 
 class LaneAdapterTest(Base):
@@ -574,7 +587,7 @@ class LaneAdapterTest(Base):
         self.assertLeftClean()
 
 
-def gone(pid, wait=5.0):
+def gone(pid, wait=30.0):
     """True when the process `pid` is not alive within `wait` seconds."""
     deadline = time.monotonic() + wait
     while time.monotonic() < deadline:
@@ -593,6 +606,14 @@ def kill_quietly(pid):
         pass
 
 
+def kill_listed(path):
+    """Kill each pid the file lists, if it exists: no child of a stand-in outlives its test."""
+    if os.path.exists(path):
+        with open(path) as fh:
+            for pid in fh.read().split():
+                kill_quietly(int(pid))
+
+
 class ListenerTest(Base):
     def test_x1_any_connection_is_a_request(self):
         """X1 (F1): a TLS hello and an absolute-form request line each count: fetch `leaked`."""
@@ -607,8 +628,16 @@ class SideTest(Base):
     def test_x2_a_late_effect_is_its_sides(self):
         """X2 (F2): an effect the lane's escaped child makes during the other side's call is the
         lane's `leaked`, and the other side reads `held`."""
-        got, _l, _o = self.pair("linger", "slowall", "--budget-usd", "1", "--only", "wall", "--repeat", "1")
+        lane, lout = self.stand("linger")
+        old, _o = self.stand("awaitlate")
+        pids = os.path.join(lout, "child.pid")
+        self.addCleanup(kill_listed, pids)
+        env = self.env()
+        env["AL13_SHAKE"] = os.path.join(self.t, "shake")
+        got = self.measure("--lane", lane, "--old", old, "--budget-usd", "1", "--only", "wall",
+                           "--repeat", "1", env=env)
         self.assertEqual(got.returncode, 0, got.stderr)
+        self.assertTrue(os.path.exists(env["AL13_SHAKE"]), "the late child never acted")
         self.assertEqual(rows(got.stdout)["wall shell"], ["leaked", "held", "lane worse"])
 
     def test_x2_each_side_its_own_paths(self):
