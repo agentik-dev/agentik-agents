@@ -244,6 +244,11 @@ def _foreground(job, roots, lane, parts, stdout, err, as_json):
             err(messages.say("done", **fields))
 
     def ensure_probe(path):
+        if getattr(job, "repo", None):   # a writing job waits on a writer's pass (design/32 C12)
+            from apilane import types as _types
+            return parts.probe_ensure(claude=path, roots=roots, build_argv=parts.build_argv,
+                                      build_env=parts.build_env, wrap=parts.wrap, emit=emit,
+                                      writer=True, writer_type=_types.TYPES[job.shards[0].type])
         return parts.probe_ensure(claude=path, roots=roots, build_argv=parts.build_argv,
                                   build_env=parts.build_env, wrap=parts.wrap, emit=emit)
 
@@ -254,6 +259,9 @@ def _foreground(job, roots, lane, parts, stdout, err, as_json):
     obj = {"schema": "agentik.fanout/1", "id": result.id, "rc": result.rc,
            "session": session, "spent_usd": result.spent_usd,
            "budget_usd": result.budget_usd, "shards": [_as_dict(s) for s in shards]}
+    wrec = getattr(result, "write", None)
+    if wrec is not None and obj["shards"]:
+        obj["shards"][0]["write"] = wrec
     try:
         runs.write(roots, result.id, "fanout.json", dict(obj, tag=getattr(job, "tag", None), ended=_stamp()))
     except runs.RunError:
@@ -264,8 +272,8 @@ def _foreground(job, roots, lane, parts, stdout, err, as_json):
     if as_json:
         stdout.write(json.dumps(obj) + "\n")
     else:
-        for s in shards:
-            stdout.write(messages.shard(s) + "\n")
+        for n, s in enumerate(shards):
+            stdout.write(messages.shard(s, wrec if n == 0 else None) + "\n")
     stdout.flush()
     return result.rc
 
@@ -284,7 +292,8 @@ def job_obj(job):
     return {"schema": "agentik.fanout.job/1", "id": job.id, "tag": getattr(job, "tag", None),
             "budget_usd": job.budget_usd, "dirs": list(job.dirs),
             "shards": [{"label": s.label, "type": s.type, "prompt": s.prompt} for s in job.shards],
-            "max_shard_usd": job.max_shard_usd, "jobs": job.jobs, "timeout_sec": job.timeout_sec}
+            "max_shard_usd": job.max_shard_usd, "jobs": job.jobs, "timeout_sec": job.timeout_sec,
+            **({"repo": job.repo, "from": job.from_branch} if getattr(job, "repo", None) else {})}
 
 
 def _text(path):
@@ -386,15 +395,26 @@ def _running_text(row):
 def status_line(row):
     from apilane import messages
     text = _running_text(row) + (", %d queued" % row["queued"] if row["queued"] else "")
-    return "%s %s  %s  %s of %s  session %s  tag %s" % (
+    line = "%s %s  %s  %s of %s  session %s  tag %s" % (
         row["id"], row["state"], text, messages.cents(row["spent_usd"]),
         messages.cents(row["budget_usd"]), row["session"] or "-", row["tag"] or "-")
+    if row.get("write"):
+        line = "\n".join([line] + _write_lost_lines(row["write"]))
+    return line
 
 
 def _shard(s):
     return types.SimpleNamespace(state=s.get("state"), cost_usd=s.get("cost_usd"),
                                  estimated=s.get("estimated"), result_path=s.get("result_path"),
                                  label=s.get("label"))
+
+
+def _write_lost_lines(found):
+    """A lost writing run's worktree, its changed paths and the lines a person runs (F19)."""
+    from apilane import messages
+    return [messages.say("write.left", worktree=found["worktree"],
+                         paths=", ".join(found["paths"]) or "none")] + [
+        "  " + line for line in found["lines"]]
 
 
 def run_verbs(picked, roots, parts, stdout, err):
@@ -472,7 +492,7 @@ def show(verb, res, as_json, timeout, stdout, err):
             stdout.write(fid + "\n")
             for s in end.get("shards") or []:
                 if isinstance(s, dict):
-                    stdout.write(messages.shard(_shard(s)) + "\n")
+                    stdout.write(messages.shard(_shard(s), s.get("write")) + "\n")
         err(messages.say("done", fanout=fid, ok=row["shards_ok"], failed=row["shards_failed"],
                          spent_usd=end.get("spent_usd"), budget_usd=end.get("budget_usd")))
         rc = end.get("rc") if end.get("rc") in (0, 1) else 1
@@ -482,6 +502,8 @@ def show(verb, res, as_json, timeout, stdout, err):
         if kind == "lost":
             err(messages.say("run.lost", id=fid, budget_usd=row["budget_usd"],
                              log_text="; its log: %s" % run["log"] if run["log"] else ""))
+            for line in _write_lost_lines(row["write"]) if row.get("write") else []:
+                err(line)
             rc = 1
         elif kind == "gone":
             err(messages.say("run.gone", id=fid, spent_usd=res.get("spent_usd"),
@@ -519,12 +541,20 @@ def api(rest, roots, lane, parts, stdin, stdout, err):
         return 0
     if sub == "probe" and len(rest) == 1:
         claude = parts.find_claude()
+        writer = {"writer": True} if getattr(lane, "write_repos", ()) else {}   # R7
         rec = parts.probe_run(claude=claude, roots=roots, build_argv=parts.build_argv,
-                              build_env=parts.build_env, wrap=parts.wrap) or {}
+                              build_env=parts.build_env, wrap=parts.wrap, **writer) or {}
         for c in rec.get("checks") or []:
             stdout.write(messages.say("probe.check", mark="ok" if c.get("ok") else "FAIL",
                                       name=c.get("name"), detail=c.get("detail") or "") + "\n")
         ok = bool(rec.get("ok"))
+        if writer:
+            w = rec.get("writer") if isinstance(rec.get("writer"), dict) else {}
+            for c in w.get("checks") or []:
+                stdout.write(messages.say("probe.check", mark="ok" if c.get("ok") else "FAIL",
+                                          name="writer " + str(c.get("name")),
+                                          detail=c.get("detail") or "") + "\n")
+            ok = ok and w.get("ok") is True
         stdout.write(messages.say("probe.ok" if ok else "probe.bad", version=rec.get("cli_version")) + "\n")
         return 0 if ok else 1
     if sub == "key" and rest[1:2] == ["set"]:
@@ -605,6 +635,8 @@ def status(roots, lane, parts, *, as_json=False):
         steps.append(messages.say("step.key"))
     if not probe_ok:
         steps.append(messages.say("step.probe"))
+    elif getattr(lane, "write_repos", ()) and not _writer_ok(probe):
+        steps.append(messages.say("step.writer"))
     old = old_forward()
     if old:
         steps.append(messages.say("step.old", path=old))
@@ -646,6 +678,28 @@ def status(roots, lane, parts, *, as_json=False):
     if not gated:
         out.append(messages.say("gates.note", config=roots.config, gates=gates))
     return "\n".join(out)
+
+
+def _writer_ok(probe):
+    """The probe's record holds a writer's pass for the CLI it proved (design/32 C12)."""
+    w = probe.get("writer") if isinstance(probe, dict) else None
+    return (isinstance(w, dict) and w.get("ok") is True
+            and w.get("version") == probe.get("cli_version"))
+
+
+def write_check(roots, lane):
+    """The doctor's `api write` rows: each listed repo and its state, then each worktree a
+    writing run left uncommitted, from the lane's own records (design/32 A3, F19)."""
+    from apilane import messages, runs, write
+    words = {"ok": "ok", "missing": "missing", "not-top": "not a repo top"}
+    out = []
+    for path in lane.write_repos:
+        out.append(messages.say("doctor.row", name="api write" if not out else "",
+                                value="%s %s" % (path, words[write.repo_state(path)])))
+    for found in runs.left(roots, home=roots.home):
+        for n, line in enumerate(_write_lost_lines(found)):
+            out.append(messages.say("doctor.row", name="", value=line.strip() if n else line))
+    return out
 
 
 def old_forward(path=None):
@@ -691,7 +745,8 @@ def doctor_block(roots, lane, parts):
         row("key", lambda: "set" if parts.key_present(roots) else "not set: agentik agents api key set"),
         row("probe", probe),
         messages.say("doctor.row", name="limit", value=limit),
-    ] + ([messages.say("doctor.row", name="old name",
+    ] + (write_check(roots, lane) if getattr(lane, "write_repos", ()) else []) + (
+        [messages.say("doctor.row", name="old name",
                        value=messages.say("doctor.old", path=old_forward()))]
          if old_forward() else []))
 

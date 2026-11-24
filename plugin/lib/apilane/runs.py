@@ -299,7 +299,7 @@ def row(roots, run, alive):
     else:
         ok, failed = report._count(live.get("ok")), report._count(live.get("failed"))
         spent = _money(live.get("spent_usd"))
-    return {"id": run["id"], "state": "ended" if st == "never" else st,
+    out = {"id": run["id"], "state": "ended" if st == "never" else st,
             "tag": start.get("tag", end.get("tag")), "session": _session(run), "pid": start.get("pid"), "started": start.get("at"),
             "ended": end.get("ended"), "rc": end.get("rc"),
             "budget_usd": _money(start.get("budget_usd", end.get("budget_usd"))),
@@ -307,6 +307,39 @@ def row(roots, run, alive):
             "queued": report._count(live.get("queued")) if st == "running" else 0,
             "running": [{"run": r, "type": t} for r, t, _j in shards],
             "shards_ok": ok, "shards_failed": failed}
+    if st == "lost":
+        rec = _write_rec(roots, run["id"])
+        if rec is not None:
+            from apilane import write as _write
+            found = _write.lost(rec, home=roots.home)
+            if found:
+                out["write"] = found
+    return out
+
+
+def _write_rec(roots, fid):
+    """The writing shard's run.json of a fan-out, or None for a read run."""
+    rec = _read(os.path.join(roots.state, "runs", fid + "-01", "run.json"))
+    return rec if isinstance(rec, dict) and rec.get("worktree") else None
+
+
+def left(roots, home=None):
+    """Each worktree a writing run left uncommitted (design/32 F19), from the lane's own run
+    records while the state folder holds them: a `commit` that is not `ok`, or none at all."""
+    from apilane import write as _write
+    out = []
+    try:
+        names = sorted(os.listdir(os.path.join(roots.state, "runs")))
+    except OSError:
+        return out
+    for name in names:
+        rec = _read(os.path.join(roots.state, "runs", name, "run.json"))
+        if not isinstance(rec, dict) or not rec.get("worktree") or rec.get("commit") == "ok":
+            continue
+        found = _write.lost(rec, home=home)
+        if found and found["paths"]:
+            out.append(dict(found, run=name))
+    return out
 
 
 def by_type(rows):

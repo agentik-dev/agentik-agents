@@ -115,7 +115,7 @@ def _seconds(n):
 
 
 def run_shard(shard, *, grant_usd, fanout, number, session, roots, lane, claude, dirs,
-              timeout_sec, restricted=True, wrap=None, key=None):
+              timeout_sec, restricted=True, wrap=None, key=None, write=None):
     """Run one shard to its end and return its ShardResult (seams §4)."""
     if wrap is None:
         from apilane import wall
@@ -138,10 +138,15 @@ def run_shard(shard, *, grant_usd, fanout, number, session, roots, lane, claude,
         _mkdir(d)
     cmd = _argv.build(shard, claude=claude, dirs=dirs, ceiling_usd=grant_usd / OVERSHOOT_FACTOR,
                       run_dir=run_dir, restricted=restricted)
-    walled = wrap(cmd, read=dirs, write=[run_dir], net="all", home=roots.home)
+    tree = (write or {}).get("worktree")
+    # a writing shard writes its run folder and its worktree, and starts in the worktree (B8)
+    walled = wrap(cmd, read=dirs, write=[run_dir] + ([tree] if tree else []), net="all",
+                  home=roots.home)
     record = {"schema": SCHEMA, "id": run_id, "pid": None, "pid_started": None,
               "type": t.name, "model": t.model, "label": shard.label, "session": session,
               "fanout": fanout, "grant_usd": grant_usd, "started": _now(), "state": "running"}
+    if tree:
+        record.update({k: write.get(k) for k in ("repo", "worktree", "branch", "from", "from_sha")})
     run_json = os.path.join(run_dir, "run.json")
 
     def finish(state, reason, rc, cost_usd, estimated, result_path):
@@ -157,7 +162,7 @@ def run_shard(shard, *, grant_usd, fanout, number, session, roots, lane, claude,
                            ca_file=getattr(lane, "ca_file", None))
     try:
         child = subprocess.Popen(walled, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                                 stderr=subprocess.PIPE, env=child_env, cwd=run_dir,
+                                 stderr=subprocess.PIPE, env=child_env, cwd=tree or run_dir,
                                  start_new_session=True, close_fds=True)
     except OSError:
         # Nothing was executed, so no request was made: zero is a measurement here.

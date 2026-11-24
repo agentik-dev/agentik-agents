@@ -45,7 +45,10 @@ def main(event, text, *, roots=None, backend=None, out=None):
             if backend() is None:
                 _say(out, event, messages.say("hook.platform", platform=platform.system()))
             else:
-                _say(out, event, messages.say("hook.on"))
+                text = messages.say("hook.on")
+                if getattr(lane, "write_repos", ()):    # design/32 A5
+                    text += " " + messages.say("hook.write")
+                _say(out, event, text)
         elif event == "UserPromptSubmit":
             try:
                 session = json.loads(text).get("session_id")
