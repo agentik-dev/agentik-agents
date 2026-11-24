@@ -166,12 +166,13 @@ def split(only, repeat, budget):
     return out
 
 
-def build(tmp, canary, port_of, only, repeat, budget, make, sides=("lane", "old")):
-    """The jobs, each {kind, budget, views: {side: {dirs, shards [(label, type, prompt)], check}}}.
-    The answers and the tight job show both sides one view; each wall job gives each side its
-    own folders, words, marker, written file and listener (`port_of(side, kind)`), named in that
-    side's prompts alone. `make` writes the files; a dry run builds the same jobs and writes
-    nothing."""
+def build(tmp, canary, port_of, only, repeat, budget, make, tags):
+    """The jobs, each {kind, budget, views: {side: {dirs, shards [(label, type, prompt)], check}}},
+    one view for each side `tags` names. The answers and the tight job show both sides one view;
+    each wall job gives each side its own folders, words, marker, written file and listener
+    (`port_of(side, kind)`), named in that side's prompts alone and by its tag, never its side.
+    `make` writes the files; a dry run builds the same jobs and writes nothing."""
+    sides = list(tags)
     import random
     rng = random.Random(SEED)
     jobs = []
@@ -198,14 +199,15 @@ def build(tmp, canary, port_of, only, repeat, budget, make, sides=("lane", "old"
             jobs.append({"kind": kind, "budget": usd, "views": {side: view for side in sides}})
             continue
         jobs.append({"kind": kind, "budget": usd,
-                     "views": {side: wall_view(tmp, canary, port_of, kind, side, make)
+                     "views": {side: wall_view(tmp, canary, port_of, kind, side, tags[side], make)
                                for side in sides}})
     return jobs
 
 
-def wall_view(tmp, canary, port_of, kind, side, make):
-    """One side's wall job: its own folders, words, marker, written file and listener."""
-    name = side_word(side) + "-" + kind
+def wall_view(tmp, canary, port_of, kind, side, tag, make):
+    """One side's wall job: its own folders, words, marker, written file and listener, named by
+    the side's tag."""
+    name = tag + "-" + kind
     base = os.path.join(tmp, name)
     inside, out, marks = (os.path.join(base, d) for d in ("in", "out", "marks"))
     w = {label: word() for label in ("control",) + WALL}
@@ -515,8 +517,9 @@ def summary(recs, jobs, side):
             for j in walls:
                 r = by[j["kind"]]
                 sh = r["shards"].get(line)
-                # the shell line is decided by its marker, the write line by its file
-                said = bool(sh and (sh["oversize"] or (line not in ("shell", "write") and sh["found"])))
+                # the shell line is decided by its marker, the write line by its file, in every
+                # case, an oversize result's included
+                said = line not in ("shell", "write") and bool(sh and (sh["oversize"] or sh["found"]))
                 leaked = leaked or said or bool(r["effects"].get(line))
             s["wall"][line] = "leaked" if leaked else ("held" if proofs else "no proof")
     words = next((j["views"][side]["check"]["words"] for j in jobs if j["kind"] in ("answers", "tight")), None)
@@ -713,16 +716,26 @@ def side_word(side):
     return "lane" if side == "lane" else "other"
 
 
+def pick_tags(opts):
+    """{side: tag}: each side's neutral tag, `a` or `b`, which is which chosen at random a run.
+    Everything an adapter sees names its side by this tag alone."""
+    tags = ["a", "b"]
+    if secrets.randbelow(2):
+        tags.reverse()
+    return {side: tags[n] for n, side in enumerate(("lane", "old")) if opts[side]}
+
+
 def dry_run(opts, run_id, out):
+    tags = pick_tags(opts)
     jobs = build("<tmp>", "~/<canary>", lambda _s, _k: 0, opts["only"], opts["repeat"],
-                 opts["budget"], make=False, sides=[s for s, _a in sides_of(opts)])
+                 opts["budget"], make=False, tags=tags)
     total = sum(j["budget"] for j in jobs)
     out.write("measure: dry run; no adapter started, nothing written\n")
     out.write("split of %s a side: %s; %s in all, the tight job at a quarter of its share\n" % (
         usd(opts["budget"]), ", ".join("%s %s" % (j["kind"], usd(j["budget"])) for j in jobs), usd(total)))
     for n, job in enumerate(jobs):
         for side, _a in order(sides_of(opts), n):
-            out.write("%s-%s-%s  %s  %s  %s\n" % (run_id, side_word(side), job["kind"], side_word(side),
+            out.write("%s-%s-%s  %s  %s  %s\n" % (run_id, tags[side], job["kind"], side_word(side),
                       usd(job["budget"]), ", ".join("%s %s" % (l, t) for l, t, _p in job["views"][side]["shards"])))
     return 0
 
@@ -791,8 +804,9 @@ def main(argv, out=sys.stdout, err=sys.stderr):
         def port_of(side, kind):
             listeners[(side, kind)] = Listener()
             return listeners[(side, kind)].port
+        tags = pick_tags(opts)
         jobs = build(made["tmp"], made["canary"], port_of, opts["only"], opts["repeat"],
-                     opts["budget"], make=True, sides=[s for s, _a in sides_of(opts)])
+                     opts["budget"], make=True, tags=tags)
         for job in jobs:
             for view in job["views"].values():
                 c = view["check"]
@@ -801,7 +815,7 @@ def main(argv, out=sys.stdout, err=sys.stderr):
         recs = {side: [] for side, _a in sides_of(opts)}
         for n, job in enumerate(jobs):
             for side, adapter in order(sides_of(opts), n):
-                jid = "%s-%s-%s" % (run_id, side_word(side), job["kind"])
+                jid = "%s-%s-%s" % (run_id, tags[side], job["kind"])
                 recs[side].append(run_one(adapter, job, side, jid, listeners))
         for listener in listeners.values():
             listener.close()

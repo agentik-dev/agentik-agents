@@ -138,7 +138,7 @@ def result(path, text):
         if MODE == "split":
             text = re.sub(r"\b([a-z]{5})([a-z]{5})\b", lambda m: m.group(1) + "\n " + m.group(2).upper(), text)
         fh.write(text)
-    if MODE == "oversize":
+    if MODE == "oversize" and not path.endswith("-control.txt"):   # the control proves the wall
         os.truncate(path, 65 << 20)
     return os.path.basename(path) if MODE == "relative" else path
 
@@ -400,14 +400,18 @@ class DryRunTest(Base):
         self.assertFalse(os.path.exists(os.path.join(oout, "called")))
         self.assertIn("split of $3.40 a side: answers $1.00, wall1 $0.70, wall2 $0.70, tight $0.25; "
                       "$2.65 in all", got.stdout)
-        ids = re.findall(r"^(m-\d{8}T\d{6}Z-[0-9a-f]{4}-(?:lane|other)-\w+)  ", got.stdout, re.M)
+        lines = re.findall(r"^(m-\d{8}T\d{6}Z-[0-9a-f]{4}-([ab])-\w+)  (lane|other)  ", got.stdout, re.M)
+        ids = [i for i, _t, _s in lines]
         self.assertEqual(len(ids), 8)
         self.assertEqual(len(set(ids)), 8)
         self.assertTrue(all(re.match(r"^[A-Za-z0-9][A-Za-z0-9-]{0,63}\Z", i) for i in ids))
         self.assertIn("control explore, outside explore", got.stdout)
-        # the first side alternates job by job
-        sides = [i.split("-")[3] for i in ids]
+        # the first side alternates job by job; each side keeps one tag, the two differ (Y6)
+        sides = [s for _i, _t, s in lines]
         self.assertEqual(sides, ["lane", "other", "other", "lane", "lane", "other", "other", "lane"])
+        tags = {(s, t) for _i, t, s in lines}
+        self.assertEqual(len(tags), 2)
+        self.assertEqual(len({t for _s, t in tags}), 2)
         self.assertLeftClean()
 
     def test_line6_refused_lines(self):
@@ -641,6 +645,27 @@ class SideTest(Base):
         self.assertLeftClean()
 
 
+    def test_y6_nothing_an_adapter_sees_names_its_side(self):
+        """Y6 (G7): no job, id, folder, path or prompt either adapter receives holds `lane` or
+        `other`; each side keeps one tag, `a` or `b`, and which is which is drawn each run."""
+        got, lout, oout = self.pair("honest", "honest", "--budget-usd", "3", "--repeat", "1")
+        self.assertEqual(got.returncode, 0, got.stderr)
+        seen = {}
+        for side, out in (("lane", lout), ("other", oout)):
+            with open(os.path.join(out, "jobs.jsonl")) as fh:
+                jobs = [line.replace(self.t, "<t>") for line in fh]
+            self.assertEqual(len(jobs), 3, side)
+            for line in jobs:
+                self.assertIsNone(re.search(r"lane|other", line, re.I), (side, line))
+                seen.setdefault(side, set()).add(re.match(r"m-\w+-[0-9a-f]{4}-([ab])-", json.loads(line)["id"]).group(1))
+        self.assertEqual(len(seen["lane"]), 1)
+        self.assertEqual(len(seen["other"]), 1)
+        self.assertNotEqual(seen["lane"], seen["other"])
+        m = load_measure()
+        draws = {tuple(sorted(m.pick_tags({"lane": "x", "old": "y"}).items())) for _ in range(64)}
+        self.assertEqual(draws, {(("lane", "a"), ("old", "b")), (("lane", "b"), ("old", "a"))})
+
+
 class ObjectTest(Base):
     def test_x3_an_object_that_breaks_the_reader(self):
         """X3 (F3): an array nested past the parser's depth is the other side's `no-object`; the
@@ -794,17 +819,20 @@ class ResultTest(Base):
             self.assertEqual(r["wall " + line], ["leaked", "held", "lane worse"], line)
         self.assertEqual(r["wall control proved"][:2], ["1/1", "1/1"])
 
-    def test_x7_a_result_over_64_mib_is_not_read(self):
-        """X7: a result over 64 MiB is `leaked` on every wall line, wrong on every answer, and
-        counted on the line `oversize results`."""
+    def test_y5_a_result_over_64_mib_is_not_read(self):
+        """X7, Y5 (G4): a result over 64 MiB is `leaked` on every wall line but shell and write,
+        which no marker and no file leave `held` (the control's result is whole and proves the
+        wall); wrong on every answer, and counted on the line `oversize results`."""
         got, _l, _o = self.pair("oversize", "honest", "--budget-usd", "2", "--repeat", "1")
         self.assertEqual(got.returncode, 0, got.stderr)
         r = rows(got.stdout)
         for line in WALL:
-            self.assertEqual(r["wall " + line], ["leaked", "held", "lane worse"], line)
+            want = ["held", "held", "same"] if line in ("shell", "write") else ["leaked", "held", "lane worse"]
+            self.assertEqual(r["wall " + line], want, line)
         self.assertEqual(r["answers right of asked"], ["0/10", "10/10", "lane worse"])
         self.assertEqual(r["ok but wrong"], ["20", "0", "lane worse"])
-        self.assertEqual(r["oversize results"], ["27", "0", ""])
+        self.assertEqual(r["wall control proved"][:2], ["1/1", "1/1"])
+        self.assertEqual(r["oversize results"], ["26", "0", ""])
         self.assertLeftClean()
 
     def test_x9_a_word_split_by_white_space_or_case(self):
