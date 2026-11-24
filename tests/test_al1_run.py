@@ -133,6 +133,45 @@ class World(unittest.TestCase):
             timeout_sec=timeout, restricted=restricted, wrap=wrap or self.stand_in,
             key=self.key)
 
+    # brief 3 of al9b: a shard cut at a timeout of a second, its record read after. Under a
+    # loaded machine the fake had not written its record when the cut came (the check's red at
+    # 966a3fb). Here the lane's own `communicate`, and so its timeout's clock, starts once the
+    # fake has its prompt and has written its record; the cut stays the lane's.
+    RECORD_WAIT_SEC = 60
+
+    def run_cut(self, mode, **kw):
+        """run_mode, the lane's timeout counted from the fake's record; returns the result
+        and the time the record was seen, None when it never was."""
+        self.assertFalse(os.path.exists(self.rec), "no older record")
+        rec_path, seen, wait = self.rec, {}, self.RECORD_WAIT_SEC
+
+        class Fed(subprocess.Popen):
+            def communicate(self, input=None, timeout=None):
+                if input is not None and self.stdin is not None:
+                    self.stdin.write(input)
+                    self.stdin.close()
+                    self.stdin, input = None, None
+                    end = time.time() + wait
+                    while time.time() < end:
+                        try:
+                            with open(rec_path) as f:
+                                json.load(f)
+                            seen["at"] = time.time()
+                            break
+                        except (OSError, ValueError):
+                            time.sleep(0.02)
+                return super().communicate(input, timeout)
+
+        run = mod("run")
+        ns = pytypes.SimpleNamespace(**vars(subprocess))
+        ns.Popen = Fed
+        run.subprocess = ns
+        try:
+            r = self.run_mode(mode, **kw)
+        finally:
+            run.subprocess = subprocess
+        return r, seen.get("at")
+
     def run_dir(self, number=1):
         return os.path.join(self.roots.state, "runs", "f1-%02d" % number)
 
@@ -598,12 +637,15 @@ class RunTest(World):
         self.assertFalse(os.path.exists(os.path.join(self.run_dir(), "result.json")))
 
     def test_the_sleeper_is_timeout_and_its_group_is_gone(self):
-        t0 = time.time()
-        r = self.run_mode("sleep", timeout=1, grant=0.4)
+        r, t0 = self.run_cut("sleep", timeout=1, grant=0.4)
+        self.assertIsNotNone(t0, "the fake wrote its record within %d s"
+                             % self.RECORD_WAIT_SEC)
         self.assertLess(time.time() - t0, 20)
         self.assertEqual((r.state, r.reason, r.cost_usd, r.estimated),
                          ("timeout", "timeout:1", 0.4, True))
         rec = self.record()
+        self.assertIsNotNone(rec, "the fake started, so the cut cut it")
+        self.assertEqual(rec["mode"], "sleep")
         gone = False
         for _ in range(50):
             try:
@@ -698,8 +740,12 @@ class SecretsTest(World):
                     os.unlink(self.rec)
                 if mode == "wall":
                     kw = dict(wrap=lambda argv, **k: ["/bin/sh", "-c", "exit 65"])
-                r = self.run_mode("cost" if mode == "wall" else mode, number=n,
-                                  extra=PROMPT_SECRET, **kw)
+                if mode == "sleep":
+                    r, seen = self.run_cut(mode, number=n, extra=PROMPT_SECRET, **kw)
+                    self.assertIsNotNone(seen, "the sleeper's record, before its cut")
+                else:
+                    r = self.run_mode("cost" if mode == "wall" else mode, number=n,
+                                      extra=PROMPT_SECRET, **kw)
                 for s in SECRETS:
                     self.assertNotIn(s, repr(r), mode)
                 rec = self.record()
