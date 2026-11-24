@@ -107,6 +107,8 @@ def parse(argv):
                 raise Refused("measure: %s needs a value" % flag)
             value = args.pop(0)
         if flag in ("--lane", "--old"):
+            if not value:
+                raise Refused("measure: %s needs a value" % flag)
             opts[flag[2:]] = value
         elif flag == "--budget-usd":
             try:
@@ -128,7 +130,9 @@ def parse(argv):
     if not opts["lane"] and not opts["old"]:
         raise Refused("measure: give --lane, --old or both: each an adapter's path")
     for side in ("lane", "old"):
-        p = opts[side]
+        # made absolute once: the file checked is the file run, a bare name read against the
+        # working folder, never PATH
+        p = opts[side] = os.path.abspath(opts[side]) if opts[side] else None
         if p and not (os.path.isfile(p) and os.access(p, os.X_OK)):
             raise Refused("measure: the --%s adapter is not an executable file" % side)
     opts["only"] = [m for m in MEASURES if m in opts["only"]] or list(MEASURES)
@@ -354,7 +358,7 @@ def call(adapter, obj):
         try:
             got = json.loads(cand)
             break
-        except ValueError:
+        except Exception:      # whatever an adapter prints, reading it never ends the run
             continue
     return got, None, sec
 
@@ -415,17 +419,28 @@ def run_one(adapter, job, side, jid, listeners):
     rec = {"kind": job["kind"], "budget": job["budget"], "seconds": sec, "reason": why,
            "effects": evidence(view, listeners), "shards": {}, "spent": None, "tool": None}
     if why is None:
-        rec["reason"] = check(got, labels)
+        try:
+            rec["reason"] = check(got, labels)
+        except Exception:
+            rec["reason"] = "shape"
     if rec["reason"] is None:
-        rec["tool"] = got["tool"]
-        for s in got["shards"]:
-            rec["shards"][s["label"]] = {"state": s["state"], "cost": s.get("cost_usd"),
-                                         "model": s.get("model"), "seconds": s.get("seconds"),
-                                         "text": read_result(s.get("result"))}
-        spent = got.get("spent_usd")
-        costs = [s["cost"] for s in rec["shards"].values() if s["cost"] is not None]
-        rec["spent"] = spent if spent is not None else (sum(costs) if costs else None)
+        try:
+            take(rec, got)
+        except Exception:
+            rec.update(reason="shape", shards={}, spent=None, tool=None)
     return rec
+
+
+def take(rec, got):
+    """A whole object's fields into the job's record."""
+    rec["tool"] = got["tool"]
+    for s in got["shards"]:
+        rec["shards"][s["label"]] = {"state": s["state"], "cost": s.get("cost_usd"),
+                                     "model": s.get("model"), "seconds": s.get("seconds"),
+                                     "text": read_result(s.get("result"))}
+    spent = got.get("spent_usd")
+    costs = [s["cost"] for s in rec["shards"].values() if s["cost"] is not None]
+    rec["spent"] = spent if spent is not None else (sum(costs) if costs else None)
 
 
 def late_effects(recs, jobs, listeners):

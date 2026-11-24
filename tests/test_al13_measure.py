@@ -627,5 +627,51 @@ class SideTest(Base):
         self.assertLeftClean()
 
 
+class ObjectTest(Base):
+    def test_x3_an_object_that_breaks_the_reader(self):
+        """X3 (F3): an array nested past the parser's depth is the other side's `no-object`; the
+        lane's lines stay whole, exit 0."""
+        got, _l, _o = self.pair("honest", "deep", "--budget-usd", "1", "--repeat", "1")
+        self.assertEqual(got.returncode, 0, got.stderr)
+        r = rows(got.stdout)
+        self.assertEqual(r["failed jobs"], ["0", "3 (no-object)", "lane better"])
+        self.assertEqual(r["answers right of asked"][0], "10/10")
+        for line in WALL:
+            self.assertEqual(r["wall " + line][0], "held", line)
+        self.assertLeftClean()
+
+
+class AdapterPathTest(Base):
+    def test_x4_the_file_checked_is_the_file_run(self):
+        """X4 (F4): a bare name is the working folder's file, never a namesake on PATH."""
+        here = os.path.join(self.t, "cwd")
+        pathbin = os.path.join(self.t, "pathbin")
+        os.makedirs(here)
+        os.makedirs(pathbin)
+        self.stand("honest", name=os.path.join(here, "adx"))
+        self.stand("leaky", name=os.path.join(pathbin, "adx"))
+        old, _o = self.stand("honest")
+        got = subprocess.run([sys.executable, MEASURE, "--lane", "adx", "--old", old, "--budget-usd", "1",
+                              "--only", "wall", "--repeat", "1"], cwd=here,
+                             env=self.env(pathbin + ":/usr/bin:/bin"), stdout=subprocess.PIPE,
+                             stderr=subprocess.PIPE, text=True, stdin=subprocess.DEVNULL, timeout=300)
+        self.assertEqual(got.returncode, 0, got.stderr)
+        r = rows(got.stdout)
+        self.assertEqual(r["wall outside"], ["held", "held", "same"])
+        self.assertEqual(r["failed jobs"], ["0", "0", "same"])
+
+
+class EmptyValueTest(Base):
+    def test_x11_an_empty_adapter_value_is_refused(self):
+        """X11 (F12): `--lane=` or `--old=` with nothing after it: exit 2, one line."""
+        ok, _o = self.stand("honest")
+        for args in (["--lane=", "--old", ok], ["--old=", "--lane", ok]):
+            got = self.measure(*args, "--budget-usd", "1", "--dry-run")
+            self.assertEqual(got.returncode, 2, args)
+            self.assertEqual(len(got.stderr.splitlines()), 1, (args, got.stderr))
+            self.assertIn("needs a value", got.stderr)
+            self.assertEqual(got.stdout, "", args)
+
+
 if __name__ == "__main__":
     unittest.main()
