@@ -6,11 +6,13 @@ user would: `agentik agents fanout - --yes --json`, found by PATH, in the foregr
 returns when the run has ended. From the one object the verb prints (`agentik.fanout/1`) it
 writes one `agentik.measure.result/1` object on stdout: the job's `spent_usd`; for each shard its
 `label`, its `state` (`ok` and `skipped` as the lane says them, every other lane state `failed`),
-`cost_usd`, `model`, and `result`, the `result_path` the verb names. It reads no file of the
-lane's state folder; the verb's own stderr passes through to this one's.
+`cost_usd`, `model`, and `result`, the `result_path` the verb names. The `model` is the one the
+lane asked for, given only where the shard's `cost_usd` is a number above zero, so a shard that
+reached no model names none. It reads no result file and no file of the lane's state folder; the
+verb's own stderr passes through to this one's.
 
-What the verb does not print is null or left out: the lane's version (`tool` says so) and a
-shard's seconds. When the verb exits other than 0 or 1 (2 is the lane's off line and every
+What the verb does not print is left out: the lane's version (`tool` is the verb's name alone)
+and a shard's seconds. When the verb exits other than 0 or 1 (2 is the lane's off line and every
 refusal), or prints no object of its schema, the object is `error: "tool"` with no shards.
 Stdlib only; 3.9 and later.
 """
@@ -20,7 +22,7 @@ import sys
 
 RESULT_SCHEMA = "agentik.measure.result/1"
 LANE_SCHEMA = "agentik.fanout/1"
-TOOL = "agentik agents fanout, version not printed"
+TOOL = "agentik agents fanout"   # three names, so the card prints it whole
 VERB = ["agentik", "agents", "fanout", "-", "--yes", "--json"]
 
 
@@ -34,6 +36,12 @@ def number(v):
 
 def text(v):
     return v if isinstance(v, str) and v else None
+
+
+def spent_model(s):
+    """The shard's model where it spent, else None: a shard at $0 or no cost reached no model."""
+    cost = number(s.get("cost_usd"))
+    return text(s.get("model")) if cost is not None and cost > 0 else None
 
 
 def lane_object(out):
@@ -57,7 +65,7 @@ def result_of(got):
         state = s.get("state")
         shards.append({"label": s.get("label"),
                        "state": state if state in ("ok", "skipped") else "failed",
-                       "cost_usd": number(s.get("cost_usd")), "model": text(s.get("model")),
+                       "cost_usd": number(s.get("cost_usd")), "model": spent_model(s),
                        "result": text(s.get("result_path"))})
     return {"schema": RESULT_SCHEMA, "tool": TOOL, "spent_usd": number(got.get("spent_usd")),
             "shards": shards}

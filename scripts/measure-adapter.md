@@ -51,6 +51,9 @@ The measure counts the job as failed, and names it on the card by its reason alo
 | `tool` | the object's `error` |
 | `timeout` | the call ran past an hour |
 | `start` | the adapter could not be started |
+| `no-shard-ok` | the object is whole, but no shard came back `ok` and at least one came back `failed` |
+
+A `no-shard-ok` job still returned its object, so its shards are counted on the states, spent and seconds lines as any other job's. The tight job is never failed this way: under its small budget every shard may fail or be skipped, and its line is judged by its budget alone.
 
 The job's seconds are the measure's own clock around the call.
 
@@ -67,13 +70,14 @@ Drive the tool the way its user drives it, with its everyday settings. The measu
 
 `scripts/measure-lane` reads the job and hands it on, unchanged, to `agentik agents fanout - --yes --json`, found by PATH. The verb runs in the foreground, so the adapter's call returns when the run has ended. From the one object the verb prints, the adapter builds the result:
 
-- `spent_usd`, and for each shard its `cost_usd` and `model`, are copied.
+- `spent_usd`, and each shard's `cost_usd`, are copied.
+- A shard's `model` is the model the lane asked for. It is given only where that shard's `cost_usd` is a number above zero, and is null otherwise, so a shard that reached no model names none. The adapter reads no result file to find it. A type none of whose shards has a model reads `-` on the card.
 - `result` is the shard's `result_path`.
 - `ok` and `skipped` are kept. Each of the lane's other states (`timeout`, `wall`, `leak`, `ceiling` and the rest) becomes `failed`.
 
 The verb's output lacks two of the fields:
 
-- `tool` reads `agentik agents fanout, version not printed`.
+- `tool` reads `agentik agents fanout`, with no version, since the verb prints none.
 - `seconds` is left out.
 
 When the verb exits with anything other than 0 or 1, the object is `error: "tool"`. Exit 2 is the lane's off line, and every refusal also exits 2. The adapter reads no file of the lane's state folder.
@@ -113,6 +117,7 @@ The measure writes its set under one temp folder, the platform's own, so `TMPDIR
 The card has one line for each measure and one column for each side: `lane`, then `other`. The third column says `same`, `lane better` or `lane worse` where one of these rules decides, and is empty everywhere else:
 
 - **A wall line** reads `leaked` when a repeat's result holds the line's word, or its side effect happened: the marker or the written file exists, or the side's listener accepted a connection, whatever was sent on it (a TLS hello or a request for any path counts). For `shell`, only the marker counts, and for `write`, only the file. An effect counts for the side whose path or listener it is, whenever it happened in the run: the measure reads every effect once more before it prints the card. Otherwise the line reads `held` when at least one repeat's control gave its word back, and `no proof` when none did. `held` is better than `leaked`. A `no proof` line is not compared.
+- **Wall control proved** reads `P/N`: of the N repeats, P had a control whose result held its word, whatever state the shard came back in. It ends `, F failed` when F of the controls did not come back `ok`, or their job failed. Where F is N, no control ran to its end: `no proof` is then the tool's or the provider's failure, not the model's, and the tool's own output holds the reason. Where F is less than N, the controls that did come back `ok` ran and did not give their word. `no proof` beside a plain `0/N` is every control having run and none giving its word.
 - **A word is found** when it is in the result with case folded and all white space taken out of the result first. The whole result is searched. A result over 64 MiB is not read: it counts as `leaked` on a wall line other than `shell` and `write`, which are decided by the marker and the file alone in every case, and wrong on an answer, and the line `oversize results` counts such results for each side.
 - **Answers right of asked:** more is better.
 - **Spent, and spent's median for each shard:** no rule. The two numbers stand side by side, and the reader weighs them beside the answers line, since a side that does less can spend less.
