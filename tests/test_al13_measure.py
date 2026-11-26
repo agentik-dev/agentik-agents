@@ -562,7 +562,7 @@ class LaneAdapterTest(Base):
         obj = json.loads(got.stdout)
         self.assertEqual(sorted(obj), ["schema", "shards", "spent_usd", "tool"])
         self.assertEqual(obj["schema"], "agentik.measure.result/1")
-        self.assertEqual(obj["tool"], "agentik agents fanout, version not printed")
+        self.assertEqual(obj["tool"], "agentik agents fanout")
         self.assertEqual(obj["spent_usd"], 0.12)
         states = ["ok", "failed", "skipped", "failed", "ok"]
         for n, s in enumerate(obj["shards"]):
@@ -999,6 +999,50 @@ class RefusalTest(Base):
             self.assertEqual(r["wall control proved"][0], want, mode)
         r = self.lane_only("donothing", "--only", "wall")
         self.assertEqual(r["wall control proved"][0], "0/2, 2 failed")
+
+
+def load_script(path):
+    """A script of scripts/ as a module, in this process: its top level starts nothing."""
+    import importlib.machinery
+    import importlib.util
+    name = "under_test_" + os.path.basename(path).replace("-", "_")
+    loader = importlib.machinery.SourceFileLoader(name, path)
+    spec = importlib.util.spec_from_loader(name, loader)
+    m = importlib.util.module_from_spec(spec)
+    loader.exec_module(m)
+    return m
+
+
+class LaneTruthTest(Base):
+    """al13b C3, C4: the lane adapter's `tool` prints whole; its `model` only where a shard spent."""
+
+    def test_c3_every_shipped_adapters_tool_prints_whole(self):
+        """C3 (line 4): each shipped adapter's `TOOL` through the card's `tool_text`, unchanged."""
+        m = load_measure()
+        scripts = os.path.join(REPO, "scripts")
+        adapters = sorted(os.path.join(scripts, f) for f in os.listdir(scripts)
+                          if f.startswith("measure-") and not f.endswith(".md"))
+        self.assertEqual([os.path.basename(a) for a in adapters], ["measure-lane"])
+        for path in adapters:
+            tool = load_script(path).TOOL
+            self.assertEqual(m.tool_text(tool), tool, path)
+
+    def test_c4_a_model_only_where_the_shard_spent(self):
+        """C4 (line 5): over a made-up verb object, cost 0 and cost null give a null model, cost
+        0.01 the verb's model; no result file is read, so a path that does not exist passes."""
+        lane = load_script(LANE)
+        nowhere = os.path.join(self.t, "no-such-result.txt")
+        got = {"schema": "agentik.fanout/1", "spent_usd": 0.01, "shards": [
+            {"label": "s1", "state": "failed", "cost_usd": 0, "model": "made-up-model-1"},
+            {"label": "s2", "state": "failed", "cost_usd": None, "model": "made-up-model-1"},
+            {"label": "s3", "state": "ok", "cost_usd": 0.01, "model": "made-up-model-1",
+             "result_path": nowhere},
+            {"label": "s4", "state": "failed", "cost_usd": 0.0, "model": "made-up-model-1"},
+            {"label": "s5", "state": "failed", "cost_usd": True, "model": "made-up-model-1"}]}
+        obj = lane.result_of(got)
+        self.assertEqual([s["model"] for s in obj["shards"]], [None, None, "made-up-model-1", None, None])
+        self.assertEqual(obj["shards"][2]["result"], nowhere)
+        self.assertEqual(obj["tool"], "agentik agents fanout")
 
 
 if __name__ == "__main__":
