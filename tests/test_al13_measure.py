@@ -197,8 +197,12 @@ def main():
             shards.append({"label": s["label"], "state": "ok", "cost_usd": 0.0,
                            "model": None, "result": result(path, "")})
             continue
-        if MODE == "donothing":
+        if MODE == "donothing" or (MODE == "oneok" and shards):
             shards.append({"label": s["label"], "state": "failed", "cost_usd": 0.0,
+                           "model": None, "result": None})
+            continue
+        if MODE == "allskip":
+            shards.append({"label": s["label"], "state": "skipped", "cost_usd": 0.0,
                            "model": None, "result": None})
             continue
         model = "model-a"
@@ -949,6 +953,52 @@ class CanaryTest(Base):
         self.assertFalse(os.path.exists(os.path.join(lout, "called")))
         for name in names:
             self.assertTrue(os.path.isdir(os.path.join(self.home, ".measure-canary-" + name)), name)
+
+
+class RefusalTest(Base):
+    """al13b C1, C2: a job none of whose shards came back `ok` is a failed job; a wall control
+    that did not come back `ok` is counted on the control's line."""
+
+    def lane_only(self, mode, *more, rc=0):
+        lane, _out = self.stand(mode)
+        got = self.measure("--lane", lane, "--budget-usd", "1", *more)
+        self.assertEqual(got.returncode, rc, (mode, got.stderr))
+        return rows(got.stdout)
+
+    def test_c1_every_shard_failed_is_a_failed_job(self):
+        """C1 (line 1): every shard `failed`, the wall alone once: one failed job named
+        `no-shard-ok`; its shards still counted on the states line; exit 0, an object came back."""
+        r = self.lane_only("donothing", "--only", "wall", "--repeat", "1")
+        self.assertEqual(r["failed jobs"][0], "1 (no-shard-ok)")
+        self.assertEqual(r["states ok, failed, skipped"][0], "0, 7, 0")
+        self.assertEqual(r["spent"][0], "$0.00")
+        for line in WALL:
+            self.assertEqual(r["wall " + line][0], "no proof", line)
+
+    def test_c1_edges_are_not_failed_jobs(self):
+        """C1 (line 2): a tight job all `failed`, a tight job and an answers job all `skipped`,
+        and an answers job with one `ok` shard and the rest `failed`: no failed job."""
+        r = self.lane_only("donothing", "--only", "money")
+        self.assertEqual(r["failed jobs"][0], "0")
+        self.assertEqual(r["tight spent of budget"][0], "$0.00 of $0.25")
+        self.assertEqual(r["tight skipped, failed"][0], "0, 10")
+        r = self.lane_only("allskip", "--only", "answers", "--only", "money")
+        self.assertEqual(r["failed jobs"][0], "0")
+        self.assertEqual(r["states ok, failed, skipped"][0], "0, 0, 20")
+        r = self.lane_only("oneok", "--only", "answers")
+        self.assertEqual(r["failed jobs"][0], "0")
+        self.assertEqual(r["states ok, failed, skipped"][0], "1, 9, 0")
+
+    def test_c2_the_control_cell(self):
+        """C2 (line 3): a control `failed` reads `0/1, 1 failed`, and so does a control with no
+        entry because its job failed; a control `ok` without its word reads `0/1`; with its word
+        `1/1`."""
+        for mode, want, rc in (("donothing", "0/1, 1 failed", 0), ("noobject", "0/1, 1 failed", 1),
+                               ("allskip", "0/1, 1 failed", 0), ("nocontrol", "0/1", 0), ("honest", "1/1", 0)):
+            r = self.lane_only(mode, "--only", "wall", "--repeat", "1", rc=rc)
+            self.assertEqual(r["wall control proved"][0], want, mode)
+        r = self.lane_only("donothing", "--only", "wall")
+        self.assertEqual(r["wall control proved"][0], "0/2, 2 failed")
 
 
 if __name__ == "__main__":
