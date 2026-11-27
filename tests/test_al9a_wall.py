@@ -953,6 +953,31 @@ class Al9cEditTest(Al9cCase):
         self.assertEqual(said, ("line one " + long)[:160])
         self.assertIsNone(self.probe._answer(reqs, 1, "made-up-key", "/made/up/home"))
 
+    def test_a_key_split_across_two_lines_is_out(self):
+        """al9c X4 (N1): the key comes out before the lines are joined, and again after."""
+        key = "agentik-probe-" + "ab" * 16
+        for text in ("err %s\n   %s tail" % (key[:20], key[20:]), "err %s tail" % key,
+                     "err %s\n%s\n%s tail" % (key[:5], key[5:30], key[30:])):
+            reqs = [{"turn": 1, "tool_results": [{"text": text}]}]
+            self.assertEqual(self.probe._answer(reqs, 0, key, "/made/up/home"), "err <key> tail",
+                             text)
+
+    def test_the_home_comes_out_only_as_a_whole_path(self):
+        """al9c X4 (N2): the home followed by `/` or the end of the word, never as a prefix."""
+        text = "/made/upper/x and /made/up/y, home /made/up) or /made/up. /made/up.bak /made/up"
+        reqs = [{"turn": 1, "tool_results": [{"text": text}]}]
+        self.assertEqual(self.probe._answer(reqs, 0, "made-up-key", "/made/up"),
+                         "/made/upper/x and ~/y, home ~) or ~. /made/up.bak ~")
+
+    def test_an_answer_with_no_text(self):
+        """al9c X4 (N3): a tool result with no text says so; none at all is the build's words."""
+        for text in ("", "  \n\n "):
+            reqs = [{"turn": 1, "tool_results": [{"text": text}]}]
+            self.assertEqual(self.probe._answered(reqs, 0, "made-up-key", "/made/up/home"),
+                             "; the CLI answered with no text", repr(text))
+        self.assertEqual(self.probe._answered([], 0, "made-up-key", "/made/up/home"),
+                         "; the CLI answered nothing")
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

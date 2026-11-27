@@ -55,6 +55,7 @@ with its own environment and stdin, and writes the stub's requests to a file the
 
 import json
 import os
+import re
 import secrets
 import shutil
 import signal
@@ -740,29 +741,37 @@ def _last_line(output, key, home):
 
 def _answer(reqs, at, key, home):
     """What the CLI answered the stub for call `at` of the list: the first tool result of the
-    request that follows it, its lines that are not blank joined by a space, the key out, the
-    home as `~` (its real path first, the longer), cut to 160; None where none came back."""
+    request that follows it, the key out (across line breaks and spaces, before its lines that
+    are not blank are joined by a space, and again after), the home as `~` only as a whole path
+    (its real path first, the longer), cut to 160; None where none came back (al9c W3, X4)."""
     for r in reqs:
         if r.get("turn") != at + 1:
             continue
         for res in r.get("tool_results") or []:
             if not isinstance(res, dict):
                 continue
-            text = " ".join(ln.strip() for ln in str(res.get("text", "")).splitlines()
-                            if ln.strip())
+            text = str(res.get("text", ""))
+            if key:
+                text = re.sub(r"\s*".join(re.escape(ch) for ch in key), "<key>", text)
+            text = " ".join(ln.strip() for ln in text.splitlines() if ln.strip())
             text = text.replace(key, "<key>") if key else text
             for h in sorted({home, os.path.realpath(home)} if home else (), key=len,
                             reverse=True):
                 if h and h != os.sep:
-                    text = text.replace(h, "~")
+                    # a whole path: no name runs on before it, and `/` or the word's end after
+                    text = re.sub(r"(?<![\w.~-])%s(?![\w-]|\.[\w-])" % re.escape(h.rstrip(os.sep)),
+                                  "~", text)
             return text[:160]
     return None
 
 
 def _answered(reqs, at, key, home):
-    """`; the CLI answered: <its answer to call at>`, for a failed check's detail (al9c W3)."""
+    """`; the CLI answered: <its answer to call at>`, for a failed check's detail (al9c W3), or
+    that it answered with no text, or nothing (X4)."""
     said = _answer(reqs, at, key, home)
-    return "; the CLI answered nothing" if said is None else "; the CLI answered: " + said
+    if said is None:
+        return "; the CLI answered nothing"
+    return "; the CLI answered: " + said if said else "; the CLI answered with no text"
 
 
 def _private_dir(path):
