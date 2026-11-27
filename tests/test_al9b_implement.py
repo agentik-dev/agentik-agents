@@ -703,6 +703,54 @@ class RefusedTest(World):
 
 # -- 5, 28, 29: the doctor, a lost run, the sweep -------------------------------------------------
 
+class DoctorProbeRowTest(World):
+    """al9c W6: with a repo listed, the doctor's `probe` row says the writer's pass too."""
+
+    def row(self, rec, repos=None):
+        from apilane import messages
+        parts = pytypes.SimpleNamespace(wall_backend=lambda: "x", key_present=lambda r: True,
+                                        probe_read=lambda r: rec)
+        with mock.patch.object(CLI, "old_forward", lambda path=None: None):
+            block = CLI.doctor_block(self.roots, self.lane(repos), parts)
+        head = messages.say("doctor.row", name="probe", value="@").split("@")[0]
+        got = [ln for ln in block.splitlines() if ln.startswith(head)]
+        self.assertEqual(len(got), 1, block)
+        return got[0][len(head):]
+
+    def rec(self, writer=None, ok=True):
+        r = {"schema": "agentik.api.probe/1", "cli_version": "9.9.9", "ok": ok, "checks": []}
+        if writer is not None:
+            r["writer"] = writer
+        return r
+
+    def writer(self, failed=(), version="9.9.9"):
+        names = ("key", "tools", "walled", "restricted", "write", "edit", "writewalled", "inert")
+        checks = [{"name": n, "ok": n not in failed, "detail": ""} for n in names]
+        return {"version": version, "ok": not failed, "type": "implement",
+                "tools": ["Edit", "Read"], "checks": checks}
+
+    def test_passed(self):
+        self.assertEqual(self.row(self.rec(self.writer())), "ok at CLI 9.9.9; writer ok")
+
+    def test_failed_names_the_first_check_that_failed(self):
+        self.assertEqual(self.row(self.rec(self.writer(failed=("write", "edit")))),
+                         "ok at CLI 9.9.9; writer failed at write")
+
+    def test_owed(self):
+        for rec in (self.rec(), self.rec(self.writer(version="9.9.8"))):
+            self.assertEqual(self.row(rec),
+                             "ok at CLI 9.9.9; writer owed: agentik agents api probe")
+        self.assertEqual(self.row(self.rec(ok=False)),
+                         "owed: agentik agents api probe; writer owed")
+        self.assertEqual(self.row(None), "owed: agentik agents api probe; writer owed")
+
+    def test_none_listed_is_the_pins_row(self):
+        for rec in (self.rec(), self.rec(self.writer()), self.rec(self.writer(failed=("edit",)))):
+            self.assertEqual(self.row(rec, repos=[]), "ok at CLI 9.9.9")
+        for rec in (None, self.rec(ok=False)):
+            self.assertEqual(self.row(rec, repos=[]), "owed: agentik agents api probe")
+
+
 class DoctorTest(World):
     def test_check(self):
         missing = os.path.join(self.home, "code", "gone")

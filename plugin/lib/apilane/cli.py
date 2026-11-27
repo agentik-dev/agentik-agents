@@ -687,6 +687,21 @@ def _writer_ok(probe):
             and w.get("version") == probe.get("cli_version"))
 
 
+def _writer_said(probe, reader_ok):
+    """The doctor's word on the writer's pass while `api.write_repos` lists a repo (al9c W6):
+    `ok` where status counts it passed, `failed at <check>` for a pass of this CLI that did not,
+    its first failed check but `restricted`, else owed."""
+    if reader_ok and _writer_ok(probe):
+        return "ok"
+    w = probe.get("writer") if isinstance(probe, dict) else None
+    if reader_ok and isinstance(w, dict) and w.get("version") == probe.get("cli_version"):
+        checks = w.get("checks") if isinstance(w.get("checks"), list) else []
+        first = [c.get("name") for c in checks if isinstance(c, dict)
+                 and c.get("name") != "restricted" and c.get("ok") is not True]
+        return "failed at %s" % first[0] if first else "failed"
+    return "owed: agentik agents api probe" if reader_ok else "owed"
+
+
 def write_check(roots, lane):
     """The doctor's `api write` rows: each listed repo and its state, then each worktree a
     writing run left uncommitted, from the lane's own records (design/32 A3, F19)."""
@@ -733,8 +748,12 @@ def doctor_block(roots, lane, parts):
     def probe():
         rec = parts.probe_read(roots)
         if rec and rec.get("ok"):
-            return "ok at CLI %s" % rec.get("cli_version")
-        return "owed: agentik agents api probe"
+            said = "ok at CLI %s" % rec.get("cli_version")
+        else:
+            said = "owed: agentik agents api probe"
+        if not getattr(lane, "write_repos", ()):
+            return said
+        return "%s; writer %s" % (said, _writer_said(rec, said.startswith("ok")))
 
     limit = (messages.say("limit.stated", limit=messages.money(lane.console_limit_usd))
              if lane.console_limit_usd is not None else messages.say("limit.none"))
