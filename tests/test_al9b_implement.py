@@ -1067,10 +1067,37 @@ import os, sys, time
 if sys.argv[1:2] == ["--version"]:
     print("9.9.9 (Fake Code)")
     sys.exit(0)
-with open(os.path.join(os.getcwd(), "pid.txt"), "w") as fh:
-    fh.write(str(os.getpid()))
+with open(os.path.join(os.getcwd(), "started.txt"), "w") as fh:
+    fh.write("started\n")
 time.sleep(120)
 '''
+
+
+def sleepers(path):
+    """The host's pids of the processes whose command line names `path`, from the host's own
+    process table (/proc where there is one, else ps): never a pid a walled process wrote, since
+    the Linux wall's pid namespace numbers its processes apart from the host's (al9c W5)."""
+    names = {path, os.path.realpath(path)}
+    found = []
+    if os.path.isdir("/proc/self"):
+        for n in os.listdir("/proc"):
+            if not n.isdigit():
+                continue
+            try:
+                with open("/proc/%s/cmdline" % n, "rb") as fh:
+                    argv = fh.read().decode("utf-8", "replace").split("\0")
+            except OSError:
+                continue
+            if names & set(argv):
+                found.append(int(n))
+        return found
+    out = subprocess.run(["/bin/ps", "-axo", "pid=,command="], capture_output=True,
+                         text=True).stdout
+    for line in out.splitlines():
+        pid, _, cmd = line.strip().partition(" ")
+        if names & set(cmd.split()):
+            found.append(int(pid))
+    return found
 
 CHILD = r'''
 import json, sys, types
@@ -1107,20 +1134,24 @@ class LinuxWriteTest(World):
         arg = json.dumps({"roots": vars(self.roots), "lane": vars(self.lane()), "repo": self.repo,
                           "claude": claude})
         child = subprocess.Popen([sys.executable, "-c", CHILD, LIB, arg], start_new_session=True)
-        mark = os.path.join(self.repo, ".claude", "worktrees", "k1", "pid.txt")
+        mark = os.path.join(self.repo, ".claude", "worktrees", "k1", "started.txt")
         for _ in range(400):
             if os.path.exists(mark) and os.path.getsize(mark):
                 break
             time.sleep(0.05)
-        with open(mark) as fh:
-            pid = int(fh.read())
+        self.assertTrue(os.path.exists(mark), "the sleeper never started")
+        self.assertNotEqual(sleepers(claude), [], "the host's table shows no sleeper")
         os.kill(child.pid, 9)
         child.wait(10)
-        time.sleep(1.0)
-        with self.assertRaises(ProcessLookupError):
-            os.kill(pid, 0)
+        left = sleepers(claude)
+        for _ in range(100):
+            if not left:
+                break
+            time.sleep(0.05)
+            left = sleepers(claude)
+        self.assertEqual(left, [], "the killed fan-out left its sleeper running")
         self.assertEqual(self.git("rev-parse", "k1"), self.git("rev-parse", "main"))
-        self.assertEqual(W.lost(self.run_json("k1"), home=self.home)["paths"], ["pid.txt"])
+        self.assertEqual(W.lost(self.run_json("k1"), home=self.home)["paths"], ["started.txt"])
 
 
 if __name__ == "__main__":
