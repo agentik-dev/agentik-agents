@@ -207,12 +207,18 @@ class TypeTest(unittest.TestCase):
     def test_implement(self):
         t = T.TYPES["implement"]
         self.assertEqual((t.name, t.model, t.tools, t.schema, t.writes),
-                         ("implement", "claude-sonnet-5-5", ("Read", "Edit", "Write"), None, True))
+                         ("implement", "claude-sonnet-5-5", ("Read", "Edit"), None, True))
         self.assertEqual(T.EFFORT["implement"], "high")
         role = T.ROLES["implement"]
         for words in ("working folder", "no shell", ".git", "CLAUDE.md", "DECISIONS.md",
-                      "settings.json", "hooks/", "fifty lines", "which test proves it"):
+                      "settings.json", "hooks/", "fifty lines", "which test proves it",
+                      "Read and Edit", "empty old_string", "new_string"):
             self.assertIn(words, role)
+
+    def test_role_names_no_write_tool(self):
+        """al9c W4: the role names the tools as built; `Write` is no tool of the type."""
+        self.assertNotIn("Write", T.ROLES["implement"])
+        self.assertNotIn("Write", T.TYPES["implement"].tools)
 
     def test_read_rows_are_the_pins(self):
         for name, (_argv, row) in PIN.items():
@@ -238,14 +244,15 @@ class ArgvTest(unittest.TestCase):
     def test_writer(self):
         a = self.build("implement")
         flag = lambda f: a[a.index(f) + 1]   # noqa: E731
-        self.assertEqual(flag("--tools"), "Read Edit Write")
-        self.assertEqual(flag("--allowedTools"), "Read Edit Write")
+        self.assertEqual(flag("--tools"), "Read Edit")       # al9c W1
+        self.assertEqual(flag("--allowedTools"), "Read Edit")
         denied = flag("--disallowedTools").split(" ")
-        self.assertEqual(denied[-5:], ["Bash", "WebFetch", "WebSearch", "Agent", "Task"])
+        self.assertEqual(denied[-6:], ["Write", "Bash", "WebFetch", "WebSearch", "Agent", "Task"])
         for p in A.DENY_PATHS:
-            for t in ("Read", "Edit", "Write"):
+            for t in ("Read", "Edit"):
                 self.assertIn("%s(%s)" % (t, p), denied)
-        self.assertEqual(len(denied), 3 * len(A.DENY_PATHS) + 5)
+        self.assertEqual([d for d in denied if d.startswith("Write(")], [])
+        self.assertEqual(len(denied), 2 * len(A.DENY_PATHS) + 6)
         read = self.build("explore")
         strip = lambda v: [x for i, x in enumerate(v) if i == 0 or v[i - 1] not in (   # noqa: E731
             "--tools", "--allowedTools", "--disallowedTools", "--model", "--effort",
