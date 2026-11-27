@@ -40,6 +40,9 @@ WRITER_CHECKS = ["key", "tools", "walled", "restricted", "write", "edit", "write
 PIN_WRITER_CHECKS = [n for n in WRITER_CHECKS if n != "edit"]   # al9c W2: the pin's seven
 HELD = ("neither attempt's outside writes landed, the direct attempt's were each refused "
         "and .git is unchanged")
+# al9c X3: the stub CLI's own words for an Edit of a file that is there and was not read first;
+# FAKE_WRITER holds the same text
+UNREAD = "the stub CLI: no Read of this file came first, so it edits nothing"
 # the pin's stub, its six replies to one made-up conversation: the sha256 measured at 82f2710
 PIN_REPLIES = "677f945dc873c5ec1005eec261d4ef490157362c47f89177c41a004407fb7da8"
 
@@ -397,6 +400,7 @@ def inside(p):
     p = os.path.realpath(p)
     return any(p == d or p.startswith(d + "/") for d in dirs)
 messages = [{"role": "user", "content": "probe"}]
+asked = set()          # al9c X3: the paths a Read was asked for, so far
 for turn in range(12):
     body = {"model": "fake", "max_tokens": 64, "messages": messages,
             "tools": [{"name": t, "input_schema": {"type": "object"}} for t in tools]}
@@ -413,9 +417,15 @@ for turn in range(12):
             continue
         path = block["input"].get("file_path", "")
         old, new = block["input"].get("old_string"), block["input"].get("new_string")
+        if block["name"] == "Read":
+            asked.add(os.path.realpath(path))
         try:
             if block["name"] in ("Write", "Edit") and MODE == "refuse" and not inside(path):
                 text, err = "outside the working directories", True   # a permission layer's
+            elif block["name"] == "Edit" and os.path.exists(path) \
+                    and os.path.realpath(path) not in asked:
+                # al9c X3: a file that is there is edited only once it was asked to be read
+                text, err = "the stub CLI: no Read of this file came first, so it edits nothing", True
             elif block["name"] == "Edit" and MODE == "newrefused" and not old \
                     and not os.path.exists(path):
                 # al9c W3: a refusal in words of its own, the key and the home in it
@@ -822,6 +832,60 @@ def result_of(stub, at):
     """The tool result the CLI sent the stub for its call `at`."""
     found = [r for r in stub.results if str(r.get("tool_use_id")).endswith("_%d" % at)]
     return found[0] if found else None
+
+
+class Al9cReadFirstTest(Al9cCase):
+    """al9c X3: the stub CLI edits no file that is there unless it was asked to read it first,
+    as a real CLI may refuse; the probe reads the `README` before its Edit."""
+
+    def play(self, calls):
+        """The stub CLI in its `good` mode, run on `calls` outside any wall: its tool results."""
+        stub = stubapi.Stub(reads=[], calls=calls)
+        stub.start()
+        try:
+            env = {"PATH": "/usr/bin:/bin", "HOME": self.home.root,
+                   "ANTHROPIC_BASE_URL": stub.url, "ANTHROPIC_API_KEY": "made-up-key"}
+            subprocess.run([self.cli("good"), "--tools", "Read Edit"], env=env, timeout=30,
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
+        finally:
+            stub.stop()
+        return [(r["is_error"], r["text"]) for r in stub.results]
+
+    def test_the_stub_refuses_an_edit_of_a_file_it_did_not_read(self):
+        folder = tempfile.mkdtemp(prefix="al9c-x3-")
+        self.addCleanup(shutil.rmtree, folder, True)
+        there, new = os.path.join(folder, "there.txt"), os.path.join(folder, "new.txt")
+        with open(there, "w", encoding="utf-8") as fh:
+            fh.write("one\n")
+        got = self.play([{"tool": "Edit", "path": there, "old": "one", "text": "two"},
+                         {"tool": "Edit", "path": new, "old": "", "text": "made"},
+                         {"tool": "Read", "path": there},
+                         {"tool": "Edit", "path": there, "old": "one", "text": "two"}])
+        self.assertEqual(got, [(True, UNREAD), (False, "created"), (False, "one\n"),
+                               (False, "edited")])
+        with open(there, encoding="utf-8") as fh:
+            self.assertEqual(fh.read(), "two\n")
+
+    def test_the_readme_is_read_before_its_edit(self):
+        rec, stubs = answered(self, "good")
+        calls = stubs[-1].calls
+        at = [i for i, c in enumerate(calls) if os.path.basename(c["path"]) == "README"]
+        self.assertEqual([calls[i]["tool"] for i in at], ["Read", "Edit"])
+        self.assertEqual(at[1], at[0] + 1)
+        self.assertIs(self.wchecks(rec)["edit"]["ok"], True)
+        self.assertIs(rec["writer"]["ok"], True, rec["writer"])
+
+    def test_without_the_read_edit_fails_in_the_stubs_words(self):
+        def no_read(calls):     # the README's Read becomes a Read of a file that is not there
+            return [dict(c, path=os.path.join(os.path.dirname(c["path"]), "probe-not-there"))
+                    if c["tool"] == "Read" and os.path.basename(c["path"]) == "README" else c
+                    for c in calls]
+        rec, _ = answered(self, "good", swap=no_read)
+        c = self.wchecks(rec)["edit"]
+        self.assertIs(c["ok"], False, c)
+        self.assertTrue(c["detail"].endswith("; the CLI answered: " + UNREAD), c["detail"])
+        self.assertIs(rec["writer"]["ok"], False)
+        self.assertEqual(leftovers(), [])
 
 
 class Al9cToolsTest(Al9cCase):

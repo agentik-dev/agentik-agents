@@ -24,8 +24,8 @@ own run folder as the `write` folders. The writing type's tools are Read and Edi
 tools the CLI offers under `--bare`, so each new file the stub asks for is an Edit, an empty
 `old_string` and the text as `new_string`: five new files (the worktree's top, three new folders
 deep in it, a read dir, the account's temp folder, `/var/tmp`); the worktree's `.git` read, then
-edited from the text the probe made; one Edit that changes the throwaway repo's `README` in
-the worktree; and one read of the walled canary. A CLI may refuse a write before it tries it, so the
+edited from the text the probe made; the throwaway repo's `README` in the worktree read, then
+changed by an Edit (a CLI may refuse an Edit of a file it has not read); and one read of the walled canary. A CLI may refuse a write before it tries it, so the
 pass then proves the wall itself, the CLI aside: a direct attempt, `/bin/sh` through the same
 `wrap` call (the writer's read, write, net and home), writes a new file in the worktree, one in
 each of the three outside folders, and the worktree's `.git`, overwritten then removed, each on
@@ -560,9 +560,10 @@ def _writer(version, step, wtype, base, *, walled, walled_text, restricted, flag
         readme = os.path.join(tree, "README")
         texts["edit"] = "probe-edit-%s" % tag
         edit = {"tool": "Edit", "path": readme, "old": README_TEXT, "text": texts["edit"]}
+        # al9c X3: a CLI may refuse an Edit of a file it has not read, so the README is read first
         calls = [{"tool": "Edit", "path": inside["top"], "old": "", "text": texts["top"]},
                  {"tool": "Edit", "path": inside["deep"], "old": "", "text": texts["deep"]},
-                 edit]
+                 {"tool": "Read", "path": readme}, edit]
         calls += [{"tool": "Edit", "path": p, "old": "", "text": "probe-outside-%s" % tag}
                   for p in outside.values()]
         # al9c X2: `.git` read, then edited from the text the probe made, so the CLI's own
