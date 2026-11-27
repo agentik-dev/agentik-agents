@@ -207,12 +207,18 @@ class TypeTest(unittest.TestCase):
     def test_implement(self):
         t = T.TYPES["implement"]
         self.assertEqual((t.name, t.model, t.tools, t.schema, t.writes),
-                         ("implement", "claude-sonnet-5-5", ("Read", "Edit", "Write"), None, True))
+                         ("implement", "claude-sonnet-5-5", ("Read", "Edit"), None, True))
         self.assertEqual(T.EFFORT["implement"], "high")
         role = T.ROLES["implement"]
         for words in ("working folder", "no shell", ".git", "CLAUDE.md", "DECISIONS.md",
-                      "settings.json", "hooks/", "fifty lines", "which test proves it"):
+                      "settings.json", "hooks/", "fifty lines", "which test proves it",
+                      "Read and Edit", "empty old_string", "new_string"):
             self.assertIn(words, role)
+
+    def test_role_names_no_write_tool(self):
+        """al9c W4: the role names the tools as built; `Write` is no tool of the type."""
+        self.assertNotIn("Write", T.ROLES["implement"])
+        self.assertNotIn("Write", T.TYPES["implement"].tools)
 
     def test_read_rows_are_the_pins(self):
         for name, (_argv, row) in PIN.items():
@@ -238,14 +244,15 @@ class ArgvTest(unittest.TestCase):
     def test_writer(self):
         a = self.build("implement")
         flag = lambda f: a[a.index(f) + 1]   # noqa: E731
-        self.assertEqual(flag("--tools"), "Read Edit Write")
-        self.assertEqual(flag("--allowedTools"), "Read Edit Write")
+        self.assertEqual(flag("--tools"), "Read Edit")       # al9c W1
+        self.assertEqual(flag("--allowedTools"), "Read Edit")
         denied = flag("--disallowedTools").split(" ")
-        self.assertEqual(denied[-5:], ["Bash", "WebFetch", "WebSearch", "Agent", "Task"])
+        self.assertEqual(denied[-6:], ["Write", "Bash", "WebFetch", "WebSearch", "Agent", "Task"])
         for p in A.DENY_PATHS:
-            for t in ("Read", "Edit", "Write"):
+            for t in ("Read", "Edit"):
                 self.assertIn("%s(%s)" % (t, p), denied)
-        self.assertEqual(len(denied), 3 * len(A.DENY_PATHS) + 5)
+        self.assertEqual([d for d in denied if d.startswith("Write(")], [])
+        self.assertEqual(len(denied), 2 * len(A.DENY_PATHS) + 6)
         read = self.build("explore")
         strip = lambda v: [x for i, x in enumerate(v) if i == 0 or v[i - 1] not in (   # noqa: E731
             "--tools", "--allowedTools", "--disallowedTools", "--model", "--effort",
@@ -696,6 +703,96 @@ class RefusedTest(World):
 
 # -- 5, 28, 29: the doctor, a lost run, the sweep -------------------------------------------------
 
+class DoctorProbeRowTest(World):
+    """al9c W6: with a repo listed, the doctor's `probe` row says the writer's pass too."""
+
+    def row(self, rec, repos=None):
+        from apilane import messages
+        parts = pytypes.SimpleNamespace(wall_backend=lambda: "x", key_present=lambda r: True,
+                                        probe_read=lambda r: rec)
+        with mock.patch.object(CLI, "old_forward", lambda path=None: None):
+            block = CLI.doctor_block(self.roots, self.lane(repos), parts)
+        head = messages.say("doctor.row", name="probe", value="@").split("@")[0]
+        got = [ln for ln in block.splitlines() if ln.startswith(head)]
+        self.assertEqual(len(got), 1, block)
+        return got[0][len(head):]
+
+    def rec(self, writer=None, ok=True):
+        r = {"schema": "agentik.api.probe/1", "cli_version": "9.9.9", "ok": ok, "checks": []}
+        if writer is not None:
+            r["writer"] = writer
+        return r
+
+    def writer(self, failed=(), version="9.9.9"):
+        names = ("key", "tools", "walled", "restricted", "write", "edit", "writewalled", "inert")
+        checks = [{"name": n, "ok": n not in failed, "detail": ""} for n in names]
+        return {"version": version, "ok": not failed, "type": "implement",
+                "tools": ["Edit", "Read"], "checks": checks}
+
+    def test_passed(self):
+        self.assertEqual(self.row(self.rec(self.writer())), "ok at CLI 9.9.9; writer ok")
+
+    def test_failed_names_the_first_check_that_failed(self):
+        self.assertEqual(self.row(self.rec(self.writer(failed=("write", "edit")))),
+                         "ok at CLI 9.9.9; writer failed at write")
+
+    def test_owed(self):
+        for rec in (self.rec(), self.rec(self.writer(version="9.9.8"))):
+            self.assertEqual(self.row(rec),
+                             "ok at CLI 9.9.9; writer owed: agentik agents api probe")
+        self.assertEqual(self.row(self.rec(ok=False)),
+                         "owed: agentik agents api probe; writer owed")
+        self.assertEqual(self.row(None), "owed: agentik agents api probe; writer owed")
+
+    def status_step(self, rec):
+        """Whether `api status` lists the writer's pass among the steps left (al9c X1)."""
+        parts = pytypes.SimpleNamespace(key_present=lambda r: True, probe_read=lambda r: rec,
+                                        day=lambda r: {"sum_usd": 0.0}, alive=lambda pid: False)
+        with mock.patch.object(CLI, "old_forward", lambda path=None: None):
+            out = CLI.status(self.roots, self.lane(), parts)
+        return M.say("step.writer") in out.splitlines()
+
+    def test_the_pins_record_reads_owed(self):
+        """al9c X1: a 1.12.2 record, its tools Edit, Read and Write and no `edit`, is owed."""
+        from apilane import probe as P
+        w = self.writer()
+        w["tools"] = ["Edit", "Read", "Write"]
+        w["checks"] = [c for c in w["checks"] if c["name"] != "edit"]
+        rec = self.rec(w)
+        self.assertFalse(P._writer_passes(rec, "9.9.9", T.TYPES["implement"]))
+        self.assertEqual(self.row(rec), "ok at CLI 9.9.9; writer owed: agentik agents api probe")
+        self.assertTrue(self.status_step(rec))
+        w["checks"][4]["ok"] = w["ok"] = False      # its `write` failed: still the old shape
+        self.assertEqual(self.row(rec), "ok at CLI 9.9.9; writer owed: agentik agents api probe")
+
+    def test_a_record_of_another_type_reads_owed(self):
+        """al9c X1: a writer's pass of another type is owed for `implement`."""
+        for key, value in (("type", "made-up-writer"), ("tools", ["Edit", "Glob", "Read"])):
+            w = self.writer()
+            w[key] = value
+            rec = self.rec(w)
+            self.assertEqual(self.row(rec),
+                             "ok at CLI 9.9.9; writer owed: agentik agents api probe", key)
+            self.assertTrue(self.status_step(rec), key)
+
+    def test_a_record_passed_accepts_reads_ok(self):
+        """al9c X1: the record `passed(..., writer=True)` accepts reads `writer ok`."""
+        from apilane import probe as P
+        rec = self.rec(self.writer())
+        os.makedirs(self.roots.state, exist_ok=True)
+        with open(os.path.join(self.roots.state, "probe.json"), "w", encoding="utf-8") as fh:
+            json.dump(rec, fh)
+        self.assertTrue(P.passed(self.roots, "9.9.9", writer=True))
+        self.assertEqual(self.row(rec), "ok at CLI 9.9.9; writer ok")
+        self.assertFalse(self.status_step(rec))
+
+    def test_none_listed_is_the_pins_row(self):
+        for rec in (self.rec(), self.rec(self.writer()), self.rec(self.writer(failed=("edit",)))):
+            self.assertEqual(self.row(rec, repos=[]), "ok at CLI 9.9.9")
+        for rec in (None, self.rec(ok=False)):
+            self.assertEqual(self.row(rec, repos=[]), "owed: agentik agents api probe")
+
+
 class DoctorTest(World):
     def test_check(self):
         missing = os.path.join(self.home, "code", "gone")
@@ -1060,10 +1157,37 @@ import os, sys, time
 if sys.argv[1:2] == ["--version"]:
     print("9.9.9 (Fake Code)")
     sys.exit(0)
-with open(os.path.join(os.getcwd(), "pid.txt"), "w") as fh:
-    fh.write(str(os.getpid()))
+with open(os.path.join(os.getcwd(), "started.txt"), "w") as fh:
+    fh.write("started\n")
 time.sleep(120)
 '''
+
+
+def sleepers(path):
+    """The host's pids of the processes whose command line names `path`, from the host's own
+    process table (/proc where there is one, else ps): never a pid a walled process wrote, since
+    the Linux wall's pid namespace numbers its processes apart from the host's (al9c W5)."""
+    names = {path, os.path.realpath(path)}
+    found = []
+    if os.path.isdir("/proc/self"):
+        for n in os.listdir("/proc"):
+            if not n.isdigit():
+                continue
+            try:
+                with open("/proc/%s/cmdline" % n, "rb") as fh:
+                    argv = fh.read().decode("utf-8", "replace").split("\0")
+            except OSError:
+                continue
+            if names & set(argv):
+                found.append(int(n))
+        return found
+    out = subprocess.run(["/bin/ps", "-axo", "pid=,command="], capture_output=True,
+                         text=True).stdout
+    for line in out.splitlines():
+        pid, _, cmd = line.strip().partition(" ")
+        if names & set(cmd.split()):
+            found.append(int(pid))
+    return found
 
 CHILD = r'''
 import json, sys, types
@@ -1100,20 +1224,24 @@ class LinuxWriteTest(World):
         arg = json.dumps({"roots": vars(self.roots), "lane": vars(self.lane()), "repo": self.repo,
                           "claude": claude})
         child = subprocess.Popen([sys.executable, "-c", CHILD, LIB, arg], start_new_session=True)
-        mark = os.path.join(self.repo, ".claude", "worktrees", "k1", "pid.txt")
+        mark = os.path.join(self.repo, ".claude", "worktrees", "k1", "started.txt")
         for _ in range(400):
             if os.path.exists(mark) and os.path.getsize(mark):
                 break
             time.sleep(0.05)
-        with open(mark) as fh:
-            pid = int(fh.read())
+        self.assertTrue(os.path.exists(mark), "the sleeper never started")
+        self.assertNotEqual(sleepers(claude), [], "the host's table shows no sleeper")
         os.kill(child.pid, 9)
         child.wait(10)
-        time.sleep(1.0)
-        with self.assertRaises(ProcessLookupError):
-            os.kill(pid, 0)
+        left = sleepers(claude)
+        for _ in range(100):
+            if not left:
+                break
+            time.sleep(0.05)
+            left = sleepers(claude)
+        self.assertEqual(left, [], "the killed fan-out left its sleeper running")
         self.assertEqual(self.git("rev-parse", "k1"), self.git("rev-parse", "main"))
-        self.assertEqual(W.lost(self.run_json("k1"), home=self.home)["paths"], ["pid.txt"])
+        self.assertEqual(W.lost(self.run_json("k1"), home=self.home)["paths"], ["started.txt"])
 
 
 if __name__ == "__main__":

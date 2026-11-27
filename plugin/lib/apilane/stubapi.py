@@ -4,8 +4,10 @@
 `Stub(reads)` binds `127.0.0.1` on a port the system picks (or the one `start` is given) and answers `POST /v1/messages`,
 streamed or whole as the request asks, with a script: one turn a path of `reads`, each asking for
 one `Read` of it, then a closing text. `Stub(reads, calls=[...])` plays an ordered list of tool
-calls instead, one a turn, each `{"tool": "Write", "path": p, "text": t}` or `{"tool": "Read",
-"path": p}` (the writer's pass of the probe); with no list it replies as before, byte for byte.
+calls instead, one a turn, each `{"tool": "Edit", "path": p, "old": o, "text": t}`, sent as the
+CLI's Edit takes it (`old_string` o, `new_string` t; the writer's pass of the probe, al9c),
+`{"tool": "Write", "path": p, "text": t}` or `{"tool": "Read", "path": p}`; with no list it
+replies as before, byte for byte.
 The turn is the number of assistant messages the request carries, so a resent conversation gets
 the same answer. For each request it records the header names that carried a credential and
 their values, the tools offered, the tool results sent back, its turn and its body, all in
@@ -114,6 +116,9 @@ class Stub:
             data = {"file_path": call["path"]}
             if call["tool"] == "Write":
                 data["content"] = call["text"]
+            elif call["tool"] == "Edit":
+                data["old_string"] = call.get("old", "")
+                data["new_string"] = call["text"]
             block = {"type": "tool_use", "id": "toolu_stub_%d_%d" % (number, turn),
                      "name": call["tool"], "input": data}
             stop = "tool_use"

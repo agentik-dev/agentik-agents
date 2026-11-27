@@ -5,7 +5,8 @@ Each type's model is a row of the status tool's PRICES, the newest Sonnet for re
 and implement and the newest Opus for analyze; a test fails a type the table does not price.
 The three read types' role prompts and efforts are the old wrapper's, as they were. A type
 with `writes` edits one new git worktree of a repo the user file's `api.write_repos` lists,
-with Read, Edit and Write and no shell; the lane, never the agent, commits what it wrote on a
+with Read and Edit and no shell, the two file tools the CLI offers under `--bare`, an Edit of
+an empty `old_string` making a new file; the lane, never the agent, commits what it wrote on a
 branch of the job's id, and never pushes (apilane/write.py).
 """
 from collections import namedtuple
@@ -77,7 +78,8 @@ asked.''' + TOOL_LIMITS,
 # it (design/32 A1, G23).
 ROLES["implement"] = '''You are making one small, well-specified change to a repository. Your
 working folder is a new git worktree of it: write only there, never outside it. Your tools are
-Read, Edit and Write, by exact file path; there is no shell, no test run and no way to invoke a
+Read and Edit, by exact file path. To make a new file, Edit its path with an empty old_string
+and the file's whole text as new_string. There is no shell, no test run and no way to invoke a
 binary, so do not try. Never write a .git, a CLAUDE.md, a DECISIONS.md, a settings.json or a
 file under hooks/: the lane refuses the whole change if you do. Keep it to one change under
 fifty lines. Do not commit; the lane commits what you wrote. End with a short summary of what
@@ -85,7 +87,8 @@ changed and which test proves it.'''
 
 EFFORT = {"review": "medium", "explore": "low", "analyze": "high", "implement": "high"}
 
-WRITE_TOOLS = ("Read", "Edit", "Write")
+# The two file tools the CLI offers under --bare; --tools only narrows what it offers (al9c W1).
+WRITE_TOOLS = ("Read", "Edit")
 
 TYPES = {
     "review": Type("review", "claude-sonnet-5-5", TOOLS, FINDINGS_SCHEMA),

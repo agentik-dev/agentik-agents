@@ -56,8 +56,9 @@ class ClaudeNone(Exception):
 
 
 # A writing type's tools denied by name beside its paths (design/32 D13): no shell, no web, no
-# agent under either of the names the CLI has carried.
-WRITER_DENIED = ("Bash", "WebFetch", "WebSearch", "Agent", "Task")
+# agent under either of the names the CLI has carried. `Write` is no tool of the type (al9c W1):
+# a `Write(<path>)` rule matches nothing, so it is denied by name alone.
+WRITER_DENIED = ("Write", "Bash", "WebFetch", "WebSearch", "Agent", "Task")
 
 
 def deny_reads():
