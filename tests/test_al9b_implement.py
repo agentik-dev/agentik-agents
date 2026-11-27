@@ -744,6 +744,48 @@ class DoctorProbeRowTest(World):
                          "owed: agentik agents api probe; writer owed")
         self.assertEqual(self.row(None), "owed: agentik agents api probe; writer owed")
 
+    def status_step(self, rec):
+        """Whether `api status` lists the writer's pass among the steps left (al9c X1)."""
+        parts = pytypes.SimpleNamespace(key_present=lambda r: True, probe_read=lambda r: rec,
+                                        day=lambda r: {"sum_usd": 0.0}, alive=lambda pid: False)
+        with mock.patch.object(CLI, "old_forward", lambda path=None: None):
+            out = CLI.status(self.roots, self.lane(), parts)
+        return M.say("step.writer") in out.splitlines()
+
+    def test_the_pins_record_reads_owed(self):
+        """al9c X1: a 1.12.2 record, its tools Edit, Read and Write and no `edit`, is owed."""
+        from apilane import probe as P
+        w = self.writer()
+        w["tools"] = ["Edit", "Read", "Write"]
+        w["checks"] = [c for c in w["checks"] if c["name"] != "edit"]
+        rec = self.rec(w)
+        self.assertFalse(P._writer_passes(rec, "9.9.9", T.TYPES["implement"]))
+        self.assertEqual(self.row(rec), "ok at CLI 9.9.9; writer owed: agentik agents api probe")
+        self.assertTrue(self.status_step(rec))
+        w["checks"][4]["ok"] = w["ok"] = False      # its `write` failed: still the old shape
+        self.assertEqual(self.row(rec), "ok at CLI 9.9.9; writer owed: agentik agents api probe")
+
+    def test_a_record_of_another_type_reads_owed(self):
+        """al9c X1: a writer's pass of another type is owed for `implement`."""
+        for key, value in (("type", "made-up-writer"), ("tools", ["Edit", "Glob", "Read"])):
+            w = self.writer()
+            w[key] = value
+            rec = self.rec(w)
+            self.assertEqual(self.row(rec),
+                             "ok at CLI 9.9.9; writer owed: agentik agents api probe", key)
+            self.assertTrue(self.status_step(rec), key)
+
+    def test_a_record_passed_accepts_reads_ok(self):
+        """al9c X1: the record `passed(..., writer=True)` accepts reads `writer ok`."""
+        from apilane import probe as P
+        rec = self.rec(self.writer())
+        os.makedirs(self.roots.state, exist_ok=True)
+        with open(os.path.join(self.roots.state, "probe.json"), "w", encoding="utf-8") as fh:
+            json.dump(rec, fh)
+        self.assertTrue(P.passed(self.roots, "9.9.9", writer=True))
+        self.assertEqual(self.row(rec), "ok at CLI 9.9.9; writer ok")
+        self.assertFalse(self.status_step(rec))
+
     def test_none_listed_is_the_pins_row(self):
         for rec in (self.rec(), self.rec(self.writer()), self.rec(self.writer(failed=("edit",)))):
             self.assertEqual(self.row(rec, repos=[]), "ok at CLI 9.9.9")

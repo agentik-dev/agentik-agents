@@ -680,25 +680,29 @@ def status(roots, lane, parts, *, as_json=False):
     return "\n".join(out)
 
 
+def _writer_verdict(probe):
+    """The writer's pass in the probe's record for the CLI it proved, by the lane's own rule
+    (`probe.writer_verdict`, the table's `implement`; design/32 C12, al9c X1)."""
+    from apilane import probe as _probe
+    if not isinstance(probe, dict):
+        return None
+    return _probe.writer_verdict(probe, probe.get("cli_version"))
+
+
 def _writer_ok(probe):
-    """The probe's record holds a writer's pass for the CLI it proved (design/32 C12)."""
-    w = probe.get("writer") if isinstance(probe, dict) else None
-    return (isinstance(w, dict) and w.get("ok") is True
-            and w.get("version") == probe.get("cli_version"))
+    """The probe's record holds a writer's pass the lane would let a writing job run on."""
+    return _writer_verdict(probe) is True
 
 
 def _writer_said(probe, reader_ok):
-    """The doctor's word on the writer's pass while `api.write_repos` lists a repo (al9c W6):
-    `ok` where status counts it passed, `failed at <check>` for a pass of this CLI that did not,
-    its first failed check but `restricted`, else owed."""
-    if reader_ok and _writer_ok(probe):
+    """The doctor's word on the writer's pass while `api.write_repos` lists a repo (al9c W6,
+    X1): `ok` where the lane counts it passed, `failed at <check>` for a pass of this CLI, type,
+    tools and checks that did not, its first failed check but `restricted`, else owed."""
+    said = _writer_verdict(probe) if reader_ok else None
+    if said is True:
         return "ok"
-    w = probe.get("writer") if isinstance(probe, dict) else None
-    if reader_ok and isinstance(w, dict) and w.get("version") == probe.get("cli_version"):
-        checks = w.get("checks") if isinstance(w.get("checks"), list) else []
-        first = [c.get("name") for c in checks if isinstance(c, dict)
-                 and c.get("name") != "restricted" and c.get("ok") is not True]
-        return "failed at %s" % first[0] if first else "failed"
+    if said is not None:
+        return "failed at %s" % said
     return "owed: agentik agents api probe" if reader_ok else "owed"
 
 

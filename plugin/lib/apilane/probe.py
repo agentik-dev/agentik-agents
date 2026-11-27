@@ -157,21 +157,35 @@ def _writer_type(wtype):
     return wtype
 
 
-def _writer_passes(rec, version, wtype):
-    """The record holds a writer's pass for this version and this type, counted from its checks:
-    each of WRITER_CHECKS once, each true but `restricted`, the type's name and tools its own."""
+def writer_verdict(rec, version, wtype=_DEFAULT):
+    """The writer's pass in the record, by the one rule `passed(..., writer=True)` keeps: True
+    where it passes for this version and this type (by default the table's `implement`),
+    counted from its checks (each of WRITER_CHECKS once, each true but `restricted`, the type's
+    name and tools its own, `ok` true); else, for a record of this version, type, tools and set
+    of checks, the name of its first check but `restricted` that failed; else None, a pass owed
+    (al9c X1)."""
+    wtype = _writer_type(wtype)
     w = rec.get("writer") if isinstance(rec, dict) else None
-    if wtype is None or not isinstance(w, dict) or w.get("ok") is not True:
-        return False
+    if wtype is None or not isinstance(w, dict):
+        return None
     if (w.get("version") != version or w.get("type") != wtype.name
             or w.get("tools") != sorted(wtype.tools)):
-        return False
+        return None
     checks = w.get("checks")
     if not isinstance(checks, list) or not all(isinstance(c, dict) for c in checks):
-        return False
+        return None
     if sorted(str(c.get("name")) for c in checks) != sorted(WRITER_CHECKS):
-        return False
-    return all(c.get("ok") is True for c in checks if c.get("name") != "restricted")
+        return None
+    bad = [str(c.get("name")) for c in checks
+           if c.get("name") != "restricted" and c.get("ok") is not True]
+    if bad:
+        return bad[0]
+    return True if w.get("ok") is True else None
+
+
+def _writer_passes(rec, version, wtype):
+    """The record holds a writer's pass for this version and this type (`writer_verdict`)."""
+    return writer_verdict(rec, version, wtype) is True
 
 
 def passed(roots, version, writer=False, writer_type=_DEFAULT):
