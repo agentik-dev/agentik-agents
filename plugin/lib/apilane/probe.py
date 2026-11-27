@@ -20,14 +20,20 @@ wall, for a writing type (`writer_type`, by default the table's `implement`, whe
 one). It makes a throwaway repo and a worktree of it under `<roots.state>/probe/`, outside the
 wall, plants a hook in the worktree's `.claude/settings.json`, a `CLAUDE.md` and a hook in the
 run folder's config folder, then runs the writer's argv in the worktree with the worktree and its
-own run folder as the `write` folders; the stub asks for six writes (the worktree's top, three
+own run folder as the `write` folders. The writing type's tools are Read and Edit, the two file
+tools the CLI offers under `--bare`, so each write the stub asks for is an Edit that makes a new
+file, an empty `old_string` and the text as `new_string`: six writes (the worktree's top, three
 new folders deep in it, a read dir, the account's temp folder, `/var/tmp`, the worktree's
-`.git`) and one read of the walled canary. A CLI may refuse a write before it tries it, so the
+`.git`), one Edit that changes the throwaway repo's `README` in the worktree, and one read of the
+walled canary. A CLI may refuse a write before it tries it, so the
 pass then proves the wall itself, the CLI aside: a direct attempt, `/bin/sh` through the same
 `wrap` call (the writer's read, write, net and home), writes a new file in the worktree, one in
 each of the three outside folders, and the worktree's `.git`, overwritten then removed, each on
-its own; each outside file is the probe's own name, removed after whatever it found. Four checks
-of its own: `write` (both worktree files hold the stub's text), `writewalled` (the CLI's outside
+its own; each outside file is the probe's own name, removed after whatever it found. Five checks
+of its own: `write` (both worktree files hold the stub's text), `edit` (the `README` reads the
+stub's edit), each of the two, where it fails, ending its detail with what the CLI answered the
+stub for the first call that failed (its tool result's text on one line, the key out, the home
+as `~`, cut to 160, as `key` cuts the CLI's last line), `writewalled` (the CLI's outside
 writes left nothing; the direct attempt ran, its worktree file landed with its text, each of its
 outside writes was refused and left nothing, and `.git`'s bytes are unchanged; on bwrap a write
 the wall's own tmpfs took, into the temp folder or `/var/tmp`, holds once nothing is left of it;
@@ -65,7 +71,8 @@ from apilane import stubapi
 SCHEMA = "agentik.api.probe/1"
 CHECKS = ("key", "tools", "walled", "restricted", "read")
 ALLOWED_TOOLS = ("Read", "Grep", "Glob")
-WRITER_CHECKS = ("key", "tools", "walled", "restricted", "write", "writewalled", "inert")
+WRITER_CHECKS = ("key", "tools", "walled", "restricted", "write", "edit", "writewalled", "inert")
+README_TEXT = "the probe's throwaway repo"
 WRITER_PROMPT = ("Write each file you are asked to write, read each file you are asked to read, "
                  "then answer in one line.")
 # The throwaway repo's git: a made-up identity, hooks and the fsmonitor off, names read literally.
@@ -479,7 +486,7 @@ def _throwaway(folder):
     """A repo of one commit under `folder` and a worktree of a new branch: the worktree's path."""
     repo = _private_dir(os.path.join(folder, "repo"))
     with open(os.path.join(repo, "README"), "w", encoding="utf-8") as handle:
-        handle.write("the probe's throwaway repo\n")
+        handle.write(README_TEXT + "\n")
     _git("init", "-q", cwd=repo)
     _git("add", "--", "README", cwd=repo)
     _git(*(list(GIT_WHO) + ["commit", "-q", "-m", "probe"]), cwd=repo)
@@ -535,11 +542,15 @@ def _writer(version, step, wtype, base, *, walled, walled_text, restricted, flag
                                 path=PATH, base_url="http://%s:1" % stubapi.HOST)
         config = env.get("CLAUDE_CONFIG_DIR") or os.path.join(run_dir, "config")
         _plant(tree, config, marks, token)
-        calls = [{"tool": "Write", "path": inside["top"], "text": texts["top"]},
-                 {"tool": "Write", "path": inside["deep"], "text": texts["deep"]}]
-        calls += [{"tool": "Write", "path": p, "text": "probe-outside-%s" % tag}
+        # al9c W2: each write an Edit that makes a new file; then one Edit of the README
+        readme = os.path.join(tree, "README")
+        texts["edit"] = "probe-edit-%s" % tag
+        calls = [{"tool": "Edit", "path": inside["top"], "old": "", "text": texts["top"]},
+                 {"tool": "Edit", "path": inside["deep"], "old": "", "text": texts["deep"]},
+                 {"tool": "Edit", "path": readme, "old": README_TEXT, "text": texts["edit"]}]
+        calls += [{"tool": "Edit", "path": p, "old": "", "text": "probe-outside-%s" % tag}
                   for p in outside.values()]
-        calls += [{"tool": "Write", "path": git, "text": "gitdir: /made/up/elsewhere\n"},
+        calls += [{"tool": "Edit", "path": git, "old": "", "text": "gitdir: /made/up/elsewhere\n"},
                   {"tool": "Read", "path": walled}]
         shard = types.SimpleNamespace(label="probe-writer", type=wtype.name, prompt=WRITER_PROMPT)
         try:
@@ -563,13 +574,20 @@ def _writer(version, step, wtype, base, *, walled, walled_text, restricted, flag
         else:
             check("walled", True, "the walled canary's read was refused")
         checks.append(dict(restricted))
+        home = step["roots"].home
         wrote = [k for k in ("top", "deep") if _text(inside[k]) != texts[k]]
         if wrote:
-            check("write", False, "not written with the stub's text: %s" % ", ".join(
+            check("write", False, "not written with the stub's text: %s%s" % (", ".join(
                 {"top": "the worktree's top file", "deep": "the file three folders deep"}[k]
-                for k in wrote))
+                for k in wrote), _answered(reqs, ("top", "deep").index(wrote[0]), got["key"],
+                                           home)))
         else:
             check("write", True, "both worktree files hold the stub's text")
+        if _text(readme) != texts["edit"] + "\n":
+            check("edit", False, "the throwaway repo's README does not read the stub's edit%s"
+                  % _answered(reqs, 2, got["key"], home))
+        else:
+            check("edit", True, "the throwaway repo's README reads the stub's edit")
         held = _walled_writes(landed, direct, _bytes(git) == git_bytes)
         check("writewalled", held is None, HELD[direct["tmpfs"]] if held is None else held)
         took = [p for p in PLANTS if os.path.lexists(marks[p])]
@@ -696,6 +714,33 @@ def _last_line(output, key, home):
         if h and h != os.sep:
             line = line.replace(h, "~")
     return ": " + line[:160]
+
+
+def _answer(reqs, at, key, home):
+    """What the CLI answered the stub for call `at` of the list: the first tool result of the
+    request that follows it, its lines that are not blank joined by a space, the key out, the
+    home as `~` (its real path first, the longer), cut to 160; None where none came back."""
+    for r in reqs:
+        if r.get("turn") != at + 1:
+            continue
+        for res in r.get("tool_results") or []:
+            if not isinstance(res, dict):
+                continue
+            text = " ".join(ln.strip() for ln in str(res.get("text", "")).splitlines()
+                            if ln.strip())
+            text = text.replace(key, "<key>") if key else text
+            for h in sorted({home, os.path.realpath(home)} if home else (), key=len,
+                            reverse=True):
+                if h and h != os.sep:
+                    text = text.replace(h, "~")
+            return text[:160]
+    return None
+
+
+def _answered(reqs, at, key, home):
+    """`; the CLI answered: <its answer to call at>`, for a failed check's detail (al9c W3)."""
+    said = _answer(reqs, at, key, home)
+    return "; the CLI answered nothing" if said is None else "; the CLI answered: " + said
 
 
 def _private_dir(path):

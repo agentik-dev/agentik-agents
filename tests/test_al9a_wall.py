@@ -36,7 +36,8 @@ GIT = shutil.which("git", path="/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin")
 DATA = "/System/Volumes/Data"
 WRITE_RULE = '(deny file-write* (subpath "/"))'
 STAND_IN = apitypes.Type("al9a-writer", "made-up-model", ("Read", "Edit", "Write"), None)
-WRITER_CHECKS = ["key", "tools", "walled", "restricted", "write", "writewalled", "inert"]
+WRITER_CHECKS = ["key", "tools", "walled", "restricted", "write", "edit", "writewalled", "inert"]
+PIN_WRITER_CHECKS = [n for n in WRITER_CHECKS if n != "edit"]   # al9c W2: the pin's seven
 HELD = ("neither attempt's outside writes landed, the direct attempt's were each refused "
         "and .git is unchanged")
 # the pin's stub, its six replies to one made-up conversation: the sha256 measured at 82f2710
@@ -337,6 +338,18 @@ class StubCallsTest(unittest.TestCase):
                           "tool_use"))
         self.assertEqual([r["text"] for r in stub.results], ["result-0", "result-1"])
 
+    def test_an_edit_call(self):
+        """al9c W2: an Edit call is sent as the CLI's Edit takes it."""
+        calls = [{"tool": "Edit", "path": "/made/up/e.txt", "old": "", "text": "made-up text"},
+                 {"tool": "Edit", "path": "/made/up/f.txt", "old": "a", "text": "b"}]
+        stub = stubapi.Stub(reads=[], calls=calls)
+        seen = self.converse(stub, 3)
+        whole = [json.loads(t)["content"][0] for _, t in seen[0::2]]
+        self.assertEqual([(b.get("name"), b.get("input")) for b in whole], [
+            ("Edit", {"file_path": "/made/up/e.txt", "old_string": "", "new_string": "made-up text"}),
+            ("Edit", {"file_path": "/made/up/f.txt", "old_string": "a", "new_string": "b"}),
+            (None, None)])
+
     def test_with_no_list_the_replies_are_the_pins(self):
         stub = stubapi.Stub(reads=["/made/up/one", "/made/up/two"])
         h = hashlib.sha256()
@@ -354,11 +367,13 @@ if args[:1] == ["--version"]:
     sys.exit(0)
 restricted = "--restricted" in args
 tools = args[args.index("--tools") + 1].split() if "--tools" in args else ["Read", "Grep", "Glob"]
-writer = "Write" in tools
+writer = "Edit" in tools
 if MODE == "more":
     tools = tools + ["Bash"]
 elif MODE == "less":
     tools = tools[:-1]
+elif MODE == "write" and "Write" not in tools:
+    tools = tools + ["Write"]
 elif MODE == "readalone" and not writer:
     tools = ["Read"]                       # as the real CLI offers a reader under --bare
 def hook(path):
@@ -397,9 +412,35 @@ for turn in range(12):
         if block.get("type") != "tool_use":
             continue
         path = block["input"].get("file_path", "")
+        old, new = block["input"].get("old_string"), block["input"].get("new_string")
         try:
-            if block["name"] == "Write" and MODE == "refuse" and not inside(path):
+            if block["name"] in ("Write", "Edit") and MODE == "refuse" and not inside(path):
                 text, err = "outside the working directories", True   # a permission layer's
+            elif block["name"] == "Edit" and MODE == "newrefused" and not old \
+                    and not os.path.exists(path):
+                # al9c W3: a refusal in words of its own, the key and the home in it
+                text, err = ("<tool_use_error>File does not exist:\n %%s (key %%s, home %%s)"
+                             "</tool_use_error>" %% (path, os.environ["ANTHROPIC_API_KEY"],
+                                                     os.environ["HOME"])), True
+            elif block["name"] == "Edit" and MODE == "noedit" and old:
+                text, err = "<tool_use_error>String to replace not found in file.</tool_use_error>", True
+            elif block["name"] == "Edit" and not old:
+                if os.path.exists(path) and MODE != "overwrite":
+                    text, err = "Cannot create new file - file already exists.", True
+                else:
+                    os.makedirs(os.path.dirname(path), exist_ok=True)
+                    with open(path, "w") as fh:
+                        fh.write(new)
+                    text, err = "created", False
+            elif block["name"] == "Edit":
+                with open(path) as fh:
+                    body = fh.read()
+                if old not in body:
+                    text, err = "String to replace not found in file.", True
+                else:
+                    with open(path, "w") as fh:
+                        fh.write(body.replace(old, new, 1))
+                    text, err = "edited", False
             elif block["name"] == "Write":
                 os.makedirs(os.path.dirname(path), exist_ok=True)
                 with open(path, "w") as fh:
@@ -535,7 +576,9 @@ class WriterPassTest(WriterCase):
         self.assertEqual(leftovers(), [])
 
     def test_a_wall_that_walls_nothing_names_every_write_and_git(self):
-        rec = self.run_writer("good", wrap=al2.open_wrap)
+        # al9c W2: the stub's writes are Edits of an empty old_string; a CLI whose Edit then
+        # overwrites a file that is there, `.git` here, is the case that names `.git`
+        rec = self.run_writer("overwrite", wrap=al2.open_wrap)
         c = self.wchecks(rec)["writewalled"]
         self.assertIs(c["ok"], False)
         for name in ("the read dir", "the account's temp folder", "/var/tmp", ".git"):
@@ -716,6 +759,89 @@ class PassedTest(WriterCase):
                               writer_type=None)
         self.assertEqual(al2.code(cm.exception)[0], "probe.fail")
         self.assertEqual(al2.code(cm.exception)[1]["check"], "writer")
+
+
+class Al9cCase(WriterCase):
+    """al9c: the table's own `implement`, through the lane's own argv builder."""
+
+    def run_implement(self, mode="good", wrap=None):
+        return self.run_writer(mode, wrap=wrap, writer_type=apitypes.TYPES["implement"],
+                               build_argv=al2.load("argv").build)
+
+    def run_writer(self, mode="good", wrap=None, writer_type=STAND_IN, build_argv=build_argv):
+        if wrap is None:
+            self.need_wall()
+        if GIT is None:
+            self.skipTest("no git here: the throwaway repo cannot be made")
+        return self.probe.run(claude=self.cli(mode), roots=self.roots, build_argv=build_argv,
+                              build_env=al2.build_env, wrap=wrap, writer=True,
+                              writer_type=writer_type)
+
+
+class Al9cToolsTest(Al9cCase):
+    """al9c acceptance 2: the writer's `tools` is exactly Read and Edit."""
+
+    def test_read_and_edit_pass_write_or_read_alone_fail(self):
+        for mode, want in (("good", (True, "offered: Edit, Read")),
+                           ("write", (False, "offered beyond Read, Edit: Write")),
+                           ("less", (False, "not offered: Edit"))):
+            rec = self.run_implement(mode)
+            c = self.wchecks(rec)["tools"]
+            self.assertEqual((c["ok"], c["detail"]), want, mode)
+            self.assertEqual(rec["writer"]["tools"], ["Edit", "Read"], mode)
+
+
+class Al9cEditTest(Al9cCase):
+    """al9c acceptance 3 and 4: the writes are Edits, the `edit` check, the CLI's own words."""
+
+    def test_edits_pass_write_and_edit(self):
+        rec = self.run_implement("good")
+        self.assertEqual([c["name"] for c in rec["writer"]["checks"]], WRITER_CHECKS)
+        got = self.wchecks(rec)
+        self.assertEqual((got["write"]["ok"], got["edit"]["ok"]), (True, True), rec["writer"])
+        self.assertIs(rec["writer"]["ok"], True, rec["writer"])
+        self.assertTrue(self.probe.passed(self.roots, al2.VERSION, writer=True))
+        self.assertEqual(leftovers(), [])
+
+    def test_a_record_without_edit_is_no_writers_pass(self):
+        rec = self.run_implement("good")
+        rec["writer"]["checks"] = [c for c in rec["writer"]["checks"] if c["name"] != "edit"]
+        self.assertEqual([c["name"] for c in rec["writer"]["checks"]], PIN_WRITER_CHECKS)
+        with open(os.path.join(self.roots.state, "probe.json"), "w", encoding="utf-8") as fh:
+            json.dump(rec, fh)
+        self.assertTrue(self.probe.passed(self.roots, al2.VERSION))
+        self.assertFalse(self.probe.passed(self.roots, al2.VERSION, writer=True))
+
+    def test_a_refused_new_file_says_the_clis_words(self):
+        rec = self.run_implement("newrefused")
+        c = self.wchecks(rec)["write"]
+        self.assertIs(c["ok"], False)
+        self.assertTrue(c["detail"].startswith(
+            "not written with the stub's text: the worktree's top file, the file three folders "
+            "deep; the CLI answered: <tool_use_error>File does not exist: ~/"), c["detail"])
+        self.assertTrue(c["detail"].endswith("home ~)</tool_use_error>"), c["detail"])
+        self.assertIn("(key <key>, ", c["detail"])
+        self.assertNotIn("agentik-probe-", c["detail"].split("(key", 1)[1])
+        self.assertNotIn(self.roots.home, c["detail"])
+        self.assertIs(self.wchecks(rec)["edit"]["ok"], True)     # README is there: an edit
+        self.assertIs(rec["writer"]["ok"], False)
+        self.assertEqual(leftovers(), [])
+
+    def test_a_refused_edit_says_the_clis_words(self):
+        rec = self.run_implement("noedit")
+        c = self.wchecks(rec)["edit"]
+        self.assertEqual((c["ok"], c["detail"]), (
+            False, "the throwaway repo's README does not read the stub's edit; the CLI answered: "
+                   "<tool_use_error>String to replace not found in file.</tool_use_error>"))
+        self.assertIs(self.wchecks(rec)["write"]["ok"], True)
+        self.assertIs(rec["writer"]["ok"], False)
+
+    def test_the_answer_is_cut_to_160(self):
+        long = "x" * 300
+        reqs = [{"turn": 1, "tool_results": [{"text": "line one\n\n  " + long}]}]
+        said = self.probe._answer(reqs, 0, "made-up-key", "/made/up/home")
+        self.assertEqual(said, ("line one " + long)[:160])
+        self.assertIsNone(self.probe._answer(reqs, 1, "made-up-key", "/made/up/home"))
 
 
 if __name__ == "__main__":
