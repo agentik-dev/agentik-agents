@@ -425,7 +425,7 @@ for turn in range(12):
             elif block["name"] == "Edit" and MODE == "noedit" and old:
                 text, err = "<tool_use_error>String to replace not found in file.</tool_use_error>", True
             elif block["name"] == "Edit" and not old:
-                if os.path.exists(path) and MODE != "overwrite":
+                if os.path.exists(path):
                     text, err = "Cannot create new file - file already exists.", True
                 else:
                     os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -576,13 +576,15 @@ class WriterPassTest(WriterCase):
         self.assertEqual(leftovers(), [])
 
     def test_a_wall_that_walls_nothing_names_every_write_and_git(self):
-        # al9c W2: the stub's writes are Edits of an empty old_string; a CLI whose Edit then
-        # overwrites a file that is there, `.git` here, is the case that names `.git`
-        rec = self.run_writer("overwrite", wrap=al2.open_wrap)
+        # al9c X2: the pin's mode; the `.git` call is a Read, then an Edit of the text it holds,
+        # so the CLI's own attempt on `.git` is among what landed
+        rec = self.run_writer("good", wrap=al2.open_wrap)
         c = self.wchecks(rec)["writewalled"]
         self.assertIs(c["ok"], False)
+        self.assertTrue(c["detail"].startswith("the CLI's attempt: landed: "), c["detail"])
+        landed = c["detail"][len("the CLI's attempt: landed: "):].split(", ")
         for name in ("the read dir", "the account's temp folder", "/var/tmp", ".git"):
-            self.assertIn(name, c["detail"])
+            self.assertIn(name, landed)
         self.assertIs(self.wchecks(rec)["write"]["ok"], True)
 
     def test_one_tool_more_or_less_fails_tools(self):
@@ -776,6 +778,50 @@ class Al9cCase(WriterCase):
         return self.probe.run(claude=self.cli(mode), roots=self.roots, build_argv=build_argv,
                               build_env=al2.build_env, wrap=wrap, writer=True,
                               writer_type=writer_type)
+
+
+class Al9cGitTest(Al9cCase):
+    """al9c X2: the probe's `.git` call is a Read, then an Edit of the text the probe made, so
+    the CLI's own attempt reaches the wall as the pin's Write did."""
+
+    def test_the_git_calls(self):
+        rec, stubs = answered(self, "good")
+        calls = stubs[-1].calls
+        at = [i for i, c in enumerate(calls) if os.path.basename(c["path"]) == ".git"]
+        self.assertEqual([calls[i]["tool"] for i in at], ["Read", "Edit"])
+        self.assertEqual(at[1], at[0] + 1)
+        self.assertTrue(calls[at[1]]["old"].startswith("gitdir: "), calls[at[1]])
+        self.assertEqual(calls[at[1]]["text"], "gitdir: /made/up/elsewhere\n")
+        said = result_of(stubs[-1], at[1])
+        self.assertIs(said["is_error"], True, said)
+        self.assertTrue(said["text"].startswith("failed: "), said)   # the wall's refusal
+        c = self.wchecks(rec)["writewalled"]
+        self.assertEqual((c["ok"], c["detail"]), (True, HELD))        # `.git`'s bytes unchanged
+        self.assertEqual(leftovers(), [])
+
+
+def answered(case, mode, swap=None, wrap=None):
+    """The writer's pass of `implement` on the stub CLI in `mode`, each stub the probe started
+    kept; `swap(calls)` may change the writer's calls before its stub plays them."""
+    real = case.probe.stubapi.Stub
+    stubs = []
+
+    class Kept(real):
+        def __init__(self, reads, text="probe done", calls=None):
+            if calls is not None and swap is not None:
+                calls = swap([dict(c) for c in calls])
+            super().__init__(reads, text, calls)
+            stubs.append(self)
+
+    with mock.patch.object(case.probe.stubapi, "Stub", Kept):
+        rec = case.run_implement(mode, wrap=wrap)
+    return rec, [s for s in stubs if s.calls is not None]
+
+
+def result_of(stub, at):
+    """The tool result the CLI sent the stub for its call `at`."""
+    found = [r for r in stub.results if str(r.get("tool_use_id")).endswith("_%d" % at)]
+    return found[0] if found else None
 
 
 class Al9cToolsTest(Al9cCase):

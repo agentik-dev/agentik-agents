@@ -21,11 +21,11 @@ one). It makes a throwaway repo and a worktree of it under `<roots.state>/probe/
 wall, plants a hook in the worktree's `.claude/settings.json`, a `CLAUDE.md` and a hook in the
 run folder's config folder, then runs the writer's argv in the worktree with the worktree and its
 own run folder as the `write` folders. The writing type's tools are Read and Edit, the two file
-tools the CLI offers under `--bare`, so each write the stub asks for is an Edit that makes a new
-file, an empty `old_string` and the text as `new_string`: six writes (the worktree's top, three
-new folders deep in it, a read dir, the account's temp folder, `/var/tmp`, the worktree's
-`.git`), one Edit that changes the throwaway repo's `README` in the worktree, and one read of the
-walled canary. A CLI may refuse a write before it tries it, so the
+tools the CLI offers under `--bare`, so each new file the stub asks for is an Edit, an empty
+`old_string` and the text as `new_string`: five new files (the worktree's top, three new folders
+deep in it, a read dir, the account's temp folder, `/var/tmp`); the worktree's `.git` read, then
+edited from the text the probe made; one Edit that changes the throwaway repo's `README` in
+the worktree; and one read of the walled canary. A CLI may refuse a write before it tries it, so the
 pass then proves the wall itself, the CLI aside: a direct attempt, `/bin/sh` through the same
 `wrap` call (the writer's read, write, net and home), writes a new file in the worktree, one in
 each of the three outside folders, and the worktree's `.git`, overwritten then removed, each on
@@ -559,13 +559,20 @@ def _writer(version, step, wtype, base, *, walled, walled_text, restricted, flag
         # al9c W2: each write an Edit that makes a new file; then one Edit of the README
         readme = os.path.join(tree, "README")
         texts["edit"] = "probe-edit-%s" % tag
+        edit = {"tool": "Edit", "path": readme, "old": README_TEXT, "text": texts["edit"]}
         calls = [{"tool": "Edit", "path": inside["top"], "old": "", "text": texts["top"]},
                  {"tool": "Edit", "path": inside["deep"], "old": "", "text": texts["deep"]},
-                 {"tool": "Edit", "path": readme, "old": README_TEXT, "text": texts["edit"]}]
+                 edit]
         calls += [{"tool": "Edit", "path": p, "old": "", "text": "probe-outside-%s" % tag}
                   for p in outside.values()]
-        calls += [{"tool": "Edit", "path": git, "old": "", "text": "gitdir: /made/up/elsewhere\n"},
+        # al9c X2: `.git` read, then edited from the text the probe made, so the CLI's own
+        # attempt on it reaches the wall as the pin's Write did
+        calls += [{"tool": "Read", "path": git},
+                  {"tool": "Edit", "path": git,
+                   "old": (git_bytes or b"").decode("utf-8", "replace"),
+                   "text": "gitdir: /made/up/elsewhere\n"},
                   {"tool": "Read", "path": walled}]
+        edit_at = calls.index(edit)
         shard = types.SimpleNamespace(label="probe-writer", type=wtype.name, prompt=WRITER_PROMPT)
         try:
             got = _attempt(restricted=flag is not None, shard=shard,
@@ -599,7 +606,7 @@ def _writer(version, step, wtype, base, *, walled, walled_text, restricted, flag
             check("write", True, "both worktree files hold the stub's text")
         if _text(readme) != texts["edit"] + "\n":
             check("edit", False, "the throwaway repo's README does not read the stub's edit%s"
-                  % _answered(reqs, 2, got["key"], home))
+                  % _answered(reqs, edit_at, got["key"], home))
         else:
             check("edit", True, "the throwaway repo's README reads the stub's edit")
         held = _walled_writes(landed, direct, _bytes(git) == git_bytes)
