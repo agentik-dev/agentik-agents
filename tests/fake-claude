@@ -77,7 +77,7 @@ def inside(path, dirs):
 def speak(base, argv, prompt):
     """The CLI's turns against the stub: answer each Read it asks for, end on its text."""
     key = os.environ.get("ANTHROPIC_API_KEY", "")
-    tools = (flag_values(argv, "--tools") or [""])[0].split()
+    tools = (flag_values(argv, "--tools") or [""])[0].split(",")
     model = (flag_values(argv, "--model") or ["fake"])[0]
     dirs, restricted = flag_values(argv, "--add-dir"), "--restricted" in argv
     messages = [{"role": "user", "content": prompt or "(no prompt)"}]

@@ -42,12 +42,12 @@ from apilane import write as W  # noqa: E402
 
 GIT = shutil.which("git", path="/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin")
 KEY = "made-up-value-not-a-key-0123456789"
-# The pin's (a207132) argv of each read type, and its row, role and effort, by sha256.
-PIN = {"review": ("1a9450616ae05b7c11f00952f2348e0b42369abbd6ef10390ba83c8fc267d6d0",
+# Each read type's argv at a207132 in al9d's flag forms, and its row, role and effort, by sha256.
+PIN = {"review": ("7bd665e85414ce117ed3015ee4418c15d333eb3708884b4cf8544862ff04742c",
                   "0ec8598fca24a54dd4939153aa2d9cf0c55410952180520b4974d075961b94fa"),
-       "explore": ("1e33eeacdf738fabe5df76203d72a3cffa0af6fb614d5afe9864f4ecec711933",
+       "explore": ("b1d09505a4020784660d66e280ad929a237c7eecf630b47e76224483f4eb834e",
                    "f0f0830593869b41e7e6d2430f44f8989643e9b2e79e4c8c5c8d45fd85251391"),
-       "analyze": ("00befc9dce896e79d224e2bef63b5b4118f4fb2871fd2ba3890d31053a98c222",
+       "analyze": ("3f1d71f7aef1a708419df8de299a0f39bbbc733efe377a7eb27c213c38e42ee3",
                    "69567d47929a978cbd5fc1b3ec8e5d4b97eb503c1fb920898b32755517927d98")}
 ShardResult = collections.namedtuple(
     "ShardResult", "label type state cost_usd estimated result_path reason model")
@@ -244,9 +244,8 @@ class ArgvTest(unittest.TestCase):
     def test_writer(self):
         a = self.build("implement")
         flag = lambda f: a[a.index(f) + 1]   # noqa: E731
-        self.assertEqual(flag("--tools"), "Read Edit")       # al9c W1
-        self.assertEqual(flag("--allowedTools"), "Read Edit")
-        denied = flag("--disallowedTools").split(" ")
+        self.assertEqual(flag("--tools"), "Read,Edit")       # al9c W1; al9d holds the lists
+        denied = a[a.index("--disallowedTools") + 1:a.index("--permission-mode")]
         self.assertEqual(denied[-6:], ["Write", "Bash", "WebFetch", "WebSearch", "Agent", "Task"])
         for p in A.DENY_PATHS:
             for t in ("Read", "Edit"):
@@ -254,10 +253,24 @@ class ArgvTest(unittest.TestCase):
         self.assertEqual([d for d in denied if d.startswith("Write(")], [])
         self.assertEqual(len(denied), 2 * len(A.DENY_PATHS) + 6)
         read = self.build("explore")
-        strip = lambda v: [x for i, x in enumerate(v) if i == 0 or v[i - 1] not in (   # noqa: E731
+        strip = lambda v: [x for i, x in enumerate(v) if i == 0 or x[:2] == "--" or  # noqa: E731
+                           [f for f in v[:i] if f[:2] == "--"][-1] not in (
             "--tools", "--allowedTools", "--disallowedTools", "--model", "--effort",
             "--append-system-prompt")]
         self.assertEqual(strip(a), strip(read))
+
+    def forms(self, kind, named):   # al9d R1: the three flags in the forms the CLI's pages give
+        a, tools = self.build(kind), list(T.TYPES[kind].tools)
+        i, j, k = map(a.index, ("--allowedTools", "--disallowedTools", "--permission-mode"))
+        self.assertEqual([a.count(f) for f in A.INVARIANT], [1] * 6)
+        self.assertEqual((a[a.index("--tools") + 1:i], a[i + 1:j], a[j + 1:k]), ([",".join(tools)],
+                         tools, ["%s(%s)" % (t, p) for p in A.DENY_PATHS for t in tools] + named))
+
+    def test_reader_flag_forms(self):
+        self.forms("explore", [])
+
+    def test_writer_flag_forms(self):
+        self.forms("implement", list(A.WRITER_DENIED))
 
     def test_read_argv_is_the_pins(self):
         for name, (argv, _row) in PIN.items():

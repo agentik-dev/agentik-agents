@@ -10,8 +10,6 @@ import os
 
 from . import types as _types
 
-TOOLS = " ".join(_types.TOOLS)
-
 # --add-dir does not confine Read, so the highest-value credential paths are denied for
 # Read, Grep and Glob as a second layer behind --tools (the old wrapper's list, as it was).
 # The kernel wall is the boundary; this is defence in depth. '~/...' is home-relative and
@@ -62,13 +60,13 @@ WRITER_DENIED = ("Write", "Bash", "WebFetch", "WebSearch", "Agent", "Task")
 
 
 def deny_reads():
-    return " ".join("%s(%s)" % (t, p) for p in DENY_PATHS for t in _types.TOOLS)
+    return ["%s(%s)" % (t, p) for p in DENY_PATHS for t in _types.TOOLS]
 
 
 def deny_writes(tools):
     """A writing type's `--disallowedTools`: the denied paths for each of its tools, then the
     tools it never has, by name."""
-    return " ".join(["%s(%s)" % (t, p) for p in DENY_PATHS for t in tools]
+    return (["%s(%s)" % (t, p) for p in DENY_PATHS for t in tools]
                     + list(WRITER_DENIED))
 
 
@@ -95,11 +93,12 @@ def build(shard, *, claude, dirs, ceiling_usd, run_dir, restricted=True):
             _value("run_dir", run_dir)):
         raise ValueError("claude and run_dir are absolute paths")
     writes = getattr(t, "writes", False)
-    tools = " ".join(t.tools) if writes else TOOLS
+    tools = t.tools if writes else _types.TOOLS
+    deny = deny_writes(t.tools) if writes else deny_reads()   # al9d: one argument for each rule
     argv = [claude, "--bare",
-            "--tools", tools,
-            "--allowedTools", tools,
-            "--disallowedTools", deny_writes(t.tools) if writes else deny_reads(),
+            "--tools", ",".join(tools),
+            "--allowedTools", *[_value("--allowedTools", r) for r in tools],
+            "--disallowedTools", *[_value("--disallowedTools", r) for r in deny],
             "--permission-mode", "dontAsk",
             "--permission-prompts", "none",
             "--max-budget-usd", _ceiling(ceiling_usd),

@@ -282,7 +282,7 @@ class ArgvTest(World):
     # test-arg-handling.sh, "post-assembly invariant + profile defaults"
     def test_each_type_emits_tools_read_grep_glob(self):
         for t in ("review", "explore", "analyze"):
-            self.assertEqual(self.value(self.build(type=t), "--tools"), "Read Grep Glob")
+            self.assertEqual(self.value(self.build(type=t), "--tools"), "Read,Grep,Glob")
 
     def test_review_emits_the_six_invariant_flags(self):
         argv = self.build()
@@ -304,7 +304,8 @@ class ArgvTest(World):
         self.assertNotIn("--json-schema", self.build(type="explore"))
 
     def test_deny_rules(self):
-        deny = self.value(self.build(), "--disallowedTools").split(" ")
+        a = self.build()
+        deny = a[a.index("--disallowedTools") + 1:a.index("--permission-mode")]
         for rule in ("Read(~/.ssh/**)", "Grep(~/.ssh/**)", "Glob(~/.ssh/**)",
                      "Read(~/.claude.json)", "Read(~/.config/sops/**)", "Glob(//proc/**)",
                      "Read(~/.aws/**)", "Read(~/.config/gh/**)", "Read(~/.claude/**)"):
