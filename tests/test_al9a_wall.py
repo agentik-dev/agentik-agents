@@ -369,7 +369,7 @@ if args[:1] == ["--version"]:
     print("%(version)s (Fake Code)")
     sys.exit(0)
 restricted = "--restricted" in args
-tools = args[args.index("--tools") + 1].split() if "--tools" in args else ["Read", "Grep", "Glob"]
+tools = args[args.index("--tools") + 1].split(",") if "--tools" in args else ["Read", "Grep", "Glob"]
 writer = "Edit" in tools
 if MODE == "more":
     tools = tools + ["Bash"]
@@ -473,7 +473,7 @@ print(json.dumps({"type": "result", "result": "done"}))
 def build_argv(shard, **kw):
     """al2's builder, with the type's tools named as the CLI's `--tools`."""
     tools = STAND_IN.tools if shard.type == STAND_IN.name else apitypes.TOOLS
-    return al2.build_argv(shard, **kw) + ["--tools", " ".join(tools)]
+    return al2.build_argv(shard, **kw) + ["--tools", ",".join(tools)]
 
 
 class WriterCase(al2.ProbeCase):
@@ -845,7 +845,7 @@ class Al9cReadFirstTest(Al9cCase):
         try:
             env = {"PATH": "/usr/bin:/bin", "HOME": self.home.root,
                    "ANTHROPIC_BASE_URL": stub.url, "ANTHROPIC_API_KEY": "made-up-key"}
-            subprocess.run([self.cli("good"), "--tools", "Read Edit"], env=env, timeout=30,
+            subprocess.run([self.cli("good"), "--tools", "Read,Edit"], env=env, timeout=30,
                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
         finally:
             stub.stop()
