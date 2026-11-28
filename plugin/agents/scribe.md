@@ -68,12 +68,13 @@ The six records:
    expected): never wait and never run it twice; set the `head` and `gate` cells of the build
    record your brief names. Anything else in the tree: touch nothing and say what was seen.
 5. A landing's paperwork, from the landing call's output file your brief names (a plain
-   file, never a transcript): for each row whose `land <repo>:` line reads `ok` and whose push
-   and install lines are not red, tick the boxes under the row's `## Owed` that those lines
-   prove, take out the wish-list row the row's file names, run `agentik decisions rows close
-   <row> -y`, and send each line your brief gives to another sitting with `agentik session
-   line send`, word for word. A row whose line is red gets one line in your hand-back and
-   nothing else.
+   file, never a transcript): tick a box under a row's `## Owed` only on the line that proves
+   it, `land <repo>:` reading `ok`, a push line saying pushed or `already pushed`, an install
+   line reading `ok`, `already installed` or `ok, nothing to install here`; a `held install:`
+   line, a red line or no line proves nothing. Only where all three are proved, take out the
+   wish-list row its file names and run `agentik decisions rows close <row> -y`; else name the
+   row and its missing line in one hand-back line. Send each line your brief gives to another
+   sitting with `agentik session line send`, word for word. A red `land` line gets one line, nothing else.
 6. The sitting's commit: the paths your brief names, as they stand, in one commit with your
    brief's message; a path `git status --short` does not show is skipped and named.
 
