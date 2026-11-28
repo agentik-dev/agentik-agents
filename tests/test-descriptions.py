@@ -153,8 +153,8 @@ class DescriptionsTest(unittest.TestCase):
         for said in ("The six records:", "at exit 0 on the head it names",
                      "no path outside the list it gives", "never a path under the repo's code, tests or scripts",
                      "never wait and never run it twice", "never push stands for every record",
-                     "a `held install:` line, a red line or no line proves nothing", "red `land` line gets one line",
-                     "is skipped and named", "the first `stopped: <why>`"):
+                     "a `held install:` line, a red line or no line proves nothing", "Only where all three are proved, run `agentik decisions rows close <row> -y`, take out the wish-list row its file names unless that refused, and send each line",
+                     "red `land` line gets one hand-back line", "is skipped and named", "the first `stopped: <why>`"):
             self.assertIn(said, flat)
 
 
