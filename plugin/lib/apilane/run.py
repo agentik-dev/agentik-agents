@@ -14,6 +14,7 @@ import math
 import os
 import signal
 import subprocess
+import sys
 
 from . import argv as _argv
 from . import classify as _classify
@@ -40,6 +41,11 @@ GRACE_SEC = 5
 
 # The child's PATH: the folder of the CLI's resolved path, then the system's own.
 SYSTEM_PATH = ("/usr/bin", "/bin", "/usr/sbin", "/sbin")
+
+# al14's watcher: an end of file on its stdin, the fan-out gone, ends the group; a byte, no one.
+WATCHER = ("import os,sys,time\ng,s=int(sys.argv[1]),float(sys.argv[2])\nif not os.read(0,1):\n"
+           " try:\n  os.killpg(g,15);t=time.time()+s\n  while time.time()<t:os.killpg(g,0)"
+           ";time.sleep(.1)\n  os.killpg(g,9)\n except OSError:pass\n")
 
 
 def _now():
@@ -171,6 +177,13 @@ def run_shard(shard, *, grant_usd, fanout, number, session, roots, lane, claude,
         child_env = None
     record["pid"] = child.pid
     record["pid_started"] = _proc.started(child.pid)
+    try:   # outside the wall; it gets the group id and the grace alone (O3)
+        watch, note = subprocess.Popen([sys.executable, "-I", "-c", WATCHER, str(child.pid),
+                                        _seconds(GRACE_SEC)], stdin=subprocess.PIPE, env={},
+                                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                       start_new_session=True), ""
+    except OSError as e:   # a soft fault (O3): the shard runs as before, said in stderr.txt
+        watch, note = None, "apilane: no watcher on the shard's group: %s\n" % e
     _write_json(run_json, record)
 
     timed_out = False
@@ -181,8 +194,10 @@ def run_shard(shard, *, grant_usd, fanout, number, session, roots, lane, claude,
         _end_group(child)
         out, err = child.communicate()
     rc = child.returncode
+    if watch:   # the child is reaped: one byte, and the watcher signals no one (O2)
+        watch.communicate(b"x")
     text = (out or b"").decode("utf-8", "replace")
-    errtext = (err or b"").decode("utf-8", "replace")
+    errtext = note + (err or b"").decode("utf-8", "replace")
     envelope = None if timed_out else _envelope(text)
     billed = _cost(envelope)
 
