@@ -29,6 +29,8 @@ plugin/lib/agentroute: renamed,sibling
 plugin/lib/claude-agents: renamed,sibling
 # A local agent's description names a task kind, design decisions.
 plugin/agents/local-implement.md: sibling
+# The scribe's page names a sibling tool's command, its row close.
+plugin/agents/scribe.md: sibling
 
 # The design records name the plugin and the siblings they read, one row per file.
 design/01-local-agent-lane.md: sibling
