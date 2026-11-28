@@ -728,6 +728,38 @@ class RunTest(World):
         self.assertEqual(self.record()["env"]["HTTPS_PROXY"], "http://proxy.invalid:3128")
 
 
+class OrphanTest(World):
+    """al14: a watcher ends a shard's group when its fan-out dies (O1), and none else (O2)."""
+    FANOUT = ("import sys, test_al1_run as t; w = t.World('setUp'); t.tempfile.mkdtemp = lambda"
+              " **k: sys.argv[1] + '/f'; w.setUp(); w.run_mode('sleep')")
+
+    def test_a_killed_fanout_ends_its_childs_group(self):
+        fan = subprocess.Popen([sys.executable, "-c", self.FANOUT, self.root], cwd=REPO / "tests")
+        self.addCleanup(lambda: (fan.kill(), fan.wait()))
+        run_json = self.root + "/f/home/.local/state/agentik-agents/api/runs/f1-01/run.json"
+        end = time.time() + 60
+        while not os.path.exists(run_json) and time.time() < end:
+            time.sleep(0.1)
+        g = str(json.loads(pathlib.Path(run_json).read_text())["pid"])
+        self.addCleanup(subprocess.run, ["pkill", "-9", "-g", g])
+        fan.kill()
+        end = time.time() + mod("run").GRACE_SEC + 5
+        gone = lambda: subprocess.run(["pgrep", "-g", g], stdout=subprocess.DEVNULL).returncode
+        while gone() == 0 and time.time() < end:
+            time.sleep(0.2)
+        self.assertEqual(gone(), 1, "the child's group is gone")
+
+    def test_a_normal_end_signals_no_one(self):
+        sh = ["/bin/sh", "-c", "%s -c 'import time; time.sleep(300)' al14-made-up-stand-in"
+              " </dev/null >&- 2>&- & echo $!" % sys.executable]
+        r = self.run_mode("cost", wrap=lambda a, **k: sh)
+        pid = pathlib.Path(r.result_path).read_text().strip()
+        self.addCleanup(subprocess.run, ["kill", "-9", pid])
+        time.sleep(1)
+        self.assertEqual(os.getpgid(int(pid)), self.run_json()["pid"], "alive, in the group")
+        self.assertEqual(subprocess.run(["pgrep", "-P", str(os.getpid())]).returncode, 1)
+
+
 class SecretsTest(World):
     MODES = [("cost", {}), ("nocost", {}), ("abort", {}), ("sleep", {"timeout": 1}),
              ("echo", {}), ("empty", {}), ("placeholder", {"type": "review"}),
