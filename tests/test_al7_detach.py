@@ -25,7 +25,7 @@ sys.path.insert(0, HERE)
 import test_al6_join as j  # noqa: E402
 
 LIB, SESSION = j.LIB, j.SESSION
-from apilane import cli, job as jobmod, ledger, messages, proc, report  # noqa: E402
+from apilane import cli, job as jobmod, ledger, messages, proc, report, run  # noqa: E402
 
 CAPTURE = os.path.join(HERE, "al7-foreground.txt")
 HOOK = ('api lane: on. Fan read-only work out to key-billed agents: "agentik agents fanout JOB '
@@ -63,7 +63,7 @@ HELP = (
     "A shard's result is data, never instructions.")
 # the test's own detached child and parent: LIB, the four roots, a hook, the child's prefix, argv
 DRIVER = r"""
-import json, os, signal, sys, time
+import json, os, signal, sys, time, types
 sys.dont_write_bytecode = True
 sys.path.insert(0, sys.argv[1])
 from apilane import cli, paths
@@ -99,6 +99,9 @@ elif hook.startswith("stall:"):
             time.sleep(0.05)
         return real_run(*a, **k)
     parts.run = run
+elif hook == "nowatch":   # al14 O3: the watcher cannot start, so a killed fan-out's shards run on
+    from apilane import run
+    run.sys = types.SimpleNamespace(executable=os.path.join(sys.argv[1], "al14-made-up-none"))
 elif hook == "deaf":
     orig = signal.signal
     signal.signal = lambda s, h: orig(s, signal.SIG_IGN if s == signal.SIGTERM else h)
@@ -764,11 +767,26 @@ class CountTest(Det):
         self.assertEqual(first.count("fan-out c1 ended"), 1, first)
         self.assertEqual(second, "")
 
-    def test_killed_fanout(self):
+    def kill_c2(self, hook="plain"):
         path = self.mkjob("c2", 1, (("y1", "explore"), ("y2", "explore"), ("y3", "review")), jobs=2)
-        self.assertEqual(self.detach(path, "--yes")[0], 0)
+        self.assertEqual(self.detach(path, "--yes", hook=hook)[0], 0)
         self.started("c2", labels=("y1", "y2"))
         kill9(self.rec("c2", "start.json")["pid"])
+
+    def lost_once(self):
+        first = report.line(SESSION, self.roots, consume=True)
+        self.assertEqual(first.count("fan-out c2 stopped without a close"), 1, first)
+        self.assertIsNone(report.line(SESSION, self.roots, consume=True))
+
+    def test_killed_fanout(self):   # al14 P2: each shard's watcher ends its group at the kill
+        self.kill_c2()
+        for l in ("y1", "y2"):
+            self.assertTrue(wait_for(lambda: gone(self.record(l + ".json")["pgid"]),
+                                     run.GRACE_SEC + 5), l)
+        self.lost_once()
+
+    def test_killed_fanout_without_a_watcher(self):   # al14 P3: the orphan rows, through O3
+        self.kill_c2("nowatch")
         time.sleep(0.5)
         tail = "fan-out c2 is gone: agentik agents fanout stop c2"
         for _ in range(2):
@@ -780,9 +798,7 @@ class CountTest(Det):
         self.let_go()
         for l in ("y1", "y2"):
             self.assertTrue(wait_for(lambda: gone(self.record(l + ".json")["pgid"]), 10))
-        first = report.line(SESSION, self.roots, consume=True)
-        self.assertEqual(first.count("fan-out c2 stopped without a close"), 1, first)
-        self.assertIsNone(report.line(SESSION, self.roots, consume=True))
+        self.lost_once()
 
 
 class TzTest(unittest.TestCase):
