@@ -145,6 +145,18 @@ class DescriptionsTest(unittest.TestCase):
         digest = hashlib.sha256((REPO / "scripts" / "plugin-description-bytes").read_bytes()).hexdigest()
         self.assertIn("%s  scripts/plugin-description-bytes" % digest, rows)
 
+    def test_t8_the_scribe_page_bounds_its_six_records(self):
+        head, body = split(PLUGIN / "agents" / "scribe.md")
+        self.assertRegex(description(head), "a sitting's paperwork.*never pushes")
+        self.assertIn("\nmaxTurns: 30\n", "\n" + head)
+        flat = " ".join(body.split())
+        for said in ("The six records:", "at exit 0 on the head it names",
+                     "no path outside the list it gives", "never a path under the repo's code, tests or scripts",
+                     "never wait and never run it twice", "never push stands for every record",
+                     "a `held install:` line, a red line or no line proves nothing", "Only where all three are proved, run `agentik decisions rows close <row> -y`, take out the wish-list row its file names unless that refused, and send each line",
+                     "red `land` line gets one hand-back line", "is skipped and named", "the first `stopped: <why>`"):
+            self.assertIn(said, flat)
+
 
 if __name__ == "__main__":
     unittest.main()
