@@ -146,10 +146,8 @@ class DescriptionsTest(unittest.TestCase):
         self.assertIn("%s  scripts/plugin-description-bytes" % digest, rows)
 
     def test_t8_the_scribe_page_bounds_its_six_records(self):
-        # bs2-clerk: records 4 to 6 (a stamp's commit, a landing's paperwork, the sitting's commit)
         head, body = split(PLUGIN / "agents" / "scribe.md")
-        self.assertIn("a sitting's paperwork", description(head))
-        self.assertIn("never pushes", description(head))
+        self.assertRegex(description(head), "a sitting's paperwork.*never pushes")
         self.assertIn("\nmaxTurns: 30\n", "\n" + head)
         flat = " ".join(body.split())
         for said in ("The six records:", "at exit 0 on the head it names",
